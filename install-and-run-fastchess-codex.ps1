@@ -12,13 +12,31 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+function Resolve-RepoRoot {
+    $candidate = Resolve-Path $PSScriptRoot
+    if (Test-Path (Join-Path $candidate "engines\codex-chess\codex-chess.cmd")) {
+        return $candidate
+    }
+
+    $parent = Resolve-Path (Join-Path $PSScriptRoot "..")
+    if (Test-Path (Join-Path $parent "engines\codex-chess\codex-chess.cmd")) {
+        return $parent
+    }
+
+    throw "Could not resolve repo root from script path: $PSScriptRoot"
+}
+
+$repoRoot = Resolve-RepoRoot
 $installRoot = Join-Path $repoRoot "tools\.fastchess"
 $resultsRoot = Join-Path $repoRoot "out\fastchess"
 $codexEngine = Join-Path $repoRoot "engines\codex-chess\codex-chess.cmd"
+$learnerEngine = Join-Path $repoRoot "engines\codex-chess-learner\codex-chess-learner.cmd"
 
 if (-not (Test-Path $codexEngine)) {
     throw "Codex-chess engine command was not found: $codexEngine"
+}
+if (-not (Test-Path $learnerEngine)) {
+    throw "Codex-chess-learner engine command was not found: $learnerEngine"
 }
 
 New-Item -ItemType Directory -Force -Path $installRoot, $resultsRoot | Out-Null
@@ -109,7 +127,7 @@ Write-Host "Log: $logPath"
 
 $fastChessArgs = @(
     "-engine", "cmd=$codexEngine", "name=Codex-chess", "proto=uci", "restart=on",
-    "-engine", "cmd=$codexEngine", "name=Codex-chess-learner", "proto=uci", "restart=on",
+    "-engine", "cmd=$learnerEngine", "name=Codex-chess-learner", "proto=uci", "restart=on",
     "-each", "tc=$TimeControl", "timemargin=5000",
     "-rounds", "$rounds",
     "-repeat",

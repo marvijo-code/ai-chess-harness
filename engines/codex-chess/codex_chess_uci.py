@@ -13,10 +13,15 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ENGINE_DIR = Path(__file__).resolve().parent
+ROOT = Path(os.environ.get("CODEX_CHESS_ROOT", ENGINE_DIR.parents[1]))
+ENGINE_NAME = os.environ.get("CODEX_CHESS_ENGINE_NAME", "Codex-chess")
+ENGINE_AUTHOR = os.environ.get("CODEX_CHESS_AUTHOR", "marvijo/Codex app-server")
 LOG_DIR = ROOT / "out" / "codex-chess-logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_PATH = LOG_DIR / f"codex-chess-{time.strftime('%Y%m%d-%H%M%S')}.log"
+MEMORY_PATH = ENGINE_DIR / "MEMORY.md"
+SKILLS_DIR = ENGINE_DIR / "skills"
 
 
 def log(message: str) -> None:
@@ -106,7 +111,8 @@ class CodexAppServer:
                 ),
                 "developerInstructions": (
                     "Return only JSON matching the schema. Do not call tools. "
-                    "The host GUI will reject illegal moves, so uci must be copied exactly from legal_moves."
+                    "The host GUI will reject illegal moves, so uci must be copied exactly from legal_moves. "
+                    f"If present, use the engine-local memory file at {MEMORY_PATH} and any engine-local Agent Skills under {SKILLS_DIR} as durable context for this engine."
                 ),
             },
         )
@@ -343,8 +349,8 @@ async def main() -> None:
 
         try:
             if command == "uci":
-                print("id name Codex-chess", flush=True)
-                print("id author marvijo/Codex app-server", flush=True)
+                print(f"id name {ENGINE_NAME}", flush=True)
+                print(f"id author {ENGINE_AUTHOR}", flush=True)
                 print("option name UCI_Chess960 type check default false", flush=True)
                 print("uciok", flush=True)
             elif command == "isready":
