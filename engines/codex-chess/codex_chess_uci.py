@@ -42,8 +42,9 @@ def parse_json_object(text: str) -> dict:
 
 
 class CodexAppServer:
-    def __init__(self, model: str = "gpt-5.5"):
+    def __init__(self, model: str = "gpt-5.5", effort: str = "low"):
         self.model = model
+        self.effort = effort
         self.port = free_port()
         self.url = f"ws://127.0.0.1:{self.port}"
         self.proc: asyncio.subprocess.Process | None = None
@@ -54,6 +55,7 @@ class CodexAppServer:
         self.turn_done: dict[str, asyncio.Future] = {}
         self.thread_id: str | None = None
         self.started = False
+        self.invalid_model_moves = 0
 
     async def start(self) -> None:
         if self.started:
@@ -195,7 +197,7 @@ class CodexAppServer:
             "turn/start",
             {
                 "threadId": self.thread_id,
-                "effort": "low",
+                "effort": self.effort,
                 "input": [{"type": "text", "text": json.dumps(prompt, separators=(",", ":"))}],
                 "outputSchema": {
                     "type": "object",
@@ -227,8 +229,13 @@ class CodexAppServer:
             log(f"Codex move fallback after {type(exc).__name__}: {exc}; move={move}")
 
         if move not in legal_moves:
+            self.invalid_model_moves += 1
+            if self.invalid_model_moves >= 3:
+                log(f"illegal Codex move {move!r}; invalid count reached 3; forfeiting with bestmove 0000")
+                print("info string invalid model move limit reached; forfeiting game", flush=True)
+                return "0000"
             fallback = legal_moves[0]
-            log(f"illegal Codex move {move!r}; fallback={fallback}")
+            log(f"illegal Codex move {move!r}; invalid_count={self.invalid_model_moves}; fallback={fallback}")
             return fallback
         if comment:
             safe_comment = " ".join(str(comment).split())
@@ -250,12 +257,18 @@ class CodexAppServer:
             except asyncio.TimeoutError:
                 self.proc.kill()
 
+    def new_game(self) -> None:
+        self.invalid_model_moves = 0
+
 
 class CodexChessUci:
     def __init__(self):
         self.board = chess.Board()
         self.history: list[str] = []
-        self.codex = CodexAppServer(os.environ.get("CODEX_CHESS_MODEL", "gpt-5.5"))
+        self.codex = CodexAppServer(
+            os.environ.get("CODEX_CHESS_MODEL", "gpt-5.5"),
+            os.environ.get("CODEX_CHESS_EFFORT", "low"),
+        )
 
     def set_position(self, tokens: list[str]) -> None:
         if not tokens:
@@ -339,6 +352,7 @@ async def main() -> None:
             elif command == "ucinewgame":
                 engine.board = chess.Board()
                 engine.history = []
+                engine.codex.new_game()
             elif command == "setoption":
                 continue
             elif command == "position":

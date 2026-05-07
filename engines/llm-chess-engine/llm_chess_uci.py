@@ -98,6 +98,7 @@ class OpenRouterChessClient:
         self.model = os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
         self.temperature = int(os.environ.get("OPENROUTER_TEMPERATURE", "20"))
         self.max_retries = int(os.environ.get("OPENROUTER_MAX_RETRIES", "1"))
+        self.invalid_model_moves = 0
 
     def set_option(self, name: str, value: str) -> None:
         lowered = name.lower()
@@ -132,12 +133,14 @@ class OpenRouterChessClient:
         payload = self._build_payload(board, go_args, history, legal_moves, with_schema=True)
         timeout = self._timeout_seconds(go_args, remaining)
         last_error = None
+        saw_illegal_move = False
         for attempt in range(self.max_retries + 1):
             try:
                 data = self._post(api_key, payload, timeout)
                 move, comment = self._parse_response(data, legal_moves)
                 if move in legal_moves:
                     return move, comment
+                saw_illegal_move = True
                 last_error = f"illegal move {move!r}"
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")[:500]
@@ -148,8 +151,16 @@ class OpenRouterChessClient:
                 last_error = f"{type(exc).__name__}: {exc}"
             log(f"OpenRouter move attempt {attempt + 1} failed: {last_error}")
 
+        if saw_illegal_move:
+            self.invalid_model_moves += 1
+            if self.invalid_model_moves >= 3:
+                return "0000", "invalid model move limit reached; forfeiting game"
+
         move = fallback_move(board)
         return move, f"OpenRouter failed; used fallback ({last_error})"
+
+    def new_game(self) -> None:
+        self.invalid_model_moves = 0
 
     def _timeout_seconds(self, go_args: dict, remaining: int | None) -> int:
         configured = int(os.environ.get("OPENROUTER_TIMEOUT_SECONDS", "90"))
@@ -346,6 +357,7 @@ def main() -> None:
             elif command == "ucinewgame":
                 engine.board = chess.Board()
                 engine.history = []
+                engine.client.new_game()
             elif command == "setoption":
                 engine.set_option(tokens)
             elif command == "position":

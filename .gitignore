@@ -6,3 +6,4 @@ venv/
 .env.*
 out/
 *.log
+tools/.fastchess/

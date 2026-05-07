@@ -1,0 +1,126 @@
+param(
+    [int]$Games = 10,
+    [int]$Concurrency = 1,
+    [string]$Model = "gpt-5.3-codex-spark",
+    [string]$Effort = "low",
+    [string]$TimeControl = "30+0.5",
+    [int]$MaxMoves = 4,
+    [string]$FastChessVersion = "latest",
+    [switch]$ForceInstall
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$installRoot = Join-Path $repoRoot "tools\.fastchess"
+$resultsRoot = Join-Path $repoRoot "out\fastchess"
+$codexEngine = Join-Path $repoRoot "engines\codex-chess\codex-chess.cmd"
+
+if (-not (Test-Path $codexEngine)) {
+    throw "Codex-chess engine command was not found: $codexEngine"
+}
+
+New-Item -ItemType Directory -Force -Path $installRoot, $resultsRoot | Out-Null
+
+function Get-FastChessRelease {
+    param([string]$Version)
+
+    if ($Version -eq "latest") {
+        $release = gh release view --repo Disservin/fastchess --json tagName,assets | ConvertFrom-Json
+    } else {
+        $release = gh release view $Version --repo Disservin/fastchess --json tagName,assets | ConvertFrom-Json
+    }
+
+    $asset = $release.assets | Where-Object { $_.name -eq "fastchess-windows-x86-64.zip" } | Select-Object -First 1
+    if (-not $asset) {
+        throw "Release $($release.tagName) does not contain fastchess-windows-x86-64.zip"
+    }
+
+    [PSCustomObject]@{
+        Tag = $release.tagName
+        AssetName = $asset.name
+        Url = $asset.url
+    }
+}
+
+function Install-FastChess {
+    param([string]$Version)
+
+    $release = Get-FastChessRelease -Version $Version
+    $versionRoot = Join-Path $installRoot $release.Tag
+    $fastChessExe = Join-Path $versionRoot "fastchess.exe"
+    $stampPath = Join-Path $versionRoot ".installed"
+
+    if ((Test-Path $fastChessExe) -and (Test-Path $stampPath) -and -not $ForceInstall) {
+        return $fastChessExe
+    }
+
+    if (Test-Path $versionRoot) {
+        Remove-Item -LiteralPath $versionRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $versionRoot | Out-Null
+
+    $zipPath = Join-Path $installRoot $release.AssetName
+    gh release download $release.Tag --repo Disservin/fastchess --pattern $release.AssetName --output $zipPath --clobber
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $versionRoot -Force
+    Remove-Item -LiteralPath $zipPath -Force
+
+    $foundExe = Get-ChildItem -LiteralPath $versionRoot -Filter "fastchess.exe" -Recurse | Select-Object -First 1
+    if (-not $foundExe) {
+        throw "fastchess.exe was not found after extracting $($release.AssetName)"
+    }
+    if ($foundExe.FullName -ne $fastChessExe) {
+        Move-Item -LiteralPath $foundExe.FullName -Destination $fastChessExe -Force
+    }
+
+    Set-Content -LiteralPath $stampPath -Value "tag=$($release.Tag)`ninstalled=$(Get-Date -Format o)" -Encoding utf8
+    return $fastChessExe
+}
+
+if ($Games -lt 2) {
+    throw "-Games must be at least 2 because FastChess repeats paired colors."
+}
+
+$rounds = [Math]::Ceiling($Games / 2)
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$pgnPath = Join-Path $resultsRoot "codex-vs-codex-learner-$stamp.pgn"
+$configPath = Join-Path $resultsRoot "codex-vs-codex-learner-$stamp-config.json"
+$logPath = Join-Path $resultsRoot "codex-vs-codex-learner-$stamp.log"
+
+$fastChess = Install-FastChess -Version $FastChessVersion
+
+$env:CODEX_CHESS_MODEL = $Model
+$env:CODEX_CHESS_EFFORT = $Effort
+
+Write-Host "FastChess: $fastChess"
+Write-Host "Engine model override: $Model"
+Write-Host "Effort: $Effort"
+Write-Host "Games requested: $Games"
+Write-Host "Rounds: $rounds with -repeat, so FastChess will schedule $($rounds * 2) games."
+Write-Host "MaxMoves: $MaxMoves"
+Write-Host "PGN: $pgnPath"
+Write-Host "Log: $logPath"
+
+& $fastChess `
+    -engine cmd="$codexEngine" name=Codex-chess proto=uci restart=on `
+    -engine cmd="$codexEngine" name=Codex-chess-learner proto=uci restart=on `
+    -each tc=$TimeControl timemargin=5000 `
+    -rounds $rounds `
+    -repeat `
+    -concurrency $Concurrency `
+    -maxmoves $MaxMoves `
+    -ratinginterval 1 `
+    -pgnout file="$pgnPath" notation=san append=false timeleft=true latency=true `
+    -config outname="$configPath" stats=true `
+    -autosaveinterval 2 `
+    -recover `
+    -log file="$logPath" level=info append=false
+
+if ($LASTEXITCODE -ne 0) {
+    throw "FastChess exited with code $LASTEXITCODE"
+}
+
+Write-Host "FastChess run complete."
+Write-Host "PGN written to $pgnPath"
+Write-Host "Config written to $configPath"

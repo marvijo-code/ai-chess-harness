@@ -7,6 +7,8 @@ UCI chess engines and harness scripts for testing LLM-backed chess play.
 - `engines/codex-chess`: a UCI engine that asks the local Codex app-server for legal moves.
 - `engines/llm-chess-engine`: a UCI engine that calls OpenRouter Chat Completions. It defaults to `moonshotai/kimi-k2.6` and can be changed with `OPENROUTER_MODEL` or the UCI `Model` option.
 
+Both AI engines repair the first two model-produced illegal moves in a game by falling back to a legal move. On the third model-produced illegal move in the same game, the engine returns `bestmove 0000` so the tournament runner can adjudicate the engine as losing instead of silently continuing.
+
 ## Setup
 
 ```powershell
@@ -44,6 +46,22 @@ python .\tools\play_engine_match.py --max-plies 8
 ```
 
 Outputs are written under `out/`, which is intentionally ignored.
+
+## FastChess Codex-vs-Codex run
+
+Install FastChess into a repo-local ignored cache and run ten unattended games between two identical Codex-chess instances. The second instance is named `Codex-chess-learner` in the tournament output. The default run uses `-maxmoves 4` so a Codex-vs-Codex smoke tournament finishes in bounded time.
+
+```powershell
+.\scripts\install-and-run-fastchess-codex.ps1
+```
+
+By default the script sets both engine processes to `CODEX_CHESS_MODEL=gpt-5.3-codex-spark` and `CODEX_CHESS_EFFORT=low`. This is an environment override for the tournament run only; it does not modify the installed Codex app or CLI configuration. Results are written to `out\fastchess`.
+
+For longer games, raise the cap:
+
+```powershell
+.\scripts\install-and-run-fastchess-codex.ps1 -MaxMoves 40 -TimeControl "300+2"
+```
 
 ## en-croissant registration
 
