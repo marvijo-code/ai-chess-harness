@@ -49,6 +49,10 @@ def parse_json_object(text: str) -> dict:
         return json.loads(match.group(0))
 
 
+def print_neutral_score_info() -> None:
+    print("info depth 0 score cp 0 nodes 0 time 0", flush=True)
+
+
 class CodexAppServer:
     def __init__(
         self,
@@ -266,6 +270,7 @@ class CodexAppServer:
             if self.invalid_model_moves >= 3:
                 log(f"illegal Codex move {move!r}; invalid count reached 3; forfeiting with bestmove 0000")
                 print("info string invalid model move limit reached; forfeiting game", flush=True)
+                print_neutral_score_info()
                 return "0000"
             fallback = legal_moves[0]
             log(f"illegal Codex move {move!r}; invalid_count={self.invalid_model_moves}; fallback={fallback}")
@@ -415,8 +420,10 @@ async def main() -> None:
                 engine.set_position(tokens)
             elif command == "go":
                 bestmove = await engine.go(tokens)
+                print_neutral_score_info()
                 print(f"bestmove {bestmove}", flush=True)
             elif command == "stop":
+                print_neutral_score_info()
                 print("bestmove 0000", flush=True)
             elif command == "quit":
                 break
@@ -425,6 +432,7 @@ async def main() -> None:
             fallback = legal[0] if legal else "0000"
             log(f"error for command {line!r}: {type(exc).__name__}: {exc}; fallback={fallback}")
             if command == "go":
+                print_neutral_score_info()
                 print(f"bestmove {fallback}", flush=True)
 
     await engine.codex.close()

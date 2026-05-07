@@ -72,6 +72,10 @@ Install FastChess into a repo-local ignored cache and run ten unattended games b
 
 By default the script sets both engine processes to `CODEX_CHESS_MODEL=gpt-5.3-codex-spark` and `CODEX_CHESS_EFFORT=low`. This is an environment override for the tournament run only; it does not modify the installed Codex app or CLI configuration. Results are written to `out\fastchess`.
 
+The script prints the exact PGN path before the match starts. FastChess writes it under `out\fastchess\codex-vs-codex-learner-<timestamp>.pgn`; the file is created during the run and populated as games finish. Matching FastChess config and log files are written beside it.
+
+Codex engines emit a neutral `info depth 0 score cp 0 nodes 0 time 0` line before `bestmove` so FastChess can parse a score field for reports. Without that normal `info ... score ...` line, FastChess prints `Warning; Last info string with score not found...`.
+
 For a short smoke run, add a move cap explicitly:
 
 ```powershell
