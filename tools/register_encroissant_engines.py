@@ -1,11 +1,29 @@
 import json
 import os
+import argparse
+import subprocess
+import sys
 import time
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE_CONFIG = Path(os.environ["APPDATA"]) / "org.encroissant.app" / "engines" / "engines.json"
+
+
+def is_encroissant_running() -> bool:
+    if os.name != "nt":
+        return False
+    result = subprocess.run(
+        ["tasklist", "/FI", "IMAGENAME eq en-croissant.exe", "/FO", "CSV", "/NH"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    return "en-croissant.exe" in result.stdout.lower()
 
 
 def upsert_engine(engines: list[dict], entry: dict) -> None:
@@ -19,6 +37,22 @@ def upsert_engine(engines: list[dict], entry: dict) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--allow-running",
+        action="store_true",
+        help="write engines.json even if en-croissant is running",
+    )
+    args = parser.parse_args()
+
+    if is_encroissant_running() and not args.allow_running:
+        print(
+            "en-croissant is running. Close it before registering engines, "
+            "otherwise the app can overwrite engines.json from its in-memory state.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
     if ENGINE_CONFIG.exists():
         engines = json.loads(ENGINE_CONFIG.read_text(encoding="utf-8"))
     else:

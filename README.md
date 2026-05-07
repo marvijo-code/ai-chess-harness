@@ -50,9 +50,10 @@ Outputs are written under `out/`, which is intentionally ignored.
 Use the helper to upsert local engine entries in en-croissant without storing credentials in the repo:
 
 ```powershell
+Get-Process en-croissant -ErrorAction SilentlyContinue | Stop-Process
 python .\tools\register_encroissant_engines.py
 ```
 
-The helper updates `%APPDATA%\org.encroissant.app\engines\engines.json` and writes a timestamped backup beside it.
+The helper updates `%APPDATA%\org.encroissant.app\engines\engines.json` and writes a timestamped backup beside it. Close en-croissant before running it; the app can otherwise rewrite the file from its stale in-memory engine list.
 
 en-croissant supports UCI engines and engine-vs-engine games through its Play Chess setup. Current client behavior is one match at a time: an engine-vs-engine game proceeds without human moves until game over or abort, but the client does not expose an auto-rematch loop for endless consecutive games.
