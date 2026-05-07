@@ -3,8 +3,8 @@ param(
     [int]$Concurrency = 1,
     [string]$Model = "gpt-5.3-codex-spark",
     [string]$Effort = "low",
-    [string]$TimeControl = "30+0.5",
-    [int]$MaxMoves = 4,
+    [string]$TimeControl = "300+0",
+    [int]$MaxMoves = 0,
     [string]$FastChessVersion = "latest",
     [switch]$ForceInstall
 )
@@ -96,26 +96,44 @@ $env:CODEX_CHESS_EFFORT = $Effort
 Write-Host "FastChess: $fastChess"
 Write-Host "Engine model override: $Model"
 Write-Host "Effort: $Effort"
+Write-Host "TimeControl: $TimeControl"
 Write-Host "Games requested: $Games"
 Write-Host "Rounds: $rounds with -repeat, so FastChess will schedule $($rounds * 2) games."
-Write-Host "MaxMoves: $MaxMoves"
+if ($MaxMoves -gt 0) {
+    Write-Host "MaxMoves: $MaxMoves"
+} else {
+    Write-Host "MaxMoves: disabled"
+}
 Write-Host "PGN: $pgnPath"
 Write-Host "Log: $logPath"
 
-& $fastChess `
-    -engine cmd="$codexEngine" name=Codex-chess proto=uci restart=on `
-    -engine cmd="$codexEngine" name=Codex-chess-learner proto=uci restart=on `
-    -each tc=$TimeControl timemargin=5000 `
-    -rounds $rounds `
-    -repeat `
-    -concurrency $Concurrency `
-    -maxmoves $MaxMoves `
-    -ratinginterval 1 `
-    -pgnout file="$pgnPath" notation=san append=false timeleft=true latency=true `
-    -config outname="$configPath" stats=true `
-    -autosaveinterval 2 `
-    -recover `
-    -log file="$logPath" level=info append=false
+$fastChessArgs = @(
+    "-engine", "cmd=$codexEngine", "name=Codex-chess", "proto=uci", "restart=on",
+    "-engine", "cmd=$codexEngine", "name=Codex-chess-learner", "proto=uci", "restart=on",
+    "-each", "tc=$TimeControl", "timemargin=5000",
+    "-rounds", "$rounds",
+    "-repeat",
+    "-concurrency", "$Concurrency",
+    "-ratinginterval", "1",
+    "-pgnout", "file=$pgnPath", "notation=san", "append=false", "timeleft=true", "latency=true",
+    "-config", "outname=$configPath", "stats=true",
+    "-autosaveinterval", "2",
+    "-recover",
+    "-log", "file=$logPath", "level=info", "append=false"
+)
+
+if ($MaxMoves -gt 0) {
+    $concurrencyIndex = [Array]::IndexOf($fastChessArgs, "-concurrency")
+    $insertIndex = $concurrencyIndex + 2
+    $fastChessArgs = @(
+        $fastChessArgs[0..($insertIndex - 1)]
+        "-maxmoves"
+        "$MaxMoves"
+        $fastChessArgs[$insertIndex..($fastChessArgs.Count - 1)]
+    )
+}
+
+& $fastChess @fastChessArgs
 
 if ($LASTEXITCODE -ne 0) {
     throw "FastChess exited with code $LASTEXITCODE"

@@ -49,7 +49,7 @@ Outputs are written under `out/`, which is intentionally ignored.
 
 ## FastChess Codex-vs-Codex run
 
-Install FastChess into a repo-local ignored cache and run ten unattended games between two identical Codex-chess instances. The second instance is named `Codex-chess-learner` in the tournament output. The default run uses `-maxmoves 4` so a Codex-vs-Codex smoke tournament finishes in bounded time.
+Install FastChess into a repo-local ignored cache and run ten unattended games between two identical Codex-chess instances. The second instance is named `Codex-chess-learner` in the tournament output. The default run has no `-maxmoves` adjudication cap and uses a five-minute time control (`300+0`), which FastChess writes to config JSON as `time: 300000`.
 
 ```powershell
 .\scripts\install-and-run-fastchess-codex.ps1
@@ -57,10 +57,10 @@ Install FastChess into a repo-local ignored cache and run ten unattended games b
 
 By default the script sets both engine processes to `CODEX_CHESS_MODEL=gpt-5.3-codex-spark` and `CODEX_CHESS_EFFORT=low`. This is an environment override for the tournament run only; it does not modify the installed Codex app or CLI configuration. Results are written to `out\fastchess`.
 
-For longer games, raise the cap:
+For a short smoke run, add a move cap explicitly:
 
 ```powershell
-.\scripts\install-and-run-fastchess-codex.ps1 -MaxMoves 40 -TimeControl "300+2"
+.\scripts\install-and-run-fastchess-codex.ps1 -Games 2 -MaxMoves 2
 ```
 
 ## en-croissant registration
