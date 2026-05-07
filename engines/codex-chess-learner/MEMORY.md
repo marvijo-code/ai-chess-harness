@@ -10,3 +10,7 @@ Initial policy:
 Agent Skills:
 - Engine-local skills may be placed under `skills/`.
 - Skills should describe reusable chess-analysis or tournament-learning procedures for Codex to use when this engine runs.
+
+Learning instruction:
+- Use this `MEMORY.md` and create or update Agent Skills under `skills/` whenever a reusable chess improvement is discovered.
+- Keep changes concise and focused on better move selection, opening choice, time management, illegal-move avoidance, and post-tournament learning.

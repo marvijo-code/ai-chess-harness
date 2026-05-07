@@ -37,6 +37,14 @@ Codex-chess-learner:
 .\engines\codex-chess-learner\codex-chess-learner.cmd
 ```
 
+Codex-chess exposes configurable UCI options:
+
+- `UseMemory`: tell the engine to use its engine-local `MEMORY.md`.
+- `UseSkills`: tell the engine to use Agent Skills from its engine-local `skills/` folder.
+- `LearningMode`: tell the engine to update `MEMORY.md` or create/update skills when reusable chess-learning improvements are found.
+
+The learner launcher defaults all three to `true`; the baseline launcher defaults them to `false`.
+
 OpenRouter LLM engine:
 
 ```powershell

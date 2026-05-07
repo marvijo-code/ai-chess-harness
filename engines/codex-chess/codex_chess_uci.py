@@ -22,6 +22,9 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_PATH = LOG_DIR / f"codex-chess-{time.strftime('%Y%m%d-%H%M%S')}.log"
 MEMORY_PATH = ENGINE_DIR / "MEMORY.md"
 SKILLS_DIR = ENGINE_DIR / "skills"
+DEFAULT_USE_MEMORY = os.environ.get("CODEX_CHESS_USE_MEMORY", "false").lower() in {"1", "true", "yes", "on"}
+DEFAULT_USE_SKILLS = os.environ.get("CODEX_CHESS_USE_SKILLS", "false").lower() in {"1", "true", "yes", "on"}
+DEFAULT_LEARNING_MODE = os.environ.get("CODEX_CHESS_LEARNING_MODE", "false").lower() in {"1", "true", "yes", "on"}
 
 
 def log(message: str) -> None:
@@ -47,9 +50,19 @@ def parse_json_object(text: str) -> dict:
 
 
 class CodexAppServer:
-    def __init__(self, model: str = "gpt-5.5", effort: str = "low"):
+    def __init__(
+        self,
+        model: str = "gpt-5.5",
+        effort: str = "low",
+        use_memory: bool = DEFAULT_USE_MEMORY,
+        use_skills: bool = DEFAULT_USE_SKILLS,
+        learning_mode: bool = DEFAULT_LEARNING_MODE,
+    ):
         self.model = model
         self.effort = effort
+        self.use_memory = use_memory
+        self.use_skills = use_skills
+        self.learning_mode = learning_mode
         self.port = free_port()
         self.url = f"ws://127.0.0.1:{self.port}"
         self.proc: asyncio.subprocess.Process | None = None
@@ -96,6 +109,24 @@ class CodexAppServer:
         )
         log(f"app-server initialized: {init.get('userAgent')}")
 
+        developer_instructions = (
+            "Return only JSON matching the schema. Do not call tools. "
+            "The host GUI will reject illegal moves, so uci must be copied exactly from legal_moves."
+        )
+        if self.use_memory:
+            developer_instructions += (
+                f" Use the engine-local memory file at {MEMORY_PATH} as durable context for this engine."
+            )
+        if self.use_skills:
+            developer_instructions += (
+                f" Use engine-local Agent Skills under {SKILLS_DIR} when they help chess move selection or tournament learning."
+            )
+        if self.learning_mode:
+            developer_instructions += (
+                f" After games or reusable insights, create or update concise Agent Skills under {SKILLS_DIR} "
+                f"and update {MEMORY_PATH} so this learner becomes a better chess player over time."
+            )
+
         started = await self.request(
             "thread/start",
             {
@@ -109,11 +140,7 @@ class CodexAppServer:
                     "Pick exactly one legal move from the supplied legal_moves list. "
                     "Respect the remaining clocks and avoid spending time on prose."
                 ),
-                "developerInstructions": (
-                    "Return only JSON matching the schema. Do not call tools. "
-                    "The host GUI will reject illegal moves, so uci must be copied exactly from legal_moves. "
-                    f"If present, use the engine-local memory file at {MEMORY_PATH} and any engine-local Agent Skills under {SKILLS_DIR} as durable context for this engine."
-                ),
+                "developerInstructions": developer_instructions,
             },
         )
         self.thread_id = started["thread"]["id"]
@@ -314,6 +341,26 @@ class CodexChessUci:
         log(f"bestmove {move} from fen={self.board.fen()} go={go_args}")
         return move
 
+    def set_option(self, tokens: list[str]) -> None:
+        if "name" not in tokens:
+            return
+        name_start = tokens.index("name") + 1
+        if "value" in tokens:
+            value_index = tokens.index("value")
+            name = " ".join(tokens[name_start:value_index]).lower()
+            value = " ".join(tokens[value_index + 1 :])
+        else:
+            name = " ".join(tokens[name_start:]).lower()
+            value = "true"
+
+        bool_value = value.lower() in {"1", "true", "yes", "on"}
+        if name == "usememory":
+            self.codex.use_memory = bool_value
+        elif name == "useskills":
+            self.codex.use_skills = bool_value
+        elif name == "learningmode":
+            self.codex.learning_mode = bool_value
+
 
 def parse_go_args(tokens: list[str]) -> dict:
     numeric_keys = {"wtime", "btime", "winc", "binc", "movetime", "depth", "nodes", "movestogo"}
@@ -352,6 +399,9 @@ async def main() -> None:
                 print(f"id name {ENGINE_NAME}", flush=True)
                 print(f"id author {ENGINE_AUTHOR}", flush=True)
                 print("option name UCI_Chess960 type check default false", flush=True)
+                print(f"option name UseMemory type check default {'true' if DEFAULT_USE_MEMORY else 'false'}", flush=True)
+                print(f"option name UseSkills type check default {'true' if DEFAULT_USE_SKILLS else 'false'}", flush=True)
+                print(f"option name LearningMode type check default {'true' if DEFAULT_LEARNING_MODE else 'false'}", flush=True)
                 print("uciok", flush=True)
             elif command == "isready":
                 print("readyok", flush=True)
@@ -360,7 +410,7 @@ async def main() -> None:
                 engine.history = []
                 engine.codex.new_game()
             elif command == "setoption":
-                continue
+                engine.set_option(tokens)
             elif command == "position":
                 engine.set_position(tokens)
             elif command == "go":
