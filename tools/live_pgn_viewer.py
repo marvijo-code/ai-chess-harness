@@ -1945,7 +1945,7 @@ def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None) -
                             "winner_label": result_label(result, white, black),
                             "round": round_name,
                             "file": str(pgn_path.relative_to(out_dir)),
-                            "path": str(pgn_path),
+                            "path": str(pgn_path.resolve()),
                             "game_index": game_index,
                         }
                     )
