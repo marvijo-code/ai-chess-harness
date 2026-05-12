@@ -1,11 +1,11 @@
 # Live Match Lessons
 
-Generated: 2026-05-12 10:21:00
-Completed games: 3 / 6
-Learner score: 2.5 (83.33%)
+Generated: 2026-05-12 10:30:20
+Completed games: 5 / 6
+Learner score: 3.5 (70.0%)
 
 ## Result Shape
-- mate: 2
+- mate: 4
 - threefold repetition: 1
 
 ## Durable Move Rules
@@ -16,5 +16,8 @@ Learner score: 2.5 (83.33%)
 - In winning endings, convert material with forcing moves and pawn promotion plans; do not shuffle the king until the clock collapses.
 
 ## Repeated Lines To Avoid
-- 2 games, score 2.0: 1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5
+- 4 games, score 3.0: 1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5
 - 1 games, score 0.5: 1. Nf3 d5 2. d4 Nf6 3. c4 e6 4. Nc3 Be7 5. Bf4 O-O
+
+## Learner Mate Losses
+- Game 4 as White: Black mates after 42 plies; 1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5

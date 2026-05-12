@@ -1,19 +1,29 @@
 {
-  "generated_at": "2026-05-12 10:21:00",
+  "generated_at": "2026-05-12 10:30:20",
   "source_pgn": "out\\fastchess\\codex-vs-codex-learner-standard5-patched-20260512-100210.pgn",
   "source_stdout": "out\\fastchess\\codex-vs-codex-learner-standard5-patched-20260512-100210-launch.out.log",
-  "completed_games": 3,
+  "completed_games": 5,
   "scheduled_games": 6,
-  "learner_points": 2.5,
-  "learner_score_percent": 83.33,
+  "learner_points": 3.5,
+  "learner_score_percent": 70.0,
   "reason_counts": {
-    "mate": 2,
+    "mate": 4,
     "threefold repetition": 1
   },
   "illegal_losses": [],
   "illegal_wins": [],
   "zero_ply_engine_failures": [],
-  "mate_losses": [],
+  "mate_losses": [
+    {
+      "game": 4,
+      "white": "Codex-chess-learner",
+      "black": "Codex-chess",
+      "result": "0-1",
+      "plies": 42,
+      "reason": "Black mates",
+      "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5"
+    }
+  ],
   "mate_wins": [
     {
       "game": 1,
@@ -32,6 +42,15 @@
       "plies": 30,
       "reason": "Black mates",
       "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5"
+    },
+    {
+      "game": 5,
+      "white": "Codex-chess",
+      "black": "Codex-chess-learner",
+      "result": "0-1",
+      "plies": 44,
+      "reason": "Black mates",
+      "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5"
     }
   ],
   "time_losses": [],
@@ -40,11 +59,11 @@
   "repeated_opening_lines": [
     {
       "line": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5",
-      "games": 2,
-      "learner_score": 2.0,
-      "wins": 2,
+      "games": 4,
+      "learner_score": 3.0,
+      "wins": 3,
       "draws": 0,
-      "losses": 0
+      "losses": 1
     },
     {
       "line": "1. Nf3 d5 2. d4 Nf6 3. c4 e6 4. Nc3 Be7 5. Bf4 O-O",

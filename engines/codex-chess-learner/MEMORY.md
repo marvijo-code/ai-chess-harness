@@ -21,9 +21,9 @@ Durable lessons:
 
 <!-- learner-autolearn:start -->
 ## Autolearn Summary
-- Last updated: 2026-05-12 10:21:00
-- Current match score: 2.5 / 3 (83.33%).
-- Result reasons: mate=2, threefold repetition=1.
+- Last updated: 2026-05-12 10:30:20
+- Current match score: 3.5 / 5 (70.0%).
+- Result reasons: mate=4, threefold repetition=1.
 - Apply `knowledgebase/live-match-lessons.md` before choosing moves.
 - Avoid threefold repetition loops unless drawing is the only practical outcome.
 - Manage the clock while still choosing a move intentionally; there is no fallback or client-picked move.

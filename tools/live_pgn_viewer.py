@@ -479,7 +479,10 @@ INDEX_HTML = """<!doctype html>
       border: 1px solid var(--line); border-radius: var(--r-md);
       padding: 9px 10px; background: var(--surface);
       display: grid; gap: 4px;
+      width: 100%; color: var(--text); text-align: left; cursor: pointer;
     }
+    button.match-row { font: inherit; }
+    .match-row:hover, .match-row.active { border-color: var(--accent); background: rgba(10, 132, 255, .08); }
     .match-main {
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
       font-size: 13px; font-weight: 700;
@@ -767,6 +770,8 @@ INDEX_HTML = """<!doctype html>
     let activeView = "board";
     let latestLearnerData = null;
     let logSideFilter = localStorage.getItem("livePgnLogSide") || "all";
+    let replayThinkingKey = "";
+    let selectedMatch = null;
     let previousMatches = [];
     let previousMatchesPage = 0;
     const previousMatchesPageSize = 5;
@@ -810,6 +815,7 @@ INDEX_HTML = """<!doctype html>
       logSideFilter = ["white", "black"].includes(side) ? side : "all";
       localStorage.setItem("livePgnLogSide", logSideFilter);
       updateLogSideButtons();
+      replayThinkingKey = "";
       if (latestLearnerData) renderLearner(latestLearnerData);
     }
 
@@ -976,11 +982,26 @@ INDEX_HTML = """<!doctype html>
       };
     }
 
-    function renderBoardThinking() {
-      const logs = latestLearnerData && Array.isArray(latestLearnerData.logs) ? latestLearnerData.logs : [];
+    function boardThinkingKey() {
+      if (followLive || !latestGame || !latestGame.has_game) return "live";
+      return [
+        latestGame.path || "",
+        latestGame.game_index || 0,
+        selectedPly(latestGame),
+        logSideFilter,
+      ].join("|");
+    }
+
+    function renderBoardThinking(force = false) {
+      const key = boardThinkingKey();
+      if (!followLive && !force && replayThinkingKey === key) return;
+      const logs = latestGame && Array.isArray(latestGame.logs)
+        ? latestGame.logs
+        : (latestLearnerData && Array.isArray(latestLearnerData.logs) ? latestLearnerData.logs : []);
       const selected = logsForBoardPly(logs);
       document.getElementById("board-thinking-meta").textContent = selected.label;
       document.getElementById("board-thinking-logs").innerHTML = logListHtml(selected.logs, "No bot decisions matched this replay move.");
+      replayThinkingKey = followLive ? "" : key;
     }
 
     function formatClock(ms) {
@@ -1074,8 +1095,10 @@ INDEX_HTML = """<!doctype html>
       followLive = enabled;
       localStorage.setItem("livePgnFollow", followLive ? "on" : "off");
       document.getElementById("follow-toggle").checked = followLive;
+      replayThinkingKey = "";
+      if (followLive) selectedMatch = null;
       if (followLive && latestGame) viewedPly = latestGame.moves.length;
-      refresh();
+      refresh(true);
     }
 
     function navigateMove(delta) {
@@ -1086,8 +1109,9 @@ INDEX_HTML = """<!doctype html>
       followLive = false;
       localStorage.setItem("livePgnFollow", "off");
       document.getElementById("follow-toggle").checked = false;
+      replayThinkingKey = "";
       renderGame(latestGame);
-      refresh();
+      refresh(true);
     }
 
     function renderAnalysis(analysis) {
@@ -1175,6 +1199,7 @@ INDEX_HTML = """<!doctype html>
       previousMatchesPage = Math.max(0, Math.min(previousMatchesPage, pages - 1));
       const start = previousMatchesPage * previousMatchesPageSize;
       const pageRows = previousMatches.slice(start, start + previousMatchesPageSize);
+      const activeKey = selectedMatch ? matchKey(selectedMatch) : "";
       meta.textContent = total ? `${previousMatchesPage + 1} / ${pages}` : "0 / 0";
       document.getElementById("matches-prev").disabled = previousMatchesPage <= 0;
       document.getElementById("matches-next").disabled = previousMatchesPage >= pages - 1;
@@ -1183,15 +1208,33 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       container.innerHTML = `<div class="match-list">${pageRows.map(match => `
-        <div class="match-row">
+        <button class="match-row ${matchKey(match) === activeKey ? "active" : ""}" type="button" data-match-index="${escapeAttr(previousMatches.indexOf(match))}">
           <div class="match-main"><span>${escapeHtml(match.winner_label)}</span><span>${escapeHtml(match.result)}</span></div>
-          <div class="match-sub">${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · ${escapeHtml(match.date)} · ${escapeHtml(match.file)}</div>
-        </div>`).join("")}</div>`;
+          <div class="match-sub">${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · game ${escapeHtml(match.game_index || 1)} · ${escapeHtml(match.date)} · ${escapeHtml(match.file)}</div>
+        </button>`).join("")}</div>`;
     }
 
     function setPreviousMatchesPage(delta) {
       previousMatchesPage += delta;
       renderPreviousMatches();
+    }
+
+    function matchKey(match) {
+      if (!match) return "";
+      return `${match.path || match.file || ""}|${match.game_index || 1}`;
+    }
+
+    function loadPreviousMatch(index) {
+      const match = previousMatches[Number(index)];
+      if (!match) return;
+      selectedMatch = match;
+      followLive = false;
+      viewedPly = null;
+      replayThinkingKey = "";
+      localStorage.setItem("livePgnFollow", "off");
+      document.getElementById("follow-toggle").checked = false;
+      renderPreviousMatches();
+      refresh(true);
     }
 
     function fileListHtml(files) {
@@ -1231,8 +1274,10 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("learner-updated").textContent = data.updated_at || "";
       if (data.error) {
         document.getElementById("learner-summary").innerHTML = `<div class="empty err">${escapeHtml(data.error)}</div>`;
-        document.getElementById("board-thinking-meta").textContent = "error";
-        document.getElementById("board-thinking-logs").innerHTML = `<div class="empty err">${escapeHtml(data.error)}</div>`;
+        if (!latestGame || !Array.isArray(latestGame.logs)) {
+          document.getElementById("board-thinking-meta").textContent = "error";
+          document.getElementById("board-thinking-logs").innerHTML = `<div class="empty err">${escapeHtml(data.error)}</div>`;
+        }
         return;
       }
       const summary = data.summary || {};
@@ -1273,9 +1318,15 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("status-text").textContent = text;
     }
 
-    async function refresh() {
+    async function refresh(force = false) {
+      if (!force && selectedMatch && !followLive && latestGame && latestGame.path === selectedMatch.path) return;
       try {
         const params = new URLSearchParams({ analysis: analysisEnabled ? "1" : "0" });
+        if (selectedMatch && !followLive) {
+          params.set("path", selectedMatch.path || selectedMatch.file || "");
+          params.set("game", String(selectedMatch.game_index || 1));
+          params.set("logs", "1");
+        }
         if (!followLive && viewedPly !== null) params.set("ply", String(viewedPly));
         const resp = await fetch(`/api/game?${params}`, { cache: "no-store" });
         const data = await resp.json();
@@ -1307,7 +1358,7 @@ INDEX_HTML = """<!doctype html>
         renderGame(data);
         const changed = data.fen !== lastFen;
         lastFen = data.fen;
-        setStatus(true, changed ? "Updated" : "Watching");
+        setStatus(true, selectedMatch && !followLive ? "Archive" : (changed ? "Updated" : "Watching"));
       } catch {
         setStatus(false, "Disconnected");
       }
@@ -1464,6 +1515,10 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("analysis-panel-toggle").addEventListener("change", e => setAnalysisEnabled(e.target.checked));
     document.getElementById("matches-prev").addEventListener("click", () => setPreviousMatchesPage(-1));
     document.getElementById("matches-next").addEventListener("click", () => setPreviousMatchesPage(1));
+    document.getElementById("matches").addEventListener("click", event => {
+      const row = event.target.closest("[data-match-index]");
+      if (row) loadPreviousMatch(row.dataset.matchIndex);
+    });
     document.querySelectorAll("[data-log-side]").forEach(button => {
       button.addEventListener("click", () => setLogSideFilter(button.dataset.logSide));
     });
@@ -1711,6 +1766,8 @@ def read_game(
     analyzer: StockfishAnalyzer | None = None,
     include_analysis: bool = True,
     analysis_ply: int | None = None,
+    game_index: int | None = None,
+    include_logs: bool = False,
 ) -> dict:
     if not path.exists():
         result = {"exists": False, "has_game": False, "path": str(path)}
@@ -1721,14 +1778,15 @@ def read_game(
     try:
         text = path.read_text(encoding="utf-8")
         stream = io.StringIO(text)
-        game = None
-        game_count = 0
+        games = []
         while True:
             parsed_game = chess.pgn.read_game(stream)
             if parsed_game is None:
                 break
-            game = parsed_game
-            game_count += 1
+            games.append(parsed_game)
+        game_count = len(games)
+        selected_index = game_count if game_index is None else max(1, min(game_index, game_count))
+        game = games[selected_index - 1] if games else None
     except Exception as exc:
         return {"exists": True, "has_game": False, "path": str(path), "error": str(exc)}
 
@@ -1785,7 +1843,7 @@ def read_game(
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
         "size": stat.st_size,
         "game_count": game_count,
-        "game_index": game_count,
+        "game_index": selected_index,
         "headers": dict(game.headers),
         "fen": board.fen(),
         "turn": "White" if board.turn == chess.WHITE else "Black",
@@ -1797,6 +1855,8 @@ def read_game(
     clock = clock_from_headers(game.headers, completed)
     if clock is not None:
         result["clock"] = clock
+    if include_logs:
+        result["logs"] = collect_game_logs(game.headers, positions, moves)
     if analyzer is not None and include_analysis:
         if analysis_ply is None:
             analysis_board = board
@@ -1856,10 +1916,12 @@ def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None) -
         try:
             mtime = pgn_path.stat().st_mtime
             with pgn_path.open("r", encoding="utf-8", errors="replace") as handle:
+                game_index = 0
                 while True:
                     game = chess.pgn.read_game(handle)
                     if game is None:
                         break
+                    game_index += 1
                     result = game.headers.get("Result", "*")
                     if result not in {"1-0", "0-1", "1/2-1/2"}:
                         continue
@@ -1883,6 +1945,8 @@ def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None) -
                             "winner_label": result_label(result, white, black),
                             "round": round_name,
                             "file": str(pgn_path.relative_to(out_dir)),
+                            "path": str(pgn_path),
+                            "game_index": game_index,
                         }
                     )
                     for side, engine in (("white", white), ("black", black)):
@@ -2028,6 +2092,53 @@ def parse_log_timestamp(line: str) -> str:
     return match.group("ts"), match.group("text")
 
 
+def parse_log_datetime(timestamp: str) -> datetime | None:
+    if not timestamp:
+        return None
+    try:
+        return datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def fen_key(fen: str) -> str:
+    return " ".join(str(fen or "").split()[:4])
+
+
+def line_fen_key(line: str) -> str:
+    match = re.search(r"\bfen=(.*?)\s+(?:legal_moves=|moves=|go=)", line, flags=re.I)
+    if not match:
+        match = re.search(r"\bfrom fen=(.*?)\s+go=", line, flags=re.I)
+    return fen_key(match.group(1)) if match else ""
+
+
+def line_move(line: str) -> str:
+    match = re.search(r"\b(?:bestmove|move)=([a-h][1-8][a-h][1-8][qrbn]?|0000)\b", line, flags=re.I)
+    return match.group(1).lower() if match else ""
+
+
+def parse_game_log_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S %z")
+        return parsed.astimezone().replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def game_log_window(headers: chess.pgn.Headers) -> tuple[datetime | None, datetime | None]:
+    start = parse_game_log_time(headers.get("GameStartTime"))
+    end = parse_game_log_time(headers.get("GameEndTime"))
+    if start is None and end is None:
+        return None, None
+    padding = 90
+    return (
+        datetime.fromtimestamp(start.timestamp() - padding) if start else None,
+        datetime.fromtimestamp(end.timestamp() + padding) if end else None,
+    )
+
+
 def bot_from_thread_line(line: str) -> tuple[str, str]:
     lower = line.lower()
     if str(LEARNER_DIR).lower() in lower:
@@ -2047,13 +2158,21 @@ def side_from_line(line: str, current_side: str = "") -> str:
     return current_side
 
 
-def collect_learner_logs(max_entries: int = 80) -> tuple[list[dict], int]:
+def collect_learner_logs(
+    max_entries: int = 80,
+    max_files: int = 30,
+    per_file_tail: int | None = 14,
+    target_fens: set[tuple[str, str]] | None = None,
+    target_moves: set[str] | None = None,
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
+) -> tuple[list[dict], int]:
     if not ENGINE_LOG_DIR.exists():
         return [], 0
     entries: list[dict] = []
     learner_log_count = 0
     paths = sorted(ENGINE_LOG_DIR.glob("codex-chess-*.log"), key=lambda path: path.stat().st_mtime, reverse=True)
-    for path in paths[:30]:
+    for path in paths[:max_files]:
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
@@ -2083,8 +2202,22 @@ def collect_learner_logs(max_entries: int = 80) -> tuple[list[dict], int]:
                 )
             ):
                 interesting.append((line, current_bot, current_bot_label, current_side))
-        for line, bot, bot_label, side in interesting[-14:]:
+        selected_lines = interesting[-per_file_tail:] if per_file_tail is not None else interesting
+        for line, bot, bot_label, side in selected_lines:
             timestamp, text = parse_log_timestamp(line)
+            parsed_time = parse_log_datetime(timestamp)
+            if window_start and (parsed_time is None or parsed_time < window_start):
+                continue
+            if window_end and (parsed_time is None or parsed_time > window_end):
+                continue
+            entry_fen = line_fen_key(text)
+            entry_move = line_move(text)
+            if target_fens is not None or target_moves is not None:
+                side_key = (side or "").lower()
+                fen_match = bool(entry_fen and target_fens and ((entry_fen, side_key) in target_fens or (entry_fen, "") in target_fens))
+                move_match = bool(entry_move and target_moves and entry_move in target_moves)
+                if not fen_match and not move_match:
+                    continue
             entries.append(
                 {
                     "timestamp": timestamp,
@@ -2094,10 +2227,37 @@ def collect_learner_logs(max_entries: int = 80) -> tuple[list[dict], int]:
                     "bot_label": bot_label,
                     "side": side,
                     "file": path.name,
+                    "fen_key": entry_fen,
+                    "uci": entry_move,
                 }
             )
     entries.sort(key=lambda item: item.get("timestamp", ""), reverse=True)
     return entries[:max_entries], learner_log_count
+
+
+def collect_game_logs(headers: chess.pgn.Headers, positions: list[dict], moves: list[dict]) -> list[dict]:
+    target_fens: set[tuple[str, str]] = set()
+    target_moves: set[str] = set()
+    positions_by_ply = {int(item.get("ply", 0)): item for item in positions}
+    for move in moves:
+        ply = int(move.get("ply", 0))
+        before = positions_by_ply.get(max(0, ply - 1))
+        side = str(move.get("side", "")).lower()
+        if before:
+            target_fens.add((fen_key(str(before.get("fen", ""))), side))
+        if move.get("uci"):
+            target_moves.add(str(move["uci"]).lower())
+    window_start, window_end = game_log_window(headers)
+    logs, _ = collect_learner_logs(
+        max_entries=1200,
+        max_files=500,
+        per_file_tail=None,
+        target_fens=target_fens,
+        target_moves=target_moves,
+        window_start=window_start,
+        window_end=window_end,
+    )
+    return logs
 
 
 def collect_learner_data() -> dict:
@@ -2155,12 +2315,19 @@ class LivePgnHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/game":
             query = parse_qs(parsed.query)
-            pgn_path = Path(query.get("path", [str(self.pgn_path)])[0])
+            raw_path = query.get("path", [str(self.pgn_path)])[0]
+            pgn_path = Path(raw_path)
+            if not pgn_path.is_absolute():
+                pgn_path = self.stats_dir / pgn_path
             include_analysis = query.get("analysis", ["1"])[0] not in {"0", "false", "off"}
+            include_logs = query.get("logs", ["0"])[0] not in {"0", "false", "off"}
+            game_index = None
+            if query.get("game", [""])[0] != "":
+                game_index = int(query.get("game", ["0"])[0])
             analysis_ply = None
             if query.get("ply", [""])[0] != "":
                 analysis_ply = int(query.get("ply", ["0"])[0])
-            self.send_json(read_game(pgn_path, self.analyzer, include_analysis, analysis_ply))
+            self.send_json(read_game(pgn_path, self.analyzer, include_analysis, analysis_ply, game_index, include_logs))
             return
 
         if parsed.path == "/api/config":

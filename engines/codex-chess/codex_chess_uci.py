@@ -186,7 +186,8 @@ class CodexAppServer:
 
         developer_instructions = (
             "Return only JSON matching the schema. "
-            "The host GUI will reject illegal moves, so uci must be copied exactly from legal_moves."
+            "The host GUI will reject illegal moves, so uci must be copied exactly from legal_moves. "
+            "When own_remaining is below 25000ms, answer immediately with one legal uci and an empty comment."
         )
         if not self.learning_mode:
             developer_instructions += " Do not call tools."
@@ -334,13 +335,14 @@ class CodexAppServer:
         remaining = go_args.get("wtime") if board.turn == chess.WHITE else go_args.get("btime")
         increment = go_args.get("winc") if board.turn == chess.WHITE else go_args.get("binc")
 
+        critical_clock = remaining is not None and remaining < 25000
         prompt = {
             "engine": "Codex-chess",
             "game_time_control": "Use only the GUI clock fields below; infer the practical time control from them.",
             "side_to_move": "white" if board.turn == chess.WHITE else "black",
             "fen": board.fen(),
             "legal_moves": legal_moves,
-            "uci_history": history,
+            "uci_history": history[-20:] if critical_clock else history,
             "clock_ms": {
                 "white": go_args.get("wtime"),
                 "black": go_args.get("btime"),
@@ -351,8 +353,8 @@ class CodexAppServer:
             },
             "time_management": (
                 "Choose a practical legal move quickly under the supplied remaining clocks. "
-                "Think through the position and return strict JSON before the clock expires. "
-                "The harness will not choose a move for you."
+                "If own_remaining is below 25000ms, do not analyze deeply: copy any clearly legal useful move from legal_moves, "
+                "set comment to an empty string, and return strict JSON immediately. The harness will not choose a move for you."
             ),
             "comment_policy": "Optionally include one short comment explaining the move; it will be shown as a UCI info string in the chess GUI logs.",
             "invalid_response_policy": (
@@ -361,9 +363,14 @@ class CodexAppServer:
                 "Three consecutive invalid responses for this engine forfeit the game."
             ),
         }
-        context = self.learner_context()
+        context = {} if critical_clock else self.learner_context()
         if context:
             prompt["learner_context"] = context
+        elif critical_clock and self.learning_mode:
+            prompt["learner_context_summary"] = (
+                "Critical clock mode. Apply only the most important learner rule: do not flag or forfeit; "
+                "copy one legal uci from legal_moves immediately, avoid repetition moves if easy, and use an empty comment."
+            )
         log(
             "decision prompt: "
             f"side={prompt['side_to_move']} fen={board.fen()} "
