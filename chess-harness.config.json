@@ -1,7 +1,7 @@
 {
   "codex": {
     "model": "gpt-5.3-codex",
-    "effort": "low",
+    "effort": "high",
     "preflightTimeoutSeconds": 45
   },
   "fastChess": {

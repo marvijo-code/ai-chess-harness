@@ -103,8 +103,9 @@ class CodexMove:
 
 
 class CodexAppServer:
-    def __init__(self, model: str):
+    def __init__(self, model: str, effort: str):
         self.model = model
+        self.effort = effort
         self.port = free_port()
         self.url = f"ws://127.0.0.1:{self.port}"
         self.proc: asyncio.subprocess.Process | None = None
@@ -231,7 +232,7 @@ class CodexAppServer:
             "turn/start",
             {
                 "threadId": self.thread_id,
-                "effort": "low",
+                "effort": self.effort,
                 "input": [{"type": "text", "text": json.dumps(prompt, separators=(",", ":"))}],
                 "outputSchema": {
                     "type": "object",
@@ -364,7 +365,7 @@ async def play(args: argparse.Namespace) -> dict:
     OUT_DIR.mkdir(exist_ok=True)
     stockfish_path = load_stockfish_path()
     engine = Stockfish(stockfish_path, args.stockfish_movetime_ms)
-    codex = CodexAppServer(args.model)
+    codex = CodexAppServer(args.model, args.effort)
     await codex.start()
 
     board = chess.Board()
@@ -435,6 +436,7 @@ async def play(args: argparse.Namespace) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=str(config_value("codex.model", "gpt-5.3-codex")))
+    parser.add_argument("--effort", default=str(config_value("codex.effort", "high")))
     parser.add_argument("--max-plies", type=int, default=80)
     parser.add_argument("--stockfish-movetime-ms", type=int, default=150)
     parser.add_argument("--live-pgn-path", type=Path, default=DEFAULT_LIVE_PGN_PATH)

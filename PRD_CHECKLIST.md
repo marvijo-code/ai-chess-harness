@@ -50,3 +50,14 @@
 - [x] Show in-progress FastChess games in the right-column match list alongside completed games.
 - [x] Collapse `Engine Config` by default with persisted open/closed state.
 - [x] Validate compile/parser checks, concurrency argument flow, and focused viewer behavior.
+- [x] Prevent live board flicker by following one monotonic move-line track during concurrent FastChess runs.
+- [x] Make every in-progress match row clickable so the followed live board can be switched intentionally.
+- [x] Validate the fixed-track mirror and live-row switch behavior.
+- [x] Add a PowerShell script that backs up active game artifacts and resets the leaderboard input to zero games.
+- [x] Make viewer stats ignore backed-up game archives.
+- [x] Run the backup script and validate the active leaderboard has zero completed games.
+- [x] Default game-playing `gpt-5.3-codex` runs to reasoning effort `high` across config and runner fallbacks.
+- [x] Validate the high-effort default resolution for PowerShell launchers and Codex-vs-Stockfish.
+- [x] Make LLM-backed engines forfeit immediately without starting a model turn when their own clock is already at or below zero.
+- [x] Show timeout winner/reason on the live board and stop the displayed clock at zero.
+- [x] Validate engine timeout guards plus live mirror/viewer timeout result rendering.

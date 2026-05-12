@@ -21,10 +21,11 @@ Durable lessons:
 
 <!-- learner-autolearn:start -->
 ## Autolearn Summary
-- Last updated: 2026-05-12 13:06:06
-- Current match score: 0.5 / 4 (12.5%).
-- Result reasons: illegal move=2, mate=1, threefold repetition=1.
+- Last updated: 2026-05-12 15:06:24
+- Current match score: 0 / 0 (0.0%).
+- Result reasons: .
 - Apply `knowledgebase/live-match-lessons.md` before choosing moves.
+- Apply model-discovered concepts from `knowledgebase/strategy-lessons.md` as generic value adjustments, not as memorized move answers.
 - Avoid threefold repetition loops unless drawing is the only practical outcome.
 - Manage the clock while still choosing a move intentionally; there is no fallback or client-picked move.
 - Never return a move outside `legal_moves`; never return `0000` while legal moves exist.

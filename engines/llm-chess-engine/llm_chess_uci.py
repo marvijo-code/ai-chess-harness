@@ -91,11 +91,15 @@ class OpenRouterChessClient:
         if not legal_moves:
             return "0000", "no legal moves"
 
+        remaining = go_args.get("wtime") if board.turn == chess.WHITE else go_args.get("btime")
+        if remaining is not None and remaining <= 0:
+            side = "White" if board.turn == chess.WHITE else "Black"
+            return forfeit_move(f"{side} clock expired; forfeiting without calling OpenRouter")
+
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             return forfeit_move("OPENROUTER_API_KEY is not set; forfeiting")
 
-        remaining = go_args.get("wtime") if board.turn == chess.WHITE else go_args.get("btime")
         payload = self._build_payload(board, go_args, history, legal_moves, with_schema=True)
         timeout = self._timeout_seconds(go_args, remaining)
         last_error = None

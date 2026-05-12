@@ -1,16 +1,16 @@
 {
-  "generated_at": "2026-05-12 13:15:02",
-  "source_pgn": "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn",
-  "source_stdout": "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035-launch.out.log",
-  "completed_games": 5,
+  "generated_at": "2026-05-12 15:06:24",
+  "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-150428.pgn",
+  "source_stdout": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-150428-launch.out.log",
+  "completed_games": 0,
   "observation_count": 7,
   "category_counts": {
-    "material_swing": 28,
-    "undefended_forcing_piece": 15,
+    "material_swing": 34,
+    "undefended_forcing_piece": 17,
     "hanging_checking_piece": 7,
-    "failed_conversion": 5,
+    "failed_conversion": 6,
+    "time_loss": 5,
     "missed_king_capture": 2,
-    "time_loss": 2,
     "pawn_promotion_failure": 1
   },
   "evidence_keys": [
@@ -73,7 +73,19 @@
     "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn|hanging_checking_piece|5|46|d1f1|r7/pp6/4npkp/8/8/8/PP3PPP/3r1BK1 b - - 1 23|checking r can be captured by king move(s): g1f1",
     "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn|material_swing|5|46|d1f1|r7/pp6/4npkp/8/8/8/PP3PPP/3r1BK1 b - - 1 23|opponent reply Kxf1 shifted material by 500 centipawns",
     "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn|time_loss|5|51|||lost on time after 51 plies",
-    "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn|failed_conversion|5|51|||highest material edge was at least 1200 centipawns but result was 1-0"
+    "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn|failed_conversion|5|51|||highest material edge was at least 1200 centipawns but result was 1-0",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144322.pgn|undefended_forcing_piece|1|22|e5d4|r1bq1rk1/2p1bppp/p2p1n2/4p3/1n1PP3/1BN2N2/PP3PPP/R1BQR1K1 b - - 1 11|forcing move leaves p capturable by f3d4, d1d4",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144322.pgn|material_swing|1|28|b7d5|r2q1rk1/1bp1bppp/p4n2/3P1N2/1n6/1BN5/PP3PPP/R1BQR1K1 b - - 0 14|opponent reply Nxd5 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144322.pgn|material_swing|1|30|f6d5|r2q1rk1/2p1bppp/p4n2/3N1N2/1n6/1B6/PP3PPP/R1BQR1K1 b - - 0 15|opponent reply Qxd5 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144322.pgn|material_swing|1|32|d8d5|r2q1rk1/2p1bppp/p7/3Q1N2/1n6/1B6/PP3PPP/R1B1R1K1 b - - 0 16|opponent reply Nxe7+ shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144322.pgn|material_swing|1|34|g8h8|r4rk1/2p1Nppp/p7/3q4/1n6/1B6/PP3PPP/R1B1R1K1 b - - 0 17|opponent reply Nxd5 shifted material by 900 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144322.pgn|time_loss|1|35|||lost on time after 35 plies",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144322.pgn|failed_conversion|1|35|||highest material edge was at least 600 centipawns but result was 1-0",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144907.pgn|material_swing|1|18|h7h6|r1bq1rk1/ppp2ppp/1bnp1n2/6B1/2BPP3/2N2N2/PP3PPP/R2Q1RK1 b - - 3 9|opponent reply Bxf6 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144907.pgn|time_loss|1|21|||lost on time after 21 plies",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144907.pgn|undefended_forcing_piece|2|13|e4d5|r1bqkb1r/pp2nppp/2n1p3/1B1p4/3NP3/8/PPP2PPP/RNBQ1RK1 w kq - 0 7|forcing move leaves P capturable by d8d5, e7d5, e6d5",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144907.pgn|material_swing|2|17|d4c6|r2qkb1r/pp1bnppp/2n5/1B1p4/3N4/2N5/PPP2PPP/R1BQ1RK1 w kq - 2 9|opponent reply bxc6 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144907.pgn|time_loss|2|18|||lost on time after 18 plies"
   ],
   "new_evidence": [],
   "new_evidence_count": 0,
@@ -81,7 +93,7 @@
     {
       "category": "material_swing",
       "description": "the opponent reply caused a material balance drop",
-      "evidence_count": 28,
+      "evidence_count": 34,
       "evidence": [
         {
           "category": "material_swing",
@@ -160,7 +172,7 @@
     {
       "category": "undefended_forcing_piece",
       "description": "a forcing move left the moved piece immediately capturable",
-      "evidence_count": 15,
+      "evidence_count": 17,
       "evidence": [
         {
           "category": "undefended_forcing_piece",
@@ -318,7 +330,7 @@
     {
       "category": "failed_conversion",
       "description": "the learner had a material edge but did not win",
-      "evidence_count": 5,
+      "evidence_count": 6,
       "evidence": [
         {
           "category": "failed_conversion",
@@ -379,6 +391,85 @@
           "fen_after": "",
           "detail": "highest material edge was at least 1200 centipawns but result was 1-0",
           "source_pgn": "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn"
+        },
+        {
+          "category": "failed_conversion",
+          "game": 1,
+          "side": "Black",
+          "ply": 35,
+          "move": "",
+          "san": "",
+          "fen_before": "",
+          "fen_after": "",
+          "detail": "highest material edge was at least 600 centipawns but result was 1-0",
+          "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144322.pgn"
+        }
+      ]
+    },
+    {
+      "category": "time_loss",
+      "description": "the learner lost on time",
+      "evidence_count": 5,
+      "evidence": [
+        {
+          "category": "time_loss",
+          "game": 2,
+          "side": "White",
+          "ply": 40,
+          "move": "",
+          "san": "",
+          "fen_before": "",
+          "fen_after": "",
+          "detail": "lost on time after 40 plies",
+          "source_pgn": "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn"
+        },
+        {
+          "category": "time_loss",
+          "game": 5,
+          "side": "Black",
+          "ply": 51,
+          "move": "",
+          "san": "",
+          "fen_before": "",
+          "fen_after": "",
+          "detail": "lost on time after 51 plies",
+          "source_pgn": "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn"
+        },
+        {
+          "category": "time_loss",
+          "game": 1,
+          "side": "Black",
+          "ply": 35,
+          "move": "",
+          "san": "",
+          "fen_before": "",
+          "fen_after": "",
+          "detail": "lost on time after 35 plies",
+          "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144322.pgn"
+        },
+        {
+          "category": "time_loss",
+          "game": 1,
+          "side": "Black",
+          "ply": 21,
+          "move": "",
+          "san": "",
+          "fen_before": "",
+          "fen_after": "",
+          "detail": "lost on time after 21 plies",
+          "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144907.pgn"
+        },
+        {
+          "category": "time_loss",
+          "game": 2,
+          "side": "White",
+          "ply": 18,
+          "move": "",
+          "san": "",
+          "fen_before": "",
+          "fen_after": "",
+          "detail": "lost on time after 18 plies",
+          "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144907.pgn"
         }
       ]
     },
@@ -414,37 +505,6 @@
       ]
     },
     {
-      "category": "time_loss",
-      "description": "the learner lost on time",
-      "evidence_count": 2,
-      "evidence": [
-        {
-          "category": "time_loss",
-          "game": 2,
-          "side": "White",
-          "ply": 40,
-          "move": "",
-          "san": "",
-          "fen_before": "",
-          "fen_after": "",
-          "detail": "lost on time after 40 plies",
-          "source_pgn": "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn"
-        },
-        {
-          "category": "time_loss",
-          "game": 5,
-          "side": "Black",
-          "ply": 51,
-          "move": "",
-          "san": "",
-          "fen_before": "",
-          "fen_after": "",
-          "detail": "lost on time after 51 plies",
-          "source_pgn": "out\\backups\\invalid-standard5-oldprompt-20260512-100000\\codex-vs-codex-learner-standard5-20260512-093035.pgn"
-        }
-      ]
-    },
-    {
       "category": "pawn_promotion_failure",
       "description": "the learner had a pawn one step from promotion but did not win",
       "evidence_count": 1,
@@ -466,100 +526,35 @@
   ],
   "concepts": [
     {
-      "name": "Punish forcing moves that leave the mover en prise",
-      "trigger": "A capture or check is considered, but the moved piece will be immediately capturable by a lower- or equal-cost recapture with no compensation.",
-      "value_adjustment": "Decrease move value strongly; add extra penalty if the moved piece is a major piece.",
-      "why": "Repeated forcing moves won a tempo but then lost the moved piece on the next move, causing immediate material swings.",
-      "confidence": 0.96,
-      "evidence_refs": [
-        "undefended_forcing_piece g1/p16 f6e4",
-        "undefended_forcing_piece g1/p34 e6a2",
-        "undefended_forcing_piece g1/p36 d8d4",
-        "hanging_checking_piece g1/p78 e2e6",
-        "hanging_checking_piece g1/p106 d4d6",
-        "undefended_forcing_piece g2/p21 f3e5",
-        "undefended_forcing_piece g2/p33 f7h8",
-        "undefended_forcing_piece g3/p18 f6e4"
-      ]
-    },
-    {
-      "name": "Do not sac queen/rook for check without forced gain",
-      "trigger": "A checking move by queen or rook can be captured by the king or a simple defender and there is no forced tactical return.",
-      "value_adjustment": "Apply very large penalty; only allow if immediate forced mate or clear net material gain is detected.",
-      "why": "Checking major pieces were repeatedly captured at once, producing the largest losses in the dataset.",
-      "confidence": 0.98,
-      "evidence_refs": [
-        "hanging_checking_piece g2/p15 d1d8",
-        "material_swing g2/p15 d1d8",
-        "hanging_checking_piece g1/p106 d4d6",
-        "material_swing g1/p106 d4d6",
-        "hanging_checking_piece g1/p78 e2e6",
-        "material_swing g1/p78 e2e6"
-      ]
-    },
-    {
-      "name": "Pre-move recapture safety gate",
-      "trigger": "Before finalizing any forcing move, opponent has an immediate legal recapture of the moved piece in one ply.",
-      "value_adjustment": "Subtract value proportional to expected net material after the likely recapture sequence (at least one-ply horizon).",
-      "why": "Many losses came from one-move blunders where an apparent active move failed basic recapture safety.",
-      "confidence": 0.95,
-      "evidence_refs": [
-        "material_swing g1/p16 f6e4",
-        "material_swing g1/p22 f6g5",
-        "material_swing g1/p34 e6a2",
-        "material_swing g1/p36 d8d4",
-        "material_swing g2/p21 f3e5",
-        "material_swing g2/p33 f7h8",
-        "material_swing g3/p18 f6e4",
-        "material_swing g3/p20 b4c2"
-      ]
-    },
-    {
-      "name": "Respect legal king captures in tactical resolution",
-      "trigger": "After giving check or trading near kings, a legal king capture of the attacking piece exists.",
-      "value_adjustment": "Strongly downweight lines that ignore king captures; upweight lines that avoid placing capturable attackers next to the king.",
-      "why": "Missing king-capture awareness caused direct tactical failures and lost major pieces.",
-      "confidence": 0.91,
-      "evidence_refs": [
-        "missed_king_capture g1/p28 f7g6",
-        "hanging_checking_piece g2/p15 d1d8",
-        "hanging_checking_piece g1/p78 e2e6",
-        "hanging_checking_piece g1/p106 d4d6"
-      ]
-    },
-    {
-      "name": "Convert advantage by reducing volatility",
-      "trigger": "Already ahead materially (large positive edge) but considering sharp forcing trades or speculative checks.",
-      "value_adjustment": "Increase value of simplification and safety; penalize high-volatility tactics that risk hanging pieces or perpetual complications.",
-      "why": "Large advantages were not converted, indicating poor risk control when winning.",
+      "name": "Forcing-move recapture liability check",
+      "trigger": "Before playing a forcing capture or pawn break, the moved piece/pawn would be immediately capturable by multiple opponent units with no compensating gain.",
+      "value_adjustment": "Penalize the forcing move unless it wins material or improves king safety; reward alternatives that keep the capturing unit defended or make recapture less favorable.",
+      "why": "A forcing capture created immediate multi-piece recapture targets and handed the opponent easy replies.",
       "confidence": 0.88,
       "evidence_refs": [
-        "failed_conversion g1/p107",
-        "failed_conversion g2/p40",
-        "material_swing g1/p78 e2e6",
-        "material_swing g1/p106 d4d6"
+        "undefended_forcing_piece g2/p13 exd5"
       ]
     },
     {
-      "name": "Promotion-race urgency and blocker priority",
-      "trigger": "Either side has a pawn one step from promotion or an imminent promotion race.",
-      "value_adjustment": "Heavily reward moves that stop, check, or outrun promotion; penalize non-urgent moves that allow immediate promotion.",
-      "why": "Endgame outcomes showed failure to convert and major value swings around imminent promotion events.",
-      "confidence": 0.84,
+      "name": "Single-jump exchange risk on advanced minors",
+      "trigger": "A minor piece jumps into enemy structure where a pawn recapture can remove it cleanly and open no clear tactical return.",
+      "value_adjustment": "Penalize such jumps when follow-up pressure is low; reward preserving the minor piece or choosing exchanges that do not concede immediate pawn recapture.",
+      "why": "An active knight capture was followed by a direct pawn recapture and a clear material drop.",
+      "confidence": 0.9,
       "evidence_refs": [
-        "pawn_promotion_failure g1/p107",
-        "material_swing g1/p88 f8e8"
+        "material_swing g2/p17 Nxc6"
       ]
     },
     {
-      "name": "Low-clock pragmatism",
-      "trigger": "Time remaining is low or game trend shows time-pressure collapse.",
-      "value_adjustment": "Prefer fast, safe, low-branching moves; reduce value of complex speculative tactics requiring deep calculation.",
-      "why": "A game was lost on time despite prior advantage, suggesting search/time policy should shift under clock stress.",
-      "confidence": 0.8,
+      "name": "Early time-triage under tactical contact",
+      "trigger": "Clock is already stressed while position has active captures/forcing replies available.",
+      "value_adjustment": "Increase value of fast, safe, low-branch decisions; reduce value of speculative tactical continuations that require long calculation without immediate material certainty.",
+      "why": "Time loss occurred almost immediately after tactical contact, indicating decision complexity remained too high for the clock state.",
+      "confidence": 0.91,
       "evidence_refs": [
-        "time_loss g2/p40",
-        "failed_conversion g2/p40"
+        "undefended_forcing_piece g2/p13 exd5",
+        "material_swing g2/p17 Nxc6",
+        "time_loss g2/p18"
       ]
     }
   ],

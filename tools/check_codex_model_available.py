@@ -132,7 +132,7 @@ async def check_model(model: str, effort: str, timeout: float) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fail fast when a Codex app-server model cannot answer a chess move.")
     parser.add_argument("--model", default=str(config_value("codex.model", "gpt-5.3-codex")))
-    parser.add_argument("--effort", default=str(config_value("codex.effort", "low")))
+    parser.add_argument("--effort", default=str(config_value("codex.effort", "high")))
     parser.add_argument("--timeout", type=float, default=float(config_value("codex.preflightTimeoutSeconds", 45)))
     args = parser.parse_args()
     try:

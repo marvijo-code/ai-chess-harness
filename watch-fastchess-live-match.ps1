@@ -118,7 +118,7 @@ $config = Get-ChessHarnessConfig -RepoRoot $repoRoot
 $Games = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Games" -CurrentValue $Games -Config $config -Path "fastChess.games" -Default 10)
 $Concurrency = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Concurrency" -CurrentValue $Concurrency -Config $config -Path "fastChess.concurrency" -Default 1)
 $Model = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Model" -CurrentValue $Model -Config $config -Path "codex.model" -Default "gpt-5.3-codex")
-$Effort = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Effort" -CurrentValue $Effort -Config $config -Path "codex.effort" -Default "low")
+$Effort = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Effort" -CurrentValue $Effort -Config $config -Path "codex.effort" -Default "high")
 $TimeControl = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "TimeControl" -CurrentValue $TimeControl -Config $config -Path "fastChess.timeControl" -Default "300+0")
 $MaxMoves = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "MaxMoves" -CurrentValue $MaxMoves -Config $config -Path "fastChess.maxMoves" -Default 0)
 $FastChessVersion = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "FastChessVersion" -CurrentValue $FastChessVersion -Config $config -Path "fastChess.version" -Default "latest")
@@ -195,10 +195,10 @@ if (-not $pgnPath) {
 
 $modelAlreadyChecked = $false
 if ($runFastChess -and (-not $skipModelPreflightEnabled)) {
-    Write-Host "Checking Codex model availability before starting viewer/run: $Model"
+    Write-Host "Checking Codex model availability before starting viewer/run: $Model (reasoning effort: $Effort)"
     & python $preflightScript --model $Model --effort $Effort
     if ($LASTEXITCODE -ne 0) {
-        throw "Codex model preflight failed for $Model. Choose another -Model or wait for the model limit reset before starting FastChess."
+        throw "Codex model preflight failed for $Model with reasoning effort $Effort. Choose another -Model/-Effort or wait for the model limit reset before starting FastChess."
     }
     $modelAlreadyChecked = $true
 }

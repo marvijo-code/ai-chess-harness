@@ -39,6 +39,13 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 30. FastChess parallel play uses the native `Concurrency` setting and CLI option, backed by FastChess `-concurrency`; no `threads`, `-t`, or `-c` aliases are part of the public runner contract.
 31. During concurrent FastChess runs, the live mirror stays fixed on one active game for the board while the right-column match list shows other in-progress games.
 32. `Engine Config` is collapsed by default, persists explicit open or closed user preference in `localStorage`, and preserves the structured controls plus raw JSON toggle when opened.
+33. Concurrent live mirror state must follow one monotonic move-line track and must not switch board positions just because another concurrent engine log updated later.
+34. In-progress match rows are clickable and should switch the followed live board intentionally instead of requiring a page reload or wrapper restart.
+35. A repo-local PowerShell reset script can back up all generated game artifacts into a timestamped archive and leave the leaderboard at zero completed games without deleting learner memory, learner skills, learner knowledgebase, validation artifacts, or existing backups.
+36. Viewer stats ignore archive folders such as `out\backups` so backed-up games remain available for inspection without contributing to the active leaderboard.
+37. The default Codex game-playing model is `gpt-5.3-codex` with reasoning effort `high`; lower efforts are explicit one-off overrides, not the runner default.
+38. If a GUI or FastChess clock says the side to move has no time remaining, LLM-backed engines must not start a new model/app-server/API turn; they should immediately forfeit with `bestmove 0000` so the runner can end the game.
+39. The live board should display the timed-out side, winner, and reason on the board header, stop the visible clock at zero, and write the timeout result into the live PGN when FastChess has not emitted its final line yet.
 
 ## Validation Requirements
 
@@ -49,7 +56,9 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 5. Config validation proves PowerShell and Python runners read defaults from `chess-harness.config.json`, and direct Codex model preflight succeeds without Windows shim launch errors.
 6. OpenRouter model search can find a target model such as `x-ai/grok-4.3`, and the generic UCI match runner can pass that model into `llm-chess-engine` against `Codex-chess-learner`.
 7. Continuous strategy learning validation proves the autolearn script collects neutral self-play evidence, deduplicates repeated evidence, writes `strategy-lessons.md/json` with model-discovered concepts when synthesis is available, and includes those concepts in learner prompt context without Stockfish PVs.
-8. Browser E2E verifies:
+8. Game backup reset validation proves the PowerShell script parses, moves active game artifacts into a timestamped backup folder, preserves learner state, and leaves viewer stats with zero completed games.
+9. Runner default validation proves launcher and Codex-vs-Stockfish game-playing paths resolve `gpt-5.3-codex` with effort `high` from `chess-harness.config.json` or fallback defaults.
+10. Browser E2E verifies:
    - 64 board squares render.
    - Bot Thinking has fixed height and includes move number text.
    - Engine Analysis appears in the left column and shows the analysis engine name.
@@ -64,7 +73,9 @@ Keep the local FastChess viewer useful during live play and replay without leaki
    - The flip-board control above Leaderboard reverses board coordinates, preserves exactly 64 board squares, keeps the side-to-move board state intact, and survives reload through `localStorage`.
    - Previous Matches rows show the date on the first line, then the winner on the next line, without adding row height.
    - Concurrent FastChess status rows show `In progress` without switching the fixed live board away from the selected live game.
+   - Clicking an in-progress row intentionally requests that live game as the followed board while non-clicked concurrent updates do not flicker the board.
    - `Engine Config` starts collapsed and can be reopened without losing structured/raw config behavior.
    - The viewer launched by the FastChess wrapper advertises hot reload through `/api/viewer-version`, restarts after a viewer source/config/doc change, and the browser reloads to the updated UI.
    - Live mirrored PGNs contain `[%clk ...]` comments on completed moves when FastChess clock state is available.
+   - When a live mirrored clock reaches zero, the board shows the winner and `lost on time`, the active clock stops at zero, and no additional LLM turn is requested by the timed-out engine.
    - No horizontal overflow at desktop width.

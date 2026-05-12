@@ -894,6 +894,7 @@ INDEX_HTML = """<!doctype html>
     let boardOrientation = localStorage.getItem("livePgnBoardOrientation") === "black" ? "black" : "white";
     let replayThinkingKey = "";
     let selectedMatch = null;
+    let requestedLiveGame = null;
     let previousMatches = [];
     let previousMatchesPage = 0;
     let activePgnPath = "";
@@ -1332,7 +1333,7 @@ INDEX_HTML = """<!doctype html>
       const value = clockValue(latestClock, side);
       el.textContent = formatClock(value);
       el.className = "clock";
-      if (latestClock && latestClock.running_side === side && !latestClock.completed) el.classList.add("running");
+      if (latestClock && latestClock.running_side === side && !latestClock.completed && (!Number.isFinite(value) || value > 0)) el.classList.add("running");
       if (Number.isFinite(value) && value <= 30000) el.classList.add("low");
       if (Number.isFinite(value) && value <= 10000) el.classList.add("danger");
     }
@@ -1384,10 +1385,22 @@ INDEX_HTML = """<!doctype html>
 
     function formatGameResult(headers) {
       const result = headers.Result || "*";
-      if (result === "1-0") return `${headers.White || "White"} (White) won`;
-      if (result === "0-1") return `${headers.Black || "Black"} (Black) won`;
-      if (result === "1/2-1/2") return "Draw";
+      const reason = String(headers.Termination || "").trim();
+      const suffix = reason && reason.toLowerCase() !== "normal" ? ` - ${reason}` : "";
+      if (result === "1-0") return `${headers.White || "White"} (White) won${suffix}`;
+      if (result === "0-1") return `${headers.Black || "Black"} (Black) won${suffix}`;
+      if (result === "1/2-1/2") return `Draw${suffix}`;
       return result;
+    }
+
+    function liveClockTimeoutResult(data, white, black) {
+      if (!data || data.completed || !latestClock || !latestClock.running_side) return "";
+      const side = latestClock.running_side;
+      const value = clockValue(latestClock, side);
+      if (!Number.isFinite(value) || value > 0) return "";
+      if (side === "White") return `${black || "Black"} (Black) won - ${white || "White"} (White) lost on time`;
+      if (side === "Black") return `${white || "White"} (White) won - ${black || "Black"} (Black) lost on time`;
+      return "";
     }
 
     function renderGame(data) {
@@ -1408,10 +1421,11 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("black-player").innerHTML = `<span class="dot-b"></span>Black: ${escapeHtml(black)}`;
       renderPlayerBars(white, black);
       renderClock(data);
+      const timeoutResult = liveClockTimeoutResult(data, white, black);
       document.getElementById("turn").textContent = followLive
-        ? (data.completed ? "Game over" : `${data.turn} to move`)
+        ? ((data.completed || timeoutResult) ? "Game over" : `${data.turn} to move`)
         : `${ply} / ${data.moves.length} plies`;
-      document.getElementById("result").textContent = formatGameResult(headers);
+      document.getElementById("result").textContent = timeoutResult || formatGameResult(headers);
       const gameLabel = data.game_count > 1 ? `game ${data.game_index} / ${data.game_count}, ` : "";
       document.getElementById("meta").textContent = followLive
         ? `${gameLabel}${data.moves.length} plies`
@@ -1544,9 +1558,10 @@ INDEX_HTML = """<!doctype html>
       }
       container.innerHTML = `<div class="match-list">${pageRows.map(match => {
         const index = previousMatches.indexOf(match);
-        const isActive = matchKey(match) === activeKey || (match.kind === "live" && !selectedMatch && followLive && match.is_board_game);
+        const isRequestedLive = match.kind === "live" && requestedLiveGame !== null && Number(match.game_index || 1) === Number(requestedLiveGame);
+        const isActive = matchKey(match) === activeKey || isRequestedLive || (match.kind === "live" && requestedLiveGame === null && !selectedMatch && followLive && match.is_board_game);
         const isLive = match.kind === "live";
-        const clickable = !isLive || match.is_board_game;
+        const clickable = true;
         const rowClasses = ["match-row", isActive ? "active" : "", isLive ? "in-progress" : "", clickable ? "" : "disabled"].filter(Boolean).join(" ");
         const statusClass = isLive ? "in-progress" : "";
         const statusLabel = match.status_label || match.result || "";
@@ -1576,17 +1591,17 @@ INDEX_HTML = """<!doctype html>
       const match = previousMatches[Number(index)];
       if (!match) return;
       if (match.kind === "live") {
-        if (!match.is_board_game) return;
         selectedMatch = null;
         followLive = true;
         viewedPly = null;
         replayThinkingKey = "";
+        requestedLiveGame = match.game_index || 1;
         localStorage.setItem("livePgnFollow", "on");
         document.getElementById("follow-toggle").checked = true;
         setMatchHash(match.tournament_slug || "");
         setActiveMatchUrl(matchUrlFor(match.tournament_slug || ""));
         renderPreviousMatches();
-        refresh(true);
+        selectLiveMatch(match);
         return;
       }
       selectedMatch = match;
@@ -1599,6 +1614,23 @@ INDEX_HTML = """<!doctype html>
       setActiveMatchUrl(matchUrlFor(match.tournament_slug || "", match.game_index || 1));
       renderPreviousMatches();
       refresh(true);
+    }
+
+    async function selectLiveMatch(match) {
+      try {
+        const resp = await fetch("/api/live-selection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: match.path || activePgnPath, game: match.game_index || 1 }),
+        });
+        if (!resp.ok) throw new Error("selection failed");
+        setStatus(true, `Following game ${match.game_index || 1}`);
+      } catch {
+        setStatus(false, "Live switch failed");
+      }
+      renderPreviousMatches();
+      await loadStats();
+      window.setTimeout(() => refresh(true), 350);
     }
 
     function selectPreviousMatchFromHash() {
@@ -2386,6 +2418,23 @@ def live_status_path_for(pgn_path: Path) -> Path:
     return pgn_path.with_suffix(".status.json")
 
 
+def live_selection_path_for(pgn_path: Path) -> Path:
+    return pgn_path.with_suffix(".selection.json")
+
+
+def write_live_selection(pgn_path: Path, game_index: int) -> dict:
+    if game_index < 1:
+        raise ValueError("Live game index must be at least 1.")
+    path = live_selection_path_for(pgn_path)
+    payload = {
+        "locked_game": game_index,
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_at_epoch": time.time(),
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return {"ok": True, "path": str(path), "locked_game": game_index}
+
+
 def collect_live_matches(out_dir: Path, live_pgn_path: Path | None) -> list[dict]:
     if live_pgn_path is None:
         return []
@@ -2427,7 +2476,7 @@ def collect_live_matches(out_dir: Path, live_pgn_path: Path | None) -> list[dict
                 "round": str(game_no),
                 "tournament_slug": slug,
                 "file": str(output_pgn.relative_to(out_dir)) if output_pgn.is_relative_to(out_dir) else str(output_pgn),
-                "path": str(output_pgn.resolve()) if is_board_game else "",
+                "path": str(output_pgn.resolve()),
                 "game_index": game_no,
                 "total": int(game.get("total") or 0),
                 "is_board_game": is_board_game,
@@ -2440,7 +2489,12 @@ def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None, l
     stats: dict[str, dict] = {}
     matches: list[dict] = collect_live_matches(out_dir, live_pgn_path)
     completed_games = 0
-    pgn_files = [path for path in sorted(out_dir.rglob("*.pgn")) if "live" not in path.relative_to(out_dir).parts]
+    excluded_archive_dirs = {"live", "backups"}
+    pgn_files = [
+        path
+        for path in sorted(out_dir.rglob("*.pgn"))
+        if not (excluded_archive_dirs & {part.lower() for part in path.relative_to(out_dir).parts})
+    ]
 
     for pgn_path in pgn_files:
         try:
@@ -2907,6 +2961,18 @@ class LivePgnHandler(BaseHTTPRequestHandler):
                 result = write_config(self.config_path, str(payload.get("text", "")))
                 if self.analyzer is not None:
                     self.analyzer.reset()
+                self.send_json(result)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        if parsed.path == "/api/live-selection":
+            try:
+                payload = self.read_json_body()
+                raw_path = str(payload.get("path") or self.pgn_path)
+                pgn_path = Path(raw_path)
+                if not pgn_path.is_absolute():
+                    pgn_path = self.stats_dir / pgn_path
+                result = write_live_selection(pgn_path, int(payload.get("game") or 1))
                 self.send_json(result)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)

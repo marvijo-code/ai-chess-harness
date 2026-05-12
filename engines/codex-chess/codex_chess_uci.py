@@ -19,7 +19,7 @@ ENGINE_NAME = os.environ.get("CODEX_CHESS_ENGINE_NAME", "Codex-chess")
 ENGINE_AUTHOR = os.environ.get("CODEX_CHESS_AUTHOR", "marvijo/Codex app-server")
 LOG_DIR = ROOT / "out" / "codex-chess-logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
-LOG_PATH = LOG_DIR / f"codex-chess-{time.strftime('%Y%m%d-%H%M%S')}.log"
+LOG_PATH = LOG_DIR / f"codex-chess-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
 CONTEXT_DIR = Path(os.environ.get("CODEX_CHESS_CONTEXT_DIR", ENGINE_DIR)).resolve()
 MEMORY_PATH = CONTEXT_DIR / "MEMORY.md"
 SKILLS_DIR = CONTEXT_DIR / "skills"
@@ -348,14 +348,21 @@ class CodexAppServer:
         }
 
     async def choose_move(self, board: chess.Board, go_args: dict, history: list[str]) -> str:
-        await self.start()
         legal_moves = [move.uci() for move in board.legal_moves]
         if not legal_moves:
             return "0000"
-        repetition = self.client_repetition_risk(board, legal_moves)
 
         remaining = go_args.get("wtime") if board.turn == chess.WHITE else go_args.get("btime")
         increment = go_args.get("winc") if board.turn == chess.WHITE else go_args.get("binc")
+        if remaining is not None and remaining <= 0:
+            side = "White" if board.turn == chess.WHITE else "Black"
+            log(f"{side} clock already expired ({remaining} ms); forfeiting without starting a Codex turn")
+            print(f"info string {side} clock expired; forfeiting game without starting model turn", flush=True)
+            print_neutral_score_info()
+            return "0000"
+
+        await self.start()
+        repetition = self.client_repetition_risk(board, legal_moves)
 
         critical_clock = remaining is not None and remaining < 25000
         prompt = {
@@ -509,7 +516,7 @@ class CodexChessUci:
         self.history: list[str] = []
         self.codex = CodexAppServer(
             os.environ.get("CODEX_CHESS_MODEL") or str(config_value("codex.model", "gpt-5.3-codex")),
-            os.environ.get("CODEX_CHESS_EFFORT") or str(config_value("codex.effort", "low")),
+            os.environ.get("CODEX_CHESS_EFFORT") or str(config_value("codex.effort", "high")),
         )
 
     def set_position(self, tokens: list[str]) -> None:
