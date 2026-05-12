@@ -263,7 +263,7 @@ def render_markdown(summary: dict) -> str:
         "- Copy `uci` exactly from `legal_moves`; never output `0000` while legal moves exist.",
         "- The main failure mode is repeated positions: avoid moves listed as repetition risks unless a draw is the only safe result.",
         "- A 15-ply threefold loop is not learning; choose a legal capture, check, pawn break, or development move that changes the position when available.",
-        "- Under 30 seconds, stop explaining and choose a simple legal move immediately.",
+        "- Manage the clock while still choosing a move intentionally; there is no fallback or client-picked move.",
         "- In winning endings, convert material with forcing moves and pawn promotion plans; do not shuffle the king until the clock collapses.",
     ]
 
@@ -284,7 +284,11 @@ def render_markdown(summary: dict) -> str:
             lines.append(f"- Game {game['game']} as {learner_side(game)}: {game['reason']}")
 
     if summary["illegal_losses"]:
-        lines += ["", "## Learner Illegal-Move Losses"]
+        lines += [
+            "",
+            "## Learner Illegal-Move Losses",
+            "- A `0000` illegal move after real plies usually means the model timed out or returned invalid JSON three consecutive times. Treat it as a clock/format failure, not a chess tactic.",
+        ]
         for game in summary["illegal_losses"]:
             lines.append(f"- Game {game['game']} as {learner_side(game)}: {game['reason']} after {game['plies']} plies; {game['opening']}")
 
@@ -296,8 +300,8 @@ def render_markdown(summary: dict) -> str:
         lines += [
             "",
             "## Learner Time Losses",
-            "- Time losses are move-selection failures. Below 25 seconds, return strict JSON immediately with any clearly legal non-repetition move; do not search for perfection.",
-            "- Prefer a forcing capture, check, passed-pawn push, king move toward passed pawns, or simple recapture that is copied exactly from `legal_moves`.",
+            "- Time losses are move-selection failures. Improve time management, but still choose a move intentionally from the position.",
+            "- Prefer a forcing capture, check, passed-pawn push, king move toward passed pawns, or simple recapture when that is the best evaluated plan.",
         ]
         for game in summary["time_losses"]:
             lines.append(f"- Game {game['game']} as {learner_side(game)}: {game['reason']} after {game['plies']} plies; {game['opening']}")
@@ -504,7 +508,7 @@ def update_memory(memory_path: Path, summary: dict) -> None:
             f"- Result reasons: {', '.join(f'{key}={value}' for key, value in sorted(summary['reason_counts'].items()))}.",
             "- Apply `knowledgebase/live-match-lessons.md` before choosing moves.",
             "- Avoid threefold repetition loops unless drawing is the only practical outcome.",
-            "- If own clock is below 25 seconds, output strict JSON immediately with a legal practical move.",
+            "- Manage the clock while still choosing a move intentionally; there is no fallback or client-picked move.",
             "- Never return a move outside `legal_moves`; never return `0000` while legal moves exist.",
             MEMORY_END,
         ]

@@ -303,14 +303,14 @@ class CodexAppServer:
             "skills_path": str(SKILLS_DIR),
             "skills": collect_text_context(SKILLS_DIR, max_files=4, max_chars_per_file=1800),
             "policy": (
-                "Apply the learner memory and knowledgebase directly. Avoid known repetition-draw loops unless a draw is the best practical outcome. "
+                "Apply the learner memory and knowledgebase directly. "
                 "Never invent UCI: copy uci exactly from legal_moves, and never return 0000 while legal moves exist."
             ),
         }
 
-    def repetition_risk(self, board: chess.Board, legal_moves: list[str]) -> dict:
-        repeated = []
-        threefold = []
+    def client_repetition_risk(self, board: chess.Board, legal_moves: list[str]) -> dict:
+        repeated: list[str] = []
+        threefold: list[str] = []
         for move_text in legal_moves:
             temp = board.copy()
             move = chess.Move.from_uci(move_text)
@@ -320,9 +320,8 @@ class CodexAppServer:
             elif temp.is_repetition(2):
                 repeated.append(move_text)
         return {
-            "moves_that_repeat_position": repeated[:24],
-            "moves_that_claim_threefold": threefold[:24],
-            "policy": "Prefer legal alternatives to repetition moves unless repetition is clearly needed to avoid loss.",
+            "repeat_moves": len(repeated),
+            "threefold_moves": len(threefold),
         }
 
     async def choose_move(self, board: chess.Board, go_args: dict, history: list[str]) -> str:
@@ -330,6 +329,7 @@ class CodexAppServer:
         legal_moves = [move.uci() for move in board.legal_moves]
         if not legal_moves:
             return "0000"
+        repetition = self.client_repetition_risk(board, legal_moves)
 
         remaining = go_args.get("wtime") if board.turn == chess.WHITE else go_args.get("btime")
         increment = go_args.get("winc") if board.turn == chess.WHITE else go_args.get("binc")
@@ -351,7 +351,8 @@ class CodexAppServer:
             },
             "time_management": (
                 "Choose a practical legal move quickly under the supplied remaining clocks. "
-                "If low on time, return strict JSON quickly. The harness will not choose a move for you."
+                "Think through the position and return strict JSON before the clock expires. "
+                "The harness will not choose a move for you."
             ),
             "comment_policy": "Optionally include one short comment explaining the move; it will be shown as a UCI info string in the chess GUI logs.",
             "invalid_response_policy": (
@@ -363,15 +364,12 @@ class CodexAppServer:
         context = self.learner_context()
         if context:
             prompt["learner_context"] = context
-        repetition = self.repetition_risk(board, legal_moves)
-        if repetition["moves_that_repeat_position"] or repetition["moves_that_claim_threefold"]:
-            prompt["repetition_risk"] = repetition
         log(
             "decision prompt: "
             f"side={prompt['side_to_move']} fen={board.fen()} "
             f"legal_moves={len(legal_moves)} own_remaining={remaining} own_increment={increment or 0} "
-            f"learner_context={'yes' if context else 'no'} repeat_moves={len(repetition['moves_that_repeat_position'])} "
-            f"threefold_moves={len(repetition['moves_that_claim_threefold'])}"
+            f"learner_context={'yes' if context else 'no'} repeat_moves={repetition['repeat_moves']} "
+            f"threefold_moves={repetition['threefold_moves']}"
         )
 
         timeout = 90

@@ -15,13 +15,17 @@ Learning instruction:
 - Use this `MEMORY.md` and create or update Agent Skills under `skills/` whenever a reusable chess improvement is discovered.
 - Keep changes concise and focused on better move selection, opening choice, time management, illegal-move avoidance, and post-tournament learning.
 
+Durable lessons:
+- Standard Codex games can lose on clock before the chess position is lost. Manage time throughout the move, but still choose intentionally from the position; there is no fallback or client-picked move.
+- A `0000` result after real plies means the engine forfeited after repeated invalid responses or timeouts. Treat that as a format/clock failure to avoid, not as a chess move.
+
 <!-- learner-autolearn:start -->
 ## Autolearn Summary
-- Last updated: 2026-05-12 09:51:32
-- Current match score: 0.5 / 3 (16.67%).
-- Result reasons: illegal move=1, mate=1, time=1.
+- Last updated: 2026-05-12 10:21:00
+- Current match score: 2.5 / 3 (83.33%).
+- Result reasons: mate=2, threefold repetition=1.
 - Apply `knowledgebase/live-match-lessons.md` before choosing moves.
 - Avoid threefold repetition loops unless drawing is the only practical outcome.
-- If own clock is below 25 seconds, output strict JSON immediately with a legal practical move.
+- Manage the clock while still choosing a move intentionally; there is no fallback or client-picked move.
 - Never return a move outside `legal_moves`; never return `0000` while legal moves exist.
 <!-- learner-autolearn:end -->

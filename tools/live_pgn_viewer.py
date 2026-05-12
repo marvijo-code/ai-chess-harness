@@ -230,10 +230,10 @@ INDEX_HTML = """<!doctype html>
     .left-col, .center-col, .side-col { display: grid; gap: 16px; min-width: 0; }
     .thinking-card {
       position: sticky; top: 70px;
-      max-height: calc(100vh - 90px);
+      height: 520px;
       display: grid; grid-template-rows: auto minmax(0, 1fr);
     }
-    .thinking-card .card-body { overflow: auto; min-height: 320px; }
+    .thinking-card .card-body { overflow: auto; min-height: 0; }
     .view-panel.hidden { display: none !important; }
 
     .learner-main {
@@ -358,8 +358,8 @@ INDEX_HTML = """<!doctype html>
       justify-content: space-between; gap: 8px;
       margin-bottom: 6px;
     }
-    .game-title { font-size: 14px; font-weight: 700; }
-    .game-result { font-size: 14px; font-weight: 700; color: var(--muted); }
+    .game-title { font-size: 14px; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .game-result { font-size: 14px; font-weight: 700; color: var(--muted); text-align: right; overflow-wrap: anywhere; }
     .player-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 5px; }
     .chip {
       display: inline-flex; align-items: center; gap: 5px;
@@ -465,6 +465,28 @@ INDEX_HTML = """<!doctype html>
     .stats-tbl td.rk { width: 34px; color: var(--muted); font-variant-numeric: tabular-nums; }
     .stats-tbl tbody tr:last-child td { border-bottom: none; }
     .stats-tbl tbody tr:hover td { background: var(--surface-alt); }
+    .pager {
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .pager button {
+      min-height: 24px; padding: 2px 8px;
+      border: 1px solid var(--line); border-radius: var(--r-sm);
+      background: var(--surface); color: var(--text); cursor: pointer;
+    }
+    .pager button:disabled { opacity: .45; cursor: not-allowed; }
+    .match-list { display: grid; gap: 8px; }
+    .match-row {
+      border: 1px solid var(--line); border-radius: var(--r-md);
+      padding: 9px 10px; background: var(--surface);
+      display: grid; gap: 4px;
+    }
+    .match-main {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      font-size: 13px; font-weight: 700;
+    }
+    .match-sub {
+      font-size: 11px; color: var(--muted); overflow-wrap: anywhere;
+    }
 
     /* === ANALYSIS === */
     .analysis-list { display: grid; gap: 0; }
@@ -477,6 +499,7 @@ INDEX_HTML = """<!doctype html>
     .score { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
     .pv { font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
     .pv-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .analysis-card { position: sticky; top: 606px; }
 
     /* === ENGINE CONFIG === */
     .cfg-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
@@ -563,6 +586,15 @@ INDEX_HTML = """<!doctype html>
           <div id="board-thinking-meta" class="card-sub" style="padding:0 16px 8px"></div>
           <div id="board-thinking-logs" class="card-body"></div>
         </section>
+
+        <section class="card analysis-card">
+          <div class="card-hd">
+            <span id="analysis-title" class="card-title">Engine Analysis</span>
+            <label class="pill-toggle" style="font-size:12px;text-transform:none;letter-spacing:0"><input id="analysis-panel-toggle" type="checkbox" checked> On</label>
+          </div>
+          <div id="analysis-meta" class="card-sub" style="padding:5px 16px 0"></div>
+          <div id="analysis" class="card-body" style="padding-top:6px"></div>
+        </section>
       </aside>
 
       <div class="center-col">
@@ -605,11 +637,14 @@ INDEX_HTML = """<!doctype html>
 
         <section class="card">
           <div class="card-hd">
-            <span class="card-title">Stockfish Analysis</span>
-            <label class="pill-toggle" style="font-size:12px;text-transform:none;letter-spacing:0"><input id="analysis-panel-toggle" type="checkbox" checked> On</label>
+            <span class="card-title">Previous Matches</span>
+            <div class="pager">
+              <button id="matches-prev" type="button" aria-label="Previous matches page">&#8592;</button>
+              <span id="matches-meta" class="card-sub"></span>
+              <button id="matches-next" type="button" aria-label="Next matches page">&#8594;</button>
+            </div>
           </div>
-          <div id="analysis-meta" class="card-sub" style="padding:5px 16px 0"></div>
-          <div id="analysis" class="card-body" style="padding-top:6px"></div>
+          <div id="matches" class="card-body"></div>
         </section>
 
         <section class="card">
@@ -732,6 +767,9 @@ INDEX_HTML = """<!doctype html>
     let activeView = "board";
     let latestLearnerData = null;
     let logSideFilter = localStorage.getItem("livePgnLogSide") || "all";
+    let previousMatches = [];
+    let previousMatchesPage = 0;
+    const previousMatchesPageSize = 5;
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -885,6 +923,12 @@ INDEX_HTML = """<!doctype html>
       return Math.max(0, Math.min(viewedPly, maxPly));
     }
 
+    function moveNumberLabel(move) {
+      if (!move) return "start position";
+      const suffix = move.side === "Black" ? "..." : ".";
+      return `Move ${move.move_number}${suffix} ${move.side} ${move.san || move.uci}`;
+    }
+
     function fenPrefix(fen) {
       return String(fen || "").split(" ").slice(0, 4).join(" ");
     }
@@ -904,7 +948,9 @@ INDEX_HTML = """<!doctype html>
     function logsForBoardPly(logs) {
       if (!logs || !logs.length) return { logs: [], label: "No bot decisions logged yet." };
       if (!latestGame || !latestGame.has_game || followLive) {
-        return { logs: logs.slice(0, 36), label: `${filterLogsBySide(logs.slice(0, 36)).length} / ${Math.min(logs.length, 36)} recent entries` };
+        const liveMove = latestGame && latestGame.moves ? latestGame.moves[Math.max(0, latestGame.moves.length - 1)] : null;
+        const liveMoveText = liveMove ? ` · current ${moveNumberLabel(liveMove)}` : "";
+        return { logs: logs.slice(0, 36), label: `${filterLogsBySide(logs.slice(0, 36)).length} / ${Math.min(logs.length, 36)} recent entries${liveMoveText}` };
       }
       const ply = selectedPly(latestGame);
       const moves = latestGame.moves || [];
@@ -923,10 +969,10 @@ INDEX_HTML = """<!doctype html>
         if (entryFen && targetFen && entryFen === targetFen && (!targetSide || !entrySide || entrySide === targetSide)) return true;
         return false;
       }).sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
-      const moveLabel = move ? `${move.side} ${move.san || move.uci}` : "start position";
+      const moveLabel = moveNumberLabel(move);
       return {
         logs: matched,
-        label: `${filterLogsBySide(matched).length} entries for ply ${ply}: ${moveLabel}`,
+        label: `${filterLogsBySide(matched).length} entries for ${moveLabel} (ply ${ply})`,
       };
     }
 
@@ -982,6 +1028,14 @@ INDEX_HTML = """<!doctype html>
       updateClockDisplays();
     }
 
+    function formatGameResult(headers) {
+      const result = headers.Result || "*";
+      if (result === "1-0") return `${headers.White || "White"} (White) won`;
+      if (result === "0-1") return `${headers.Black || "Black"} (Black) won`;
+      if (result === "1/2-1/2") return "Draw";
+      return result;
+    }
+
     function renderGame(data) {
       latestGame = data;
       const headers = data.headers || {};
@@ -1003,7 +1057,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("turn").textContent = followLive
         ? (data.completed ? "Game over" : `${data.turn} to move`)
         : `${ply} / ${data.moves.length} plies`;
-      document.getElementById("result").textContent = headers.Result || "*";
+      document.getElementById("result").textContent = formatGameResult(headers);
       const gameLabel = data.game_count > 1 ? `game ${data.game_index} / ${data.game_count}, ` : "";
       document.getElementById("meta").textContent = followLive
         ? `${gameLabel}${data.moves.length} plies`
@@ -1039,6 +1093,8 @@ INDEX_HTML = """<!doctype html>
     function renderAnalysis(analysis) {
       const container = document.getElementById("analysis");
       const meta = document.getElementById("analysis-meta");
+      const title = document.getElementById("analysis-title");
+      title.textContent = analysis && analysis.engine ? `Engine Analysis: ${analysis.engine}` : "Engine Analysis";
       if (!analysis || analysis.enabled === false) {
         if (!analysisAvailable) {
           updateAnalysisControls();
@@ -1073,7 +1129,7 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       const lines = analysis.lines || [];
-      meta.textContent = analysis.engine ? `${analysis.engine} · ${analysis.movetime_ms} ms` : "";
+      meta.textContent = analysis.engine ? `${analysis.engine} · ${analysis.movetime_ms} ms` : "";
       if (!lines.length) {
         container.innerHTML = '<div class="empty">No analysis available.</div>';
         return;
@@ -1088,6 +1144,8 @@ INDEX_HTML = """<!doctype html>
     function renderStats(data) {
       const container = document.getElementById("stats");
       document.getElementById("stats-meta").textContent = `${data.games} games`;
+      previousMatches = data.matches || [];
+      renderPreviousMatches();
       if (data.error) {
         container.innerHTML = `<div class="empty err">${escapeHtml(data.error)}</div>`;
         return;
@@ -1107,6 +1165,33 @@ INDEX_HTML = """<!doctype html>
           <td class="n">${escapeHtml(eng.games)}</td>
         </tr>`);
       container.innerHTML = `<table class="stats-tbl"><thead><tr><th class="rk">#</th><th>Engine</th><th class="n">Pts</th><th class="n">W</th><th class="n">D</th><th class="n">L</th><th class="n">G</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+    }
+
+    function renderPreviousMatches() {
+      const container = document.getElementById("matches");
+      const meta = document.getElementById("matches-meta");
+      const total = previousMatches.length;
+      const pages = Math.max(1, Math.ceil(total / previousMatchesPageSize));
+      previousMatchesPage = Math.max(0, Math.min(previousMatchesPage, pages - 1));
+      const start = previousMatchesPage * previousMatchesPageSize;
+      const pageRows = previousMatches.slice(start, start + previousMatchesPageSize);
+      meta.textContent = total ? `${previousMatchesPage + 1} / ${pages}` : "0 / 0";
+      document.getElementById("matches-prev").disabled = previousMatchesPage <= 0;
+      document.getElementById("matches-next").disabled = previousMatchesPage >= pages - 1;
+      if (!total) {
+        container.innerHTML = '<div class="empty">No previous matches found.</div>';
+        return;
+      }
+      container.innerHTML = `<div class="match-list">${pageRows.map(match => `
+        <div class="match-row">
+          <div class="match-main"><span>${escapeHtml(match.winner_label)}</span><span>${escapeHtml(match.result)}</span></div>
+          <div class="match-sub">${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · ${escapeHtml(match.date)} · ${escapeHtml(match.file)}</div>
+        </div>`).join("")}</div>`;
+    }
+
+    function setPreviousMatchesPage(delta) {
+      previousMatchesPage += delta;
+      renderPreviousMatches();
     }
 
     function fileListHtml(files) {
@@ -1377,6 +1462,8 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("next-move").addEventListener("click", () => navigateMove(1));
     document.getElementById("analysis-toggle").addEventListener("change", e => setAnalysisEnabled(e.target.checked));
     document.getElementById("analysis-panel-toggle").addEventListener("change", e => setAnalysisEnabled(e.target.checked));
+    document.getElementById("matches-prev").addEventListener("click", () => setPreviousMatchesPage(-1));
+    document.getElementById("matches-next").addEventListener("click", () => setPreviousMatchesPage(1));
     document.querySelectorAll("[data-log-side]").forEach(button => {
       button.addEventListener("click", () => setLogSideFilter(button.dataset.logSide));
     });
@@ -1749,8 +1836,19 @@ def result_points(result: str, side: str) -> tuple[float, str] | None:
     return None
 
 
+def result_label(result: str, white: str, black: str) -> str:
+    if result == "1-0":
+        return f"{white} (White) won"
+    if result == "0-1":
+        return f"{black} (Black) won"
+    if result == "1/2-1/2":
+        return "Draw"
+    return result
+
+
 def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None) -> dict:
     stats: dict[str, dict] = {}
+    matches: list[dict] = []
     completed_games = 0
     pgn_files = [path for path in sorted(out_dir.rglob("*.pgn")) if "live" not in path.relative_to(out_dir).parts]
 
@@ -1772,7 +1870,21 @@ def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None) -
                         continue
                     white = game.headers.get("White", "White")
                     black = game.headers.get("Black", "Black")
+                    round_name = game.headers.get("Round", "")
                     completed_games += 1
+                    matches.append(
+                        {
+                            "date": game_date.isoformat(),
+                            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime)),
+                            "updated_at_epoch": mtime,
+                            "white": white,
+                            "black": black,
+                            "result": result,
+                            "winner_label": result_label(result, white, black),
+                            "round": round_name,
+                            "file": str(pgn_path.relative_to(out_dir)),
+                        }
+                    )
                     for side, engine in (("white", white), ("black", black)):
                         entry = stats.setdefault(
                             engine,
@@ -1794,11 +1906,15 @@ def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None) -
             continue
 
     engines = sorted(stats.values(), key=lambda item: (-item["points"], -item["wins"], item["engine"].lower()))
+    matches.sort(key=lambda item: (item["updated_at_epoch"], item["date"], item["file"], item["round"]), reverse=True)
+    for match in matches:
+        match.pop("updated_at_epoch", None)
     for entry in engines:
         entry["points"] = int(entry["points"]) if entry["points"].is_integer() else entry["points"]
     return {
         "games": completed_games,
         "engines": engines,
+        "matches": matches,
         "filters": {
             "from": date_from.isoformat() if date_from else None,
             "to": date_to.isoformat() if date_to else None,
