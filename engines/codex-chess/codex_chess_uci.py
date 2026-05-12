@@ -24,6 +24,7 @@ CONTEXT_DIR = Path(os.environ.get("CODEX_CHESS_CONTEXT_DIR", ENGINE_DIR)).resolv
 MEMORY_PATH = CONTEXT_DIR / "MEMORY.md"
 SKILLS_DIR = CONTEXT_DIR / "skills"
 KNOWLEDGEBASE_DIR = CONTEXT_DIR / "knowledgebase"
+FEN_KNOWLEDGE_PATH = KNOWLEDGEBASE_DIR / "fen-curriculum-lessons.md"
 DEFAULT_USE_MEMORY = os.environ.get("CODEX_CHESS_USE_MEMORY", "false").lower() in {"1", "true", "yes", "on"}
 DEFAULT_USE_SKILLS = os.environ.get("CODEX_CHESS_USE_SKILLS", "false").lower() in {"1", "true", "yes", "on"}
 DEFAULT_LEARNING_MODE = os.environ.get("CODEX_CHESS_LEARNING_MODE", "false").lower() in {"1", "true", "yes", "on"}
@@ -296,15 +297,18 @@ class CodexAppServer:
     def learner_context(self) -> dict:
         if not (self.use_memory or self.use_skills or self.learning_mode):
             return {}
+        fen_knowledge = read_limited_text(FEN_KNOWLEDGE_PATH, 3500)
         return {
             "memory_path": str(MEMORY_PATH),
             "memory": read_limited_text(MEMORY_PATH, 6000),
             "knowledgebase_path": str(KNOWLEDGEBASE_DIR),
+            "fen_knowledge_path": str(FEN_KNOWLEDGE_PATH),
+            "fen_knowledge": fen_knowledge,
             "knowledgebase": collect_text_context(KNOWLEDGEBASE_DIR, max_files=8, max_chars_per_file=2500),
             "skills_path": str(SKILLS_DIR),
             "skills": collect_text_context(SKILLS_DIR, max_files=4, max_chars_per_file=1800),
             "policy": (
-                "Apply the learner memory and knowledgebase directly. "
+                "Apply the learner memory, fen_knowledge, and knowledgebase directly. "
                 "Never invent UCI: copy uci exactly from legal_moves, and never return 0000 while legal moves exist."
             ),
         }
@@ -369,7 +373,8 @@ class CodexAppServer:
         elif critical_clock and self.learning_mode:
             prompt["learner_context_summary"] = (
                 "Critical clock mode. Apply only the most important learner rule: do not flag or forfeit; "
-                "copy one legal uci from legal_moves immediately, avoid repetition moves if easy, and use an empty comment."
+                "read the FEN side-to-move and legal_moves directly, copy one legal uci from legal_moves immediately, "
+                "avoid repetition moves if easy, and use an empty comment."
             )
         log(
             "decision prompt: "
