@@ -341,7 +341,7 @@ class CodexAppServer:
 
         critical_clock = remaining is not None and remaining < 25000
         prompt = {
-            "engine": "Codex-chess",
+            "engine": ENGINE_NAME,
             "game_time_control": "Use only the GUI clock fields below; infer the practical time control from them.",
             "side_to_move": "white" if board.turn == chess.WHITE else "black",
             "fen": board.fen(),
