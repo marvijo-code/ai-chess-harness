@@ -14,3 +14,13 @@ Agent Skills:
 Learning instruction:
 - Use this `MEMORY.md` and create or update Agent Skills under `skills/` whenever a reusable chess improvement is discovered.
 - Keep changes concise and focused on better move selection, opening choice, time management, illegal-move avoidance, and post-tournament learning.
+
+<!-- learner-autolearn:start -->
+## Autolearn Summary
+- Last updated: 2026-05-12 08:16:29
+- Current match score: 26.0 / 52 (50.0%).
+- Result reasons: illegal move=20, mate=1, threefold repetition=31.
+- Apply `knowledgebase/live-match-lessons.md` before choosing moves.
+- Avoid threefold repetition loops unless drawing is the only practical outcome.
+- Never return a move outside `legal_moves`; never return `0000` while legal moves exist.
+<!-- learner-autolearn:end -->

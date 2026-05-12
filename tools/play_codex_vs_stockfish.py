@@ -19,6 +19,7 @@ from websockets.exceptions import ConnectionClosed
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE_CONFIG = Path.home() / "AppData/Roaming/org.encroissant.app/engines/engines.json"
 OUT_DIR = ROOT / "out"
+DEFAULT_LIVE_PGN_PATH = OUT_DIR / "live" / "codex-vs-stockfish-live.pgn"
 
 
 def free_port() -> int:
@@ -282,6 +283,13 @@ def game_to_pgn(game: chess.pgn.Game) -> str:
     return str(game)
 
 
+def write_live_pgn(path: Path | None, game: chess.pgn.Game) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(game_to_pgn(game) + "\n", encoding="utf-8")
+
+
 def render_board_png(board: chess.Board, png_path: Path, title: str, footer: str) -> None:
     size = 88
     margin_top = 90
@@ -364,8 +372,10 @@ async def play(args: argparse.Namespace) -> dict:
     game.headers["Date"] = time.strftime("%Y.%m.%d")
     game.headers["White"] = "Codex App-server"
     game.headers["Black"] = "Stockfish 18"
+    game.headers["Result"] = "*"
     node = game
     moves_log = []
+    write_live_pgn(args.live_pgn_path, game)
 
     try:
         for ply in range(args.max_plies):
@@ -383,10 +393,12 @@ async def play(args: argparse.Namespace) -> dict:
             board.push(move)
             node = node.add_variation(move)
             moves_log.append({"ply": ply + 1, "uci": move.uci(), "san": san, "source": source, "fen_after": board.fen()})
+            write_live_pgn(args.live_pgn_path, game)
             print(f"{ply + 1:02d}. {source.split(':', 1)[0]} {san} ({move.uci()})")
 
         result = board.result(claim_draw=True) if board.is_game_over(claim_draw=True) else "*"
         game.headers["Result"] = result
+        write_live_pgn(args.live_pgn_path, game)
         stamp = time.strftime("%Y%m%d-%H%M%S")
         pgn_path = OUT_DIR / f"codex-vs-stockfish-{stamp}.pgn"
         json_path = OUT_DIR / f"codex-vs-stockfish-{stamp}.json"
@@ -400,6 +412,7 @@ async def play(args: argparse.Namespace) -> dict:
             "fen": board.fen(),
             "stockfish": str(stockfish_path),
             "pgn": str(pgn_path),
+            "live_pgn": str(args.live_pgn_path) if args.live_pgn_path else None,
             "png": str(png_path),
             "moves": moves_log,
         }
@@ -422,6 +435,8 @@ def main() -> None:
     parser.add_argument("--model", default="gpt-5.5")
     parser.add_argument("--max-plies", type=int, default=80)
     parser.add_argument("--stockfish-movetime-ms", type=int, default=150)
+    parser.add_argument("--live-pgn-path", type=Path, default=DEFAULT_LIVE_PGN_PATH)
+    parser.add_argument("--no-live-pgn", dest="live_pgn_path", action="store_const", const=None)
     args = parser.parse_args()
     summary = asyncio.run(play(args))
     print(json.dumps(summary, indent=2))

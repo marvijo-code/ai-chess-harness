@@ -6,6 +6,8 @@ param(
     [string]$TimeControl = "300+0",
     [int]$MaxMoves = 0,
     [string]$FastChessVersion = "latest",
+    [string]$RunName = "codex-vs-codex-learner",
+    [string]$Stamp = "",
     [switch]$ForceInstall
 )
 
@@ -101,10 +103,21 @@ if ($Games -lt 2) {
 }
 
 $rounds = [Math]::Ceiling($Games / 2)
-$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$pgnPath = Join-Path $resultsRoot "codex-vs-codex-learner-$stamp.pgn"
-$configPath = Join-Path $resultsRoot "codex-vs-codex-learner-$stamp-config.json"
-$logPath = Join-Path $resultsRoot "codex-vs-codex-learner-$stamp.log"
+if ($RunName -match '[\\/:*?"<>|]') {
+    throw "-RunName must be a file-name-safe value, without path separators or reserved characters."
+}
+if ($Stamp -eq "") {
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+} else {
+    if ($Stamp -match '[\\/:*?"<>|]') {
+        throw "-Stamp must be a file-name-safe value, without path separators or reserved characters."
+    }
+    $stamp = $Stamp
+}
+$outputBaseName = "$RunName-$stamp"
+$pgnPath = Join-Path $resultsRoot "$outputBaseName.pgn"
+$configPath = Join-Path $resultsRoot "$outputBaseName-config.json"
+$logPath = Join-Path $resultsRoot "$outputBaseName.log"
 
 $fastChess = Install-FastChess -Version $FastChessVersion
 

@@ -20,11 +20,14 @@ ENGINE_AUTHOR = os.environ.get("CODEX_CHESS_AUTHOR", "marvijo/Codex app-server")
 LOG_DIR = ROOT / "out" / "codex-chess-logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_PATH = LOG_DIR / f"codex-chess-{time.strftime('%Y%m%d-%H%M%S')}.log"
-MEMORY_PATH = ENGINE_DIR / "MEMORY.md"
-SKILLS_DIR = ENGINE_DIR / "skills"
+CONTEXT_DIR = Path(os.environ.get("CODEX_CHESS_CONTEXT_DIR", ENGINE_DIR)).resolve()
+MEMORY_PATH = CONTEXT_DIR / "MEMORY.md"
+SKILLS_DIR = CONTEXT_DIR / "skills"
+KNOWLEDGEBASE_DIR = CONTEXT_DIR / "knowledgebase"
 DEFAULT_USE_MEMORY = os.environ.get("CODEX_CHESS_USE_MEMORY", "false").lower() in {"1", "true", "yes", "on"}
 DEFAULT_USE_SKILLS = os.environ.get("CODEX_CHESS_USE_SKILLS", "false").lower() in {"1", "true", "yes", "on"}
 DEFAULT_LEARNING_MODE = os.environ.get("CODEX_CHESS_LEARNING_MODE", "false").lower() in {"1", "true", "yes", "on"}
+TEXT_CONTEXT_EXTENSIONS = {".md", ".txt", ".json", ".yaml", ".yml"}
 
 
 def log(message: str) -> None:
@@ -40,6 +43,12 @@ def free_port() -> int:
 
 
 def parse_json_object(text: str) -> dict:
+    text = text.strip()
+    if not text:
+        raise ValueError("empty Codex response")
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I).strip()
+        text = re.sub(r"\s*```$", "", text).strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -51,6 +60,50 @@ def parse_json_object(text: str) -> dict:
 
 def print_neutral_score_info() -> None:
     print("info depth 0 score cp 0 nodes 0 time 0", flush=True)
+
+
+def read_limited_text(path: Path, max_chars: int) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n[truncated]"
+
+
+def collect_text_context(root: Path, max_files: int = 8, max_chars_per_file: int = 2000) -> list[dict]:
+    if not root.exists():
+        return []
+    paths = [
+        path
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in TEXT_CONTEXT_EXTENSIONS
+    ]
+    paths.sort(key=lambda path: (path.stat().st_mtime, str(path).lower()), reverse=True)
+    files = []
+    for path in paths[:max_files]:
+        files.append(
+            {
+                "path": str(path.relative_to(root)),
+                "text": read_limited_text(path, max_chars_per_file),
+            }
+        )
+    return files
+
+
+def extract_text_fragment(value) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        if isinstance(value.get("text"), str):
+            return value["text"]
+        if isinstance(value.get("json"), (dict, list)):
+            return json.dumps(value["json"], separators=(",", ":"))
+        return "".join(extract_text_fragment(item) for item in value.values())
+    if isinstance(value, list):
+        return "".join(extract_text_fragment(item) for item in value)
+    return ""
 
 
 class CodexAppServer:
@@ -113,10 +166,16 @@ class CodexAppServer:
         )
         log(f"app-server initialized: {init.get('userAgent')}")
 
+        sandbox = "workspace-write" if self.learning_mode else "read-only"
+        if self.learning_mode:
+            KNOWLEDGEBASE_DIR.mkdir(parents=True, exist_ok=True)
+
         developer_instructions = (
-            "Return only JSON matching the schema. Do not call tools. "
+            "Return only JSON matching the schema. "
             "The host GUI will reject illegal moves, so uci must be copied exactly from legal_moves."
         )
+        if not self.learning_mode:
+            developer_instructions += " Do not call tools."
         if self.use_memory:
             developer_instructions += (
                 f" Use the engine-local memory file at {MEMORY_PATH} as durable context for this engine."
@@ -127,8 +186,9 @@ class CodexAppServer:
             )
         if self.learning_mode:
             developer_instructions += (
-                f" After games or reusable insights, create or update concise Agent Skills under {SKILLS_DIR} "
-                f"and update {MEMORY_PATH} so this learner becomes a better chess player over time."
+                f" Post-game learning is handled by a local autolearn process that writes {MEMORY_PATH}, {SKILLS_DIR}, and {KNOWLEDGEBASE_DIR}. "
+                "During UCI move selection, use the learner_context included in each prompt and do not spend clock time editing files. "
+                "Do not use network access. Return only the required move JSON."
             )
 
         started = await self.request(
@@ -137,7 +197,7 @@ class CodexAppServer:
                 "cwd": str(ROOT),
                 "model": self.model,
                 "approvalPolicy": "never",
-                "sandbox": "read-only",
+                "sandbox": sandbox,
                 "ephemeral": True,
                 "baseInstructions": (
                     "You are Codex-chess, a UCI chess engine playing under the time control supplied by the chess GUI. "
@@ -152,7 +212,9 @@ class CodexAppServer:
         log(
             "thread started: "
             f"id={self.thread_id} model={started.get('model')} "
-            f"provider={started.get('modelProvider')} serviceTier={started.get('serviceTier')}"
+            f"provider={started.get('modelProvider')} serviceTier={started.get('serviceTier')} "
+            f"context={CONTEXT_DIR} memory={self.use_memory} skills={self.use_skills} "
+            f"learning={self.learning_mode} sandbox={sandbox} knowledgebase={KNOWLEDGEBASE_DIR}"
         )
 
     async def _reader(self) -> None:
@@ -169,13 +231,14 @@ class CodexAppServer:
 
                 method = msg.get("method")
                 params = msg.get("params", {})
-                if method == "item/agentMessage/delta":
+                if method in {"item/agentMessage/delta", "item/agent_message/delta"}:
                     turn_id = params["turnId"]
                     self.turn_text[turn_id] = self.turn_text.get(turn_id, "") + params.get("delta", "")
                 elif method == "item/completed":
                     item = params.get("item", {})
-                    if item.get("type") == "agentMessage":
-                        self.turn_text[params["turnId"]] = item.get("text", self.turn_text.get(params["turnId"], ""))
+                    if item.get("type") in {"agentMessage", "agent_message", "message"}:
+                        text = extract_text_fragment(item) or self.turn_text.get(params["turnId"], "")
+                        self.turn_text[params["turnId"]] = text
                 elif method == "turn/completed":
                     turn_id = params["turn"]["id"]
                     fut = self.turn_done.get(turn_id)
@@ -195,6 +258,39 @@ class CodexAppServer:
         await self.ws.send(json.dumps({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}))
         return await fut
 
+    def learner_context(self) -> dict:
+        if not (self.use_memory or self.use_skills or self.learning_mode):
+            return {}
+        return {
+            "memory_path": str(MEMORY_PATH),
+            "memory": read_limited_text(MEMORY_PATH, 6000),
+            "knowledgebase_path": str(KNOWLEDGEBASE_DIR),
+            "knowledgebase": collect_text_context(KNOWLEDGEBASE_DIR, max_files=8, max_chars_per_file=2500),
+            "skills_path": str(SKILLS_DIR),
+            "skills": collect_text_context(SKILLS_DIR, max_files=4, max_chars_per_file=1800),
+            "policy": (
+                "Apply the learner memory and knowledgebase directly. Avoid known repetition-draw loops unless a draw is the best practical outcome. "
+                "Never invent UCI: copy uci exactly from legal_moves, and never return 0000 while legal moves exist."
+            ),
+        }
+
+    def repetition_risk(self, board: chess.Board, legal_moves: list[str]) -> dict:
+        repeated = []
+        threefold = []
+        for move_text in legal_moves:
+            temp = board.copy()
+            move = chess.Move.from_uci(move_text)
+            temp.push(move)
+            if temp.is_repetition(3):
+                threefold.append(move_text)
+            elif temp.is_repetition(2):
+                repeated.append(move_text)
+        return {
+            "moves_that_repeat_position": repeated[:24],
+            "moves_that_claim_threefold": threefold[:24],
+            "policy": "Prefer legal alternatives to repetition moves unless repetition is clearly needed to avoid loss.",
+        }
+
     async def choose_move(self, board: chess.Board, go_args: dict, history: list[str]) -> str:
         await self.start()
         legal_moves = [move.uci() for move in board.legal_moves]
@@ -203,10 +299,6 @@ class CodexAppServer:
 
         remaining = go_args.get("wtime") if board.turn == chess.WHITE else go_args.get("btime")
         increment = go_args.get("winc") if board.turn == chess.WHITE else go_args.get("binc")
-        if remaining is not None and remaining <= 2000:
-            move = legal_moves[0]
-            log(f"emergency move due to low clock {remaining}ms: {move}")
-            return move
 
         prompt = {
             "engine": "Codex-chess",
@@ -225,60 +317,104 @@ class CodexAppServer:
             },
             "time_management": (
                 "Choose a practical legal move quickly under the supplied remaining clocks. "
-                "If low on time, prefer a simple safe legal move over deep calculation."
+                "If low on time, return strict JSON quickly. The harness will not choose a move for you."
             ),
             "comment_policy": "Optionally include one short comment explaining the move; it will be shown as a UCI info string in the chess GUI logs.",
+            "invalid_response_policy": (
+                "Return only JSON matching the schema, with uci copied exactly from legal_moves. "
+                "Empty text, non-JSON, and any uci not in legal_moves count as invalid model responses. "
+                "Three consecutive invalid responses for this engine forfeit the game."
+            ),
         }
-
-        response = await self.request(
-            "turn/start",
-            {
-                "threadId": self.thread_id,
-                "effort": self.effort,
-                "input": [{"type": "text", "text": json.dumps(prompt, separators=(",", ":"))}],
-                "outputSchema": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["uci", "comment"],
-                    "properties": {
-                        "uci": {"type": "string"},
-                        "comment": {"type": "string"},
-                    },
-                },
-            },
+        context = self.learner_context()
+        if context:
+            prompt["learner_context"] = context
+        repetition = self.repetition_risk(board, legal_moves)
+        if repetition["moves_that_repeat_position"] or repetition["moves_that_claim_threefold"]:
+            prompt["repetition_risk"] = repetition
+        log(
+            "decision prompt: "
+            f"side={prompt['side_to_move']} fen={board.fen()} "
+            f"legal_moves={len(legal_moves)} own_remaining={remaining} own_increment={increment or 0} "
+            f"learner_context={'yes' if context else 'no'} repeat_moves={len(repetition['moves_that_repeat_position'])} "
+            f"threefold_moves={len(repetition['moves_that_claim_threefold'])}"
         )
-        turn_id = response["turn"]["id"]
-        done = asyncio.get_running_loop().create_future()
-        self.turn_done[turn_id] = done
 
         timeout = 90
         if remaining is not None:
-            timeout = max(5, min(90, int(remaining / 1000) - 2))
-        try:
-            await asyncio.wait_for(done, timeout=timeout)
-            text = self.turn_text.get(turn_id, "").strip()
-            data = parse_json_object(text)
-            move = data.get("uci", "")
-            comment = data.get("comment", "")
-        except Exception as exc:
-            move = legal_moves[0]
-            comment = ""
-            log(f"Codex move fallback after {type(exc).__name__}: {exc}; move={move}")
+            timeout = max(1, min(90, int(remaining / 1000) - 1))
 
-        if move not in legal_moves:
-            self.invalid_model_moves += 1
-            if self.invalid_model_moves >= 3:
-                log(f"illegal Codex move {move!r}; invalid count reached 3; forfeiting with bestmove 0000")
-                print("info string invalid model move limit reached; forfeiting game", flush=True)
-                print_neutral_score_info()
-                return "0000"
-            fallback = legal_moves[0]
-            log(f"illegal Codex move {move!r}; invalid_count={self.invalid_model_moves}; fallback={fallback}")
-            return fallback
-        if comment:
-            safe_comment = " ".join(str(comment).split())
-            print(f"info string {safe_comment[:240]}", flush=True)
-        return move
+        while self.invalid_model_moves < 3:
+            attempt = self.invalid_model_moves + 1
+            prompt["attempt"] = attempt
+            if self.invalid_model_moves:
+                prompt["previous_invalid_responses"] = self.invalid_model_moves
+            response = await self.request(
+                "turn/start",
+                {
+                    "threadId": self.thread_id,
+                    "effort": self.effort,
+                    "input": [{"type": "text", "text": json.dumps(prompt, separators=(",", ":"))}],
+                    "outputSchema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["uci", "comment"],
+                        "properties": {
+                            "uci": {"type": "string"},
+                            "comment": {"type": "string"},
+                        },
+                    },
+                },
+            )
+            turn_id = response["turn"]["id"]
+            done = asyncio.get_running_loop().create_future()
+            self.turn_done[turn_id] = done
+
+            try:
+                await asyncio.wait_for(done, timeout=timeout)
+                text = self.turn_text.get(turn_id, "").strip()
+                data = parse_json_object(text)
+                move = str(data.get("uci", "")).strip()
+                comment = data.get("comment", "")
+            except Exception as exc:
+                self.invalid_model_moves += 1
+                log(
+                    "invalid Codex response "
+                    f"{self.invalid_model_moves}/3 after {type(exc).__name__}: {exc}"
+                )
+                if self.invalid_model_moves >= 3:
+                    log("invalid Codex response streak reached 3; forfeiting with bestmove 0000")
+                    print("info string invalid model response limit reached; forfeiting game", flush=True)
+                    print_neutral_score_info()
+                    return "0000"
+                continue
+            finally:
+                self.turn_done.pop(turn_id, None)
+                self.turn_text.pop(turn_id, None)
+
+            if move not in legal_moves:
+                self.invalid_model_moves += 1
+                log(f"illegal Codex move {move!r}; invalid_count={self.invalid_model_moves}/3")
+                if self.invalid_model_moves >= 3:
+                    log("illegal Codex move streak reached 3; forfeiting with bestmove 0000")
+                    print("info string invalid model move limit reached; forfeiting game", flush=True)
+                    print_neutral_score_info()
+                    return "0000"
+                continue
+
+            self.invalid_model_moves = 0
+            if comment:
+                safe_comment = " ".join(str(comment).split())
+                log(f"decision comment: move={move} comment={safe_comment[:500]}")
+                print(f"info string {safe_comment[:240]}", flush=True)
+            else:
+                log(f"decision comment: move={move} comment=")
+            return move
+
+        log("invalid response streak reached 3; forfeiting with bestmove 0000")
+        print("info string invalid model response limit reached; forfeiting game", flush=True)
+        print_neutral_score_info()
+        return "0000"
 
     async def close(self) -> None:
         if self.ws is not None:
@@ -428,12 +564,10 @@ async def main() -> None:
             elif command == "quit":
                 break
         except Exception as exc:
-            legal = [move.uci() for move in engine.board.legal_moves]
-            fallback = legal[0] if legal else "0000"
-            log(f"error for command {line!r}: {type(exc).__name__}: {exc}; fallback={fallback}")
+            log(f"error for command {line!r}: {type(exc).__name__}: {exc}; forfeiting with bestmove 0000")
             if command == "go":
                 print_neutral_score_info()
-                print(f"bestmove {fallback}", flush=True)
+                print("bestmove 0000", flush=True)
 
     await engine.codex.close()
     log("Codex-chess UCI stopped")

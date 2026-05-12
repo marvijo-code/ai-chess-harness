@@ -8,7 +8,7 @@ UCI chess engines and harness scripts for testing LLM-backed chess play.
 - `engines/codex-chess-learner`: a separate UCI launcher for the learner engine. It initially runs the same implementation as Codex-chess, but has its own `MEMORY.md` and `skills/` folder for learner-specific durable context.
 - `engines/llm-chess-engine`: a UCI engine that calls OpenRouter Chat Completions. It defaults to `moonshotai/kimi-k2.6` and can be changed with `OPENROUTER_MODEL` or the UCI `Model` option.
 
-Both AI engines repair the first two model-produced illegal moves in a game by falling back to a legal move. On the third model-produced illegal move in the same game, the engine returns `bestmove 0000` so the tournament runner can adjudicate the engine as losing instead of silently continuing.
+Both AI engines repair the first two model-produced illegal moves in a game by falling back to a legal move. On the third model-produced illegal move in the same game, the engine must return `bestmove 0000` so the tournament runner adjudicates that engine as losing instead of silently continuing.
 
 ## Setup
 
@@ -62,6 +62,41 @@ python .\tools\play_engine_match.py --max-plies 8
 
 Outputs are written under `out/`, which is intentionally ignored.
 
+Run Codex App-server against Stockfish without paid inference API calls:
+
+```powershell
+python .\tools\play_codex_vs_stockfish.py --max-plies 8
+```
+
+That runner writes timestamped final PGN/JSON/PNG files under `out\` and also keeps a live-updating PGN at `out\live\codex-vs-stockfish-live.pgn`. The live PGN is rewritten before the game starts, after every ply, and again when the final result is known, so local PGN followers such as Lichess Broadcaster can watch `out\live`.
+
+Follow that PGN locally with no Lichess account or external upload:
+
+```powershell
+python .\tools\live_pgn_viewer.py
+```
+
+Then open `http://127.0.0.1:8765/`. The viewer polls `out\live\codex-vs-stockfish-live.pgn`, renders the current board and move list, and stays entirely on localhost. To watch a different PGN:
+
+```powershell
+python .\tools\live_pgn_viewer.py --pgn .\out\live\some-other-live.pgn --port 8766
+```
+
+The local viewer opens in dark theme by default. The board uses black/white pieces on grey/white squares, and the top toolbar can toggle light/dark theme, Stockfish analysis, and Follow Live mode. The left and right arrow keys, or the arrow buttons in the toolbar, move backward and forward through the PGN and automatically switch Follow Live off so the board stays on the selected move.
+
+Stockfish analysis is on by default in the local viewer. It reads the enabled Stockfish entry from `%APPDATA%\org.encroissant.app\engines\engines.json`, analyzes the current PGN position locally, and shows the top PV lines without any Lichess account or external upload. Tune or disable it at startup with:
+
+```powershell
+python .\tools\live_pgn_viewer.py --analysis-movetime-ms 500 --analysis-multipv 4
+python .\tools\live_pgn_viewer.py --no-analysis
+```
+
+The viewer also exposes local maintenance panels for:
+
+- editing `%APPDATA%\org.encroissant.app\engines\engines.json` through structured controls by default, with raw JSON shown only when the Raw JSON toggle is enabled, and with a timestamped backup written before each save;
+- completed-game stats from `out\**\*.pgn`, sorted by most points per engine;
+- optional date filters for those stats, with no filter applied by default.
+
 ## FastChess Codex-vs-Codex run
 
 Install FastChess into a repo-local ignored cache and run ten unattended games between two identical Codex-chess instances. The second instance is named `Codex-chess-learner` in the tournament output. The default run has no `-maxmoves` adjudication cap and uses a five-minute time control (`300+0`), which FastChess writes to config JSON as `time: 300000`.
@@ -74,7 +109,58 @@ By default the script sets both engine processes to `CODEX_CHESS_MODEL=gpt-5.3-c
 
 The script prints the exact PGN path before the match starts. FastChess writes it under `out\fastchess\codex-vs-codex-learner-<timestamp>.pgn`; the file is created during the run and populated as games finish. Matching FastChess config and log files are written beside it.
 
+To start the local viewer before FastChess and open it against the exact PGN path for that run:
+
+```powershell
+.\watch-fastchess-live-match.ps1
+```
+
+The FastChess live wrapper uses the single dedicated local viewer URL `http://127.0.0.1:8766/`. If an older live-viewer process is already on that port, the wrapper restarts that viewer on the same port instead of moving to another URL. The wrapper does not expose a port selector.
+
+The viewer uses a three-column desktop layout: the left pane shows live bot thinking logs, the center pane shows the board, and the right pane keeps match data, leaderboard, analysis, moves, and config. The board shows the black-side player above the board and the white-side player below the board, matching the normal board orientation. Stockfish analysis stays switchable from the top toolbar and the analysis panel.
+
+For a short viewer smoke run, pass the same match options through the wrapper:
+
+```powershell
+.\watch-fastchess-live-match.ps1 -Games 2 -MaxMoves 2
+```
+
+FastChess `-pgnout` is not a current-game live feed. In FastChess v1.8.0-alpha, `-pgnout` is written after each game finishes, and `-autosaveinterval` saves tournament state every N games. For an already-running FastChess match, mirror the current game from the engine logs into `out\live` and point the viewer at that mirror PGN:
+
+```powershell
+python .\tools\mirror_fastchess_live_pgn.py `
+  --fastchess-stdout .\out\fastchess\<run>-launch.out.log `
+  --engine-log-dir .\out\codex-chess-logs `
+  --output .\out\live\<run>-live.pgn
+
+python .\tools\live_pgn_viewer.py --pgn .\out\live\<run>-live.pgn --port 8766
+```
+
+The mirror also writes `WhiteClockMs`, `BlackClockMs`, `ClockUpdatedAtEpochMs`, and `ClockRunningSide` headers from the latest UCI `go wtime ... btime ...` line, so the viewer can show live running clocks above and below the board.
+
+The viewer has a `Learner` screen on the top toolbar and also mirrors the latest bot log rows into the board view's left pane. It reads the learner's real `MEMORY.md`, `skills/`, `knowledgebase/`, and recent `out\codex-chess-logs` entries. Bot log rows are colored by source: learner and baseline entries are separated by their active engine context, and engine processes log observable prompt snapshots, repetition-risk counts, invalid-move repairs, bestmove lines, and returned short move comments without claiming hidden chain-of-thought access.
+
+Learner improvement is handled by `tools\update_learner_knowledgebase.py`. It reads the FastChess PGN plus the redirected launch stdout, writes `engines\codex-chess-learner\knowledgebase\live-match-lessons.md`, writes a JSON copy, and refreshes the learner `MEMORY.md` autolearn block. Run it once or as a watcher:
+
+```powershell
+python .\tools\update_learner_knowledgebase.py `
+  --pgn .\out\fastchess\<run>.pgn `
+  --stdout .\out\fastchess\<run>-launch.out.log `
+  --watch
+```
+
+Use `tools\play_codex_vs_stockfish.py` when a native move-by-move live PGN is required without FastChess log mirroring.
+
 Codex engines emit a neutral `info depth 0 score cp 0 nodes 0 time 0` line before `bestmove` so FastChess can parse a score field for reports. Without that normal `info ... score ...` line, FastChess prints `Warning; Last info string with score not found...`.
+
+FastChess PGN headers often say `Termination "normal"` even when the console gives the useful reason, such as `Draw by 3-fold repetition`, `Black mates`, or `White makes an illegal move`. When reviewing completed matches, summarize reasons from the PGN plus the redirected launch stdout:
+
+```powershell
+python .\tools\summarize_fastchess_reasons.py `
+  --pgn .\out\fastchess\<run>.pgn `
+  --stdout .\out\fastchess\<run>-launch.out.log `
+  --json .\out\fastchess\<run>-reasons.json
+```
 
 For a short smoke run, add a move cap explicitly:
 

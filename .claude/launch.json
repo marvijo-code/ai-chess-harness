@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "chess-viewer",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["tools/live_pgn_viewer.py", "--no-analysis"],
+      "port": 8765
+    }
+  ]
+}
