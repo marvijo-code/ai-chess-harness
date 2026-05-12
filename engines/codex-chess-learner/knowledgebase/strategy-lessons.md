@@ -1,7 +1,7 @@
 # Strategy Lessons
 
-Generated: 2026-05-12 15:06:24
-Completed games scanned: 0
+Generated: 2026-05-12 15:08:12
+Completed games scanned: 2
 
 This file stores model-discovered concepts from self-play evidence. It must not be treated as memorized move answers.
 

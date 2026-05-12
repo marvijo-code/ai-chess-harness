@@ -21,9 +21,9 @@ Durable lessons:
 
 <!-- learner-autolearn:start -->
 ## Autolearn Summary
-- Last updated: 2026-05-12 15:06:24
-- Current match score: 0 / 0 (0.0%).
-- Result reasons: .
+- Last updated: 2026-05-12 15:08:12
+- Current match score: 0.0 / 2 (0.0%).
+- Result reasons: time=2.
 - Apply `knowledgebase/live-match-lessons.md` before choosing moves.
 - Apply model-discovered concepts from `knowledgebase/strategy-lessons.md` as generic value adjustments, not as memorized move answers.
 - Avoid threefold repetition loops unless drawing is the only practical outcome.
