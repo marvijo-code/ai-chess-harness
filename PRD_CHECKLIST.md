@@ -39,9 +39,14 @@
 - [x] Write bounded `strategy-lessons.md/json` outputs with model-discovered concepts and deduped evidence.
 - [x] Feed compact strategy concepts into learner prompts without Stockfish analysis or hardcoded move answers.
 - [x] Add focused tests for neutral evidence capture and repeated-game dedupe counts.
-- [ ] Validate py_compile, archived-PGN autolearn output, and a short frozen-self autolearn run.
+- [x] Validate py_compile, archived-PGN autolearn output, and a short frozen-self autolearn run.
 - [x] Add hot reload for the local FastChess viewer workflow.
 - [x] Verify a running viewer exposes the Bot Thinking type filter after restart and reports hot reload through `/api/viewer-version`.
-- [ ] Change Bot Thinking type filter default to only `Comment` and make `All` toggle all-selected to none-selected.
-- [ ] Move `Flip Board` from the header toolbar to above the Leaderboard.
-- [ ] Verify filter defaults, `All` toggle semantics, persistence, and above-Leaderboard flip placement in the browser.
+- [x] Change Bot Thinking type filter default to only `Comment` and make `All` toggle all-selected to none-selected.
+- [x] Move `Flip Board` from the header toolbar to above the Leaderboard.
+- [x] Verify filter defaults, `All` toggle semantics, persistence, and above-Leaderboard flip placement in the browser.
+- [x] Document native FastChess `Concurrency` as the only parallelism option, with no `threads`, `-t`, or `-c` aliases.
+- [x] Lock the FastChess live mirror to one active board game while concurrent games can run.
+- [x] Show in-progress FastChess games in the right-column match list alongside completed games.
+- [x] Collapse `Engine Config` by default with persisted open/closed state.
+- [x] Validate compile/parser checks, concurrency argument flow, and focused viewer behavior.

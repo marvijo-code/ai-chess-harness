@@ -11,9 +11,9 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 2. The left column contains fixed-height `Bot Thinking` and `Engine Analysis`.
 3. `Bot Thinking` shows observable prompt/comment/bestmove logs, syncs to the replayed move when Follow Live is off, and includes the move number for the selected move/log context.
 4. `Engine Analysis` replaces `Stockfish Analysis`, shows the selected local engine name, stays viewer-only, and must never be sent to Codex-chess or Codex-chess-learner prompts.
-5. The right column shows `Leaderboard`, then `Previous Matches`, then moves and config.
-6. `Previous Matches` lists completed games below the leaderboard and paginates to 5 matches per page.
-7. Clicking a `Previous Matches` row loads that archived game into the board viewer, including its move list, result, analysis position, and matching bot logs.
+5. The right column shows `Leaderboard`, then `Matches`, then moves and config.
+6. `Matches` lists in-progress live FastChess games and completed games below the leaderboard, with status labels and 5-row pagination.
+7. Clicking a completed `Matches` row loads that archived game into the board viewer, including its move list, result, analysis position, and matching bot logs.
 8. When Follow Live is off, `Bot Thinking` stays steady unless the user intentionally selects another move, match, side filter, or re-enables live following.
 9. Completed games show the winner as `<player> (<colour>) won`; draws show `Draw`.
 10. The learner must always choose its own move from the prompt context. There is no fallback legal move, no client-picked shortcut, and no Stockfish-provided move advice.
@@ -36,6 +36,9 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 27. Learner autolearn continuously collects neutral frozen-self-play observations, uses Codex app-server to synthesize generalized concepts and value adjustments into compact bounded `strategy-lessons` knowledgebase files, and feeds those model-discovered concepts into future learner prompts without hardcoding FEN-specific move answers.
 28. Initial continuous strategy learning uses only `Codex-chess` with memory/skills/learning disabled as the opponent; Stockfish analysis stays viewer-only and must not seed learner strategy lessons in this phase.
 29. The dedicated FastChess viewer workflow supports hot reload for viewer source/config/doc changes so UI edits become visible without manually finding and restarting stale `live_pgn_viewer.py` processes.
+30. FastChess parallel play uses the native `Concurrency` setting and CLI option, backed by FastChess `-concurrency`; no `threads`, `-t`, or `-c` aliases are part of the public runner contract.
+31. During concurrent FastChess runs, the live mirror stays fixed on one active game for the board while the right-column match list shows other in-progress games.
+32. `Engine Config` is collapsed by default, persists explicit open or closed user preference in `localStorage`, and preserves the structured controls plus raw JSON toggle when opened.
 
 ## Validation Requirements
 
@@ -50,8 +53,8 @@ Keep the local FastChess viewer useful during live play and replay without leaki
    - 64 board squares render.
    - Bot Thinking has fixed height and includes move number text.
    - Engine Analysis appears in the left column and shows the analysis engine name.
-   - Previous Matches appears below Leaderboard and paginates to 5 rows.
-   - Clicking Previous Matches loads the archived game and matching bot logs.
+   - Matches appears below Leaderboard, shows in-progress and completed status rows, and paginates to 5 rows.
+   - Clicking completed matches loads the archived game and matching bot logs.
    - Bot Thinking does not auto-refresh while replaying or viewing archived games.
    - Completed winner text uses `<player> (<colour>) won`.
    - Active games show a tournament slug and a copy control that copies the full absolute viewer URL.
@@ -60,6 +63,8 @@ Keep the local FastChess viewer useful during live play and replay without leaki
    - Bot Thinking type filters default to only `Comment`, can select multiple message kinds, let `All` toggle all-selected to none-selected, survive reload through `localStorage`, and update board and learner log counts.
    - The flip-board control above Leaderboard reverses board coordinates, preserves exactly 64 board squares, keeps the side-to-move board state intact, and survives reload through `localStorage`.
    - Previous Matches rows show the date on the first line, then the winner on the next line, without adding row height.
+   - Concurrent FastChess status rows show `In progress` without switching the fixed live board away from the selected live game.
+   - `Engine Config` starts collapsed and can be reopened without losing structured/raw config behavior.
    - The viewer launched by the FastChess wrapper advertises hot reload through `/api/viewer-version`, restarts after a viewer source/config/doc change, and the browser reloads to the updated UI.
    - Live mirrored PGNs contain `[%clk ...]` comments on completed moves when FastChess clock state is available.
    - No horizontal overflow at desktop width.

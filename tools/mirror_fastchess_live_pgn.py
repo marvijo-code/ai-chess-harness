@@ -1,5 +1,6 @@
 import argparse
 import io
+import json
 import re
 import time
 from datetime import datetime
@@ -16,31 +17,50 @@ GO_RE = re.compile(r"\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+>\s+go\b.
 CLK_COMMENT_RE = re.compile(r"\[%clk\s+[^\]]+\]")
 
 
-def parse_current_game(stdout_path: Path) -> dict | None:
+def parse_games(stdout_path: Path) -> list[dict]:
     if not stdout_path.exists():
-        return None
+        return []
     text = stdout_path.read_text(encoding="utf-8", errors="replace")
-    started = [match.groupdict() for match in STARTED_RE.finditer(text)]
+    started = [(match.start(), match.groupdict()) for match in STARTED_RE.finditer(text)]
     if not started:
-        return None
+        return []
     finished = {int(match.group("game")): match.groupdict() for match in FINISHED_RE.finditer(text)}
-    current = started[-1]
-    game_no = int(current["game"])
-    total = int(current["total"])
-    result = "*"
-    reason = ""
-    if game_no in finished:
-        result = finished[game_no]["result"]
-        reason = finished[game_no]["reason"]
-    return {
-        "game": game_no,
-        "total": total,
-        "white": current["white"],
-        "black": current["black"],
-        "result": result,
-        "reason": reason,
-        "finished": game_no in finished,
-    }
+    games: list[dict] = []
+    for order, (_, current) in enumerate(started, start=1):
+        game_no = int(current["game"])
+        total = int(current["total"])
+        result = "*"
+        reason = ""
+        if game_no in finished:
+            result = finished[game_no]["result"]
+            reason = finished[game_no]["reason"]
+        games.append(
+            {
+                "game": game_no,
+                "total": total,
+                "white": current["white"],
+                "black": current["black"],
+                "result": result,
+                "reason": reason,
+                "finished": game_no in finished,
+                "order": order,
+            }
+        )
+    return games
+
+
+def select_board_game(games: list[dict], locked_game: int | None) -> tuple[dict | None, int | None]:
+    if locked_game is not None:
+        for game in games:
+            if int(game["game"]) == locked_game:
+                return game, locked_game
+    for game in games:
+        if not game["finished"]:
+            return game, int(game["game"])
+    if games:
+        game = games[-1]
+        return game, int(game["game"])
+    return None, locked_game
 
 
 def log_timestamp_ms(value: str) -> int:
@@ -149,16 +169,50 @@ def pgn_text(game: chess.pgn.Game) -> str:
     return output.getvalue()
 
 
+def status_text(games: list[dict], output_path: Path, locked_game: int | None) -> str:
+    generated_at = time.time()
+    payload = {
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(generated_at)),
+        "generated_at_epoch": generated_at,
+        "output_pgn": str(output_path.resolve()),
+        "locked_game": locked_game,
+        "games": [
+            {
+                "game": game["game"],
+                "total": game["total"],
+                "white": game["white"],
+                "black": game["black"],
+                "result": game["result"],
+                "reason": game["reason"],
+                "finished": game["finished"],
+                "status": "Completed" if game["finished"] else "In progress",
+                "is_board_game": locked_game is not None and int(game["game"]) == locked_game,
+            }
+            for game in games
+        ],
+    }
+    return json.dumps(payload, indent=2)
+
+
 def mirror(stdout_path: Path, log_dir: Path, output_path: Path, interval: float, once: bool) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path = output_path.with_suffix(".status.json")
     previous = None
+    previous_status = None
+    locked_game: int | None = None
     while True:
-        current = parse_current_game(stdout_path)
+        games = parse_games(stdout_path)
+        current, locked_game = select_board_game(games, locked_game)
         if current is not None:
             text = pgn_text(build_game(current, latest_engine_state(log_dir)))
             if text != previous:
                 output_path.write_text(text, encoding="utf-8")
                 previous = text
+        if games:
+            status = status_text(games, output_path, locked_game)
+            if status != previous_status:
+                status_path.write_text(status, encoding="utf-8")
+                previous_status = status
         if once:
             return
         time.sleep(interval)

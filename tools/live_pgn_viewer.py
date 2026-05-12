@@ -27,6 +27,7 @@ LEARNER_SKILLS_DIR = LEARNER_DIR / "skills"
 LEARNER_KNOWLEDGEBASE_DIR = LEARNER_DIR / "knowledgebase"
 ENGINE_LOG_DIR = OUT_DIR / "codex-chess-logs"
 CLK_COMMENT_RE = re.compile(r"\[%clk\s+(?P<value>\d+(?::\d{1,2}){1,2}(?:\.\d+)?)\]")
+LIVE_STATUS_MAX_AGE_SECONDS = 24 * 60 * 60
 HOT_RELOAD_ENV = "CHESS_VIEWER_HOT_RELOAD_CHILD"
 HOT_RELOAD_FILES = (
     Path(__file__).resolve(),
@@ -533,11 +534,14 @@ INDEX_HTML = """<!doctype html>
       width: 100%; color: var(--text); text-align: left;
     }
     .match-row:hover, .match-row.active { border-color: var(--accent); background: rgba(10, 132, 255, .08); }
+    .match-row.in-progress { border-color: rgba(48, 209, 88, .45); }
+    .match-row.disabled { opacity: .78; }
     .match-select {
       min-width: 0; width: 100%; max-width: 100%; padding: 0; border: 0; background: transparent;
       color: inherit; text-align: left; cursor: pointer; display: grid; gap: 4px;
       font: inherit;
     }
+    .match-select:disabled { cursor: default; }
     .match-main {
       min-width: 0;
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -558,6 +562,12 @@ INDEX_HTML = """<!doctype html>
     }
     .match-row.active .match-copy-btn { display: grid; }
     .match-copy-btn.copied { border-color: var(--ok); color: var(--ok); }
+    .status-badge {
+      display: inline-flex; align-items: center; min-height: 20px; padding: 2px 7px;
+      border-radius: 999px; border: 1px solid var(--line);
+      color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap;
+    }
+    .status-badge.in-progress { border-color: rgba(48, 209, 88, .55); color: var(--ok); }
 
     /* === ANALYSIS === */
     .analysis-list { display: grid; gap: 0; }
@@ -573,6 +583,11 @@ INDEX_HTML = """<!doctype html>
     .analysis-card { position: sticky; top: 606px; }
 
     /* === ENGINE CONFIG === */
+    .config-card > summary { list-style: none; cursor: pointer; }
+    .config-card > summary::-webkit-details-marker { display: none; }
+    .config-card .config-caret { color: var(--muted); font-size: 12px; }
+    .config-card[open] .config-caret::before { content: "Collapse"; }
+    .config-card:not([open]) .config-caret::before { content: "Expand"; }
     .cfg-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
     .cfg-mode { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--muted); cursor: pointer; text-transform: none; letter-spacing: 0; }
     .engine-list { display: grid; gap: 10px; }
@@ -729,7 +744,7 @@ INDEX_HTML = """<!doctype html>
 
         <section class="card">
           <div class="card-hd">
-            <span class="card-title">Previous Matches</span>
+            <span class="card-title">Matches</span>
             <div class="pager">
               <button id="matches-prev" type="button" aria-label="Previous matches page">&#8592;</button>
               <span id="matches-meta" class="card-sub"></span>
@@ -747,11 +762,11 @@ INDEX_HTML = """<!doctype html>
           <div id="moves"></div>
         </section>
 
-        <section class="card">
-          <div class="card-hd">
+        <details id="engine-config-card" class="card config-card">
+          <summary class="card-hd">
             <span class="card-title">Engine Config</span>
-            <span id="config-path" class="card-sub"></span>
-          </div>
+            <span class="card-sub"><span id="config-path"></span><span class="config-caret"></span></span>
+          </summary>
           <div class="card-body">
             <div class="cfg-bar">
               <label class="cfg-mode"><input id="raw-config-toggle" type="checkbox"> Raw JSON</label>
@@ -765,7 +780,7 @@ INDEX_HTML = """<!doctype html>
               <button id="config-save" class="primary" type="button">Save Config</button>
             </div>
           </div>
-        </section>
+        </details>
       </div>
     </main>
 
@@ -861,6 +876,7 @@ INDEX_HTML = """<!doctype html>
     let lastFen = "";
     let configData = [];
     let rawConfigMode = false;
+    let engineConfigExpanded = localStorage.getItem("livePgnEngineConfigExpanded") === "on";
     let analysisEnabled = true;
     let analysisAvailable = true;
     let activeTheme = "light";
@@ -921,9 +937,20 @@ INDEX_HTML = """<!doctype html>
       const parsedHash = parseMatchHash();
       followLive = !(parsedHash.slug && parsedHash.gameIndex);
       document.getElementById("follow-toggle").checked = followLive;
+      syncEngineConfigExpanded();
       updateLogSideButtons();
       updateLogKindButtons();
       updateBoardOrientationButton();
+    }
+
+    function syncEngineConfigExpanded() {
+      document.getElementById("engine-config-card").open = engineConfigExpanded;
+    }
+
+    function setEngineConfigExpanded(enabled) {
+      engineConfigExpanded = !!enabled;
+      localStorage.setItem("livePgnEngineConfigExpanded", engineConfigExpanded ? "on" : "off");
+      syncEngineConfigExpanded();
     }
 
     function updateLogSideButtons() {
@@ -1113,7 +1140,8 @@ INDEX_HTML = """<!doctype html>
     async function copyMatchRowUrl(index, button) {
       const match = previousMatches[Number(index)];
       if (!match) return;
-      await copyTextToClipboard(matchUrlFor(match.tournament_slug || "", match.game_index || 1), button);
+      const gameIndex = match.kind === "live" ? null : (match.game_index || 1);
+      await copyTextToClipboard(matchUrlFor(match.tournament_slug || "", gameIndex), button);
     }
 
     function squareName(file, rank) {
@@ -1516,12 +1544,20 @@ INDEX_HTML = """<!doctype html>
       }
       container.innerHTML = `<div class="match-list">${pageRows.map(match => {
         const index = previousMatches.indexOf(match);
-        return `<div class="match-row ${matchKey(match) === activeKey ? "active" : ""}">
-          <button class="match-select" type="button" data-match-index="${escapeAttr(index)}">
-            <div class="match-main"><span>${escapeHtml(match.date || "unknown date")}</span><span>${escapeHtml(match.result)}</span></div>
-            <div class="match-sub"><span class="match-winner">${escapeHtml(match.winner_label)}</span> · ${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · ${escapeHtml(match.tournament_slug || "unknown")} · game ${escapeHtml(match.game_index || 1)} · ${escapeHtml(match.file)}</div>
+        const isActive = matchKey(match) === activeKey || (match.kind === "live" && !selectedMatch && followLive && match.is_board_game);
+        const isLive = match.kind === "live";
+        const clickable = !isLive || match.is_board_game;
+        const rowClasses = ["match-row", isActive ? "active" : "", isLive ? "in-progress" : "", clickable ? "" : "disabled"].filter(Boolean).join(" ");
+        const statusClass = isLive ? "in-progress" : "";
+        const statusLabel = match.status_label || match.result || "";
+        const gameLabel = isLive && match.total ? `game ${match.game_index || 1} / ${match.total}` : `game ${match.game_index || 1}`;
+        const fileLabel = match.file ? ` · ${escapeHtml(match.file)}` : "";
+        return `<div class="${rowClasses}">
+          <button class="match-select" type="button" ${clickable ? `data-match-index="${escapeAttr(index)}"` : "disabled"}>
+            <div class="match-main"><span>${escapeHtml(match.date || match.updated_at || "live")}</span><span class="status-badge ${statusClass}">${escapeHtml(statusLabel)}</span></div>
+            <div class="match-sub"><span class="match-winner">${escapeHtml(match.winner_label)}</span> · ${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · ${escapeHtml(match.tournament_slug || "unknown")} · ${escapeHtml(gameLabel)}${fileLabel}</div>
           </button>
-          <button class="match-copy-btn" type="button" title="Copy match URL" aria-label="Copy archived match URL" data-match-copy-index="${escapeAttr(index)}">&#10697;</button>
+          <button class="match-copy-btn" type="button" title="Copy match URL" aria-label="Copy match URL" data-match-copy-index="${escapeAttr(index)}">&#10697;</button>
         </div>`;
       }).join("")}</div>`;
     }
@@ -1533,12 +1569,26 @@ INDEX_HTML = """<!doctype html>
 
     function matchKey(match) {
       if (!match) return "";
-      return `${match.path || match.file || ""}|${match.game_index || 1}`;
+      return `${match.kind || "completed"}|${match.path || match.file || ""}|${match.game_index || 1}`;
     }
 
     function loadPreviousMatch(index) {
       const match = previousMatches[Number(index)];
       if (!match) return;
+      if (match.kind === "live") {
+        if (!match.is_board_game) return;
+        selectedMatch = null;
+        followLive = true;
+        viewedPly = null;
+        replayThinkingKey = "";
+        localStorage.setItem("livePgnFollow", "on");
+        document.getElementById("follow-toggle").checked = true;
+        setMatchHash(match.tournament_slug || "");
+        setActiveMatchUrl(matchUrlFor(match.tournament_slug || ""));
+        renderPreviousMatches();
+        refresh(true);
+        return;
+      }
       selectedMatch = match;
       followLive = false;
       viewedPly = null;
@@ -1556,6 +1606,7 @@ INDEX_HTML = """<!doctype html>
       if (!parsed.slug || !previousMatches.length) return false;
       if (!parsed.gameIndex && latestGame && latestGame.tournament_slug === parsed.slug && followLive) return false;
       const match = previousMatches.find(item => {
+        if (item.kind === "live") return false;
         if ((item.tournament_slug || "") !== parsed.slug) return false;
         return parsed.gameIndex ? Number(item.game_index || 1) === parsed.gameIndex : true;
       });
@@ -1710,7 +1761,8 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function loadStats() {
-      const resp = await fetch("/api/stats", { cache: "no-store" });
+      const params = new URLSearchParams({ live: activePgnPath || "" });
+      const resp = await fetch(`/api/stats?${params}`, { cache: "no-store" });
       renderStats(await resp.json());
     }
 
@@ -1889,6 +1941,7 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("config-controls").addEventListener("input", e => updateConfigFromInput(e.target));
     document.getElementById("config-controls").addEventListener("change", e => updateConfigFromInput(e.target));
     document.getElementById("config-save").addEventListener("click", saveConfig);
+    document.getElementById("engine-config-card").addEventListener("toggle", e => setEngineConfigExpanded(e.target.open));
     window.addEventListener("hashchange", () => {
       if (suppressHashChange) return;
       if (selectPreviousMatchFromHash()) {
@@ -1905,6 +1958,7 @@ INDEX_HTML = """<!doctype html>
     loadLearner();
     setInterval(refresh, 1000);
     setInterval(updateClockDisplays, 250);
+    setInterval(loadStats, 3000);
     setInterval(loadLearner, 2500);
     checkViewerVersion();
     setInterval(checkViewerVersion, 1200);
@@ -2328,9 +2382,63 @@ def result_label(result: str, white: str, black: str) -> str:
     return result
 
 
-def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None) -> dict:
-    stats: dict[str, dict] = {}
+def live_status_path_for(pgn_path: Path) -> Path:
+    return pgn_path.with_suffix(".status.json")
+
+
+def collect_live_matches(out_dir: Path, live_pgn_path: Path | None) -> list[dict]:
+    if live_pgn_path is None:
+        return []
+    status_path = live_status_path_for(live_pgn_path)
+    if not status_path.exists():
+        return []
+    try:
+        mtime = status_path.stat().st_mtime
+        if time.time() - mtime > LIVE_STATUS_MAX_AGE_SECONDS:
+            return []
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    output_pgn = Path(payload.get("output_pgn") or live_pgn_path)
+    if not output_pgn.is_absolute():
+        output_pgn = live_pgn_path
+    slug = tournament_slug(output_pgn)
+    updated_at = payload.get("generated_at") or time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+    updated_epoch = float(payload.get("generated_at_epoch") or mtime)
+    locked_game = payload.get("locked_game")
     matches: list[dict] = []
+    for game in payload.get("games", []):
+        if game.get("finished"):
+            continue
+        game_no = int(game.get("game") or 0)
+        is_board_game = locked_game is not None and game_no == int(locked_game)
+        matches.append(
+            {
+                "kind": "live",
+                "date": "In progress",
+                "updated_at": updated_at,
+                "updated_at_epoch": updated_epoch,
+                "white": game.get("white") or "White",
+                "black": game.get("black") or "Black",
+                "result": "*",
+                "winner_label": "In progress",
+                "status_label": "In progress",
+                "round": str(game_no),
+                "tournament_slug": slug,
+                "file": str(output_pgn.relative_to(out_dir)) if output_pgn.is_relative_to(out_dir) else str(output_pgn),
+                "path": str(output_pgn.resolve()) if is_board_game else "",
+                "game_index": game_no,
+                "total": int(game.get("total") or 0),
+                "is_board_game": is_board_game,
+            }
+        )
+    return matches
+
+
+def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None, live_pgn_path: Path | None = None) -> dict:
+    stats: dict[str, dict] = {}
+    matches: list[dict] = collect_live_matches(out_dir, live_pgn_path)
     completed_games = 0
     pgn_files = [path for path in sorted(out_dir.rglob("*.pgn")) if "live" not in path.relative_to(out_dir).parts]
 
@@ -2359,17 +2467,20 @@ def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None) -
                     matches.append(
                         {
                             "date": game_date.isoformat(),
+                            "kind": "completed",
                             "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime)),
                             "updated_at_epoch": mtime,
                             "white": white,
                             "black": black,
                             "result": result,
                             "winner_label": result_label(result, white, black),
+                            "status_label": result,
                             "round": round_name,
                             "tournament_slug": tournament_slug(pgn_path),
                             "file": str(pgn_path.relative_to(out_dir)),
                             "path": str(pgn_path.resolve()),
                             "game_index": game_index,
+                            "is_board_game": False,
                         }
                     )
                     for side, engine in (("white", white), ("black", black)):
@@ -2767,7 +2878,10 @@ class LivePgnHandler(BaseHTTPRequestHandler):
             try:
                 date_from = parse_filter_date(query.get("from", [None])[0])
                 date_to = parse_filter_date(query.get("to", [None])[0])
-                self.send_json(collect_stats(self.stats_dir, date_from, date_to))
+                live_pgn_path = Path(query.get("live", [str(self.pgn_path)])[0] or str(self.pgn_path))
+                if not live_pgn_path.is_absolute():
+                    live_pgn_path = self.stats_dir / live_pgn_path
+                self.send_json(collect_stats(self.stats_dir, date_from, date_to, live_pgn_path))
             except Exception as exc:
                 self.send_json({"games": 0, "engines": [], "error": str(exc)})
             return

@@ -1,13 +1,13 @@
 # Strategy Lessons
 
-Generated: 2026-05-12 13:06:36
+Generated: 2026-05-12 13:15:02
 Completed games scanned: 5
 
 This file stores model-discovered concepts from self-play evidence. It must not be treated as memorized move answers.
 
 ## Concept Synthesis
-- status: ok
-- message: synthesized 7 generalized concepts from 60 new observations
+- status: unchanged
+- message: no new self-play evidence
 
 ## Discovered Concepts
 - Punish forcing moves that leave the mover en prise; (confidence 0.96); trigger: A capture or check is considered, but the moved piece will be immediately capturable by a lower- or equal-cost recapture with no compensation.; value adjustment: Decrease move value strongly; add extra penalty if the moved piece is a major piece.
