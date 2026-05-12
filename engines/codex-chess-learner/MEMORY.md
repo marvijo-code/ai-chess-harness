@@ -17,10 +17,11 @@ Learning instruction:
 
 <!-- learner-autolearn:start -->
 ## Autolearn Summary
-- Last updated: 2026-05-12 08:16:29
-- Current match score: 26.0 / 52 (50.0%).
-- Result reasons: illegal move=20, mate=1, threefold repetition=31.
+- Last updated: 2026-05-12 09:51:32
+- Current match score: 0.5 / 3 (16.67%).
+- Result reasons: illegal move=1, mate=1, time=1.
 - Apply `knowledgebase/live-match-lessons.md` before choosing moves.
 - Avoid threefold repetition loops unless drawing is the only practical outcome.
+- If own clock is below 25 seconds, output strict JSON immediately with a legal practical move.
 - Never return a move outside `legal_moves`; never return `0000` while legal moves exist.
 <!-- learner-autolearn:end -->

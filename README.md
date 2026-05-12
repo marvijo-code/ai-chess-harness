@@ -8,7 +8,7 @@ UCI chess engines and harness scripts for testing LLM-backed chess play.
 - `engines/codex-chess-learner`: a separate UCI launcher for the learner engine. It initially runs the same implementation as Codex-chess, but has its own `MEMORY.md` and `skills/` folder for learner-specific durable context.
 - `engines/llm-chess-engine`: a UCI engine that calls OpenRouter Chat Completions. It defaults to `moonshotai/kimi-k2.6` and can be changed with `OPENROUTER_MODEL` or the UCI `Model` option.
 
-Both AI engines repair the first two model-produced illegal moves in a game by falling back to a legal move. On the third model-produced illegal move in the same game, the engine must return `bestmove 0000` so the tournament runner adjudicates that engine as losing instead of silently continuing.
+Codex-chess does not choose fallback legal moves for the model. Empty responses, non-JSON responses, and moves outside `legal_moves` count as consecutive invalid model responses; after three consecutive invalid responses in a game, the engine returns `bestmove 0000` so the tournament runner adjudicates that engine as losing instead of silently continuing. Codex app-server turn failures, such as usage limits, are logged separately and forfeit immediately because retrying the same unavailable model does not test chess strength.
 
 ## Setup
 
@@ -105,7 +105,7 @@ Install FastChess into a repo-local ignored cache and run ten unattended games b
 .\install-and-run-fastchess-codex.ps1
 ```
 
-By default the script sets both engine processes to `CODEX_CHESS_MODEL=gpt-5.3-codex-spark` and `CODEX_CHESS_EFFORT=low`. This is an environment override for the tournament run only; it does not modify the installed Codex app or CLI configuration. Results are written to `out\fastchess`.
+By default the script sets both engine processes to `CODEX_CHESS_MODEL=gpt-5.5` and `CODEX_CHESS_EFFORT=low`. This is an environment override for the tournament run only; it does not modify the installed Codex app or CLI configuration. The script preflights the selected Codex model before starting FastChess, so a usage-limit or unavailable-model error fails before a long match can produce zero-ply forfeits. Results are written to `out\fastchess`.
 
 The script prints the exact PGN path before the match starts. FastChess writes it under `out\fastchess\codex-vs-codex-learner-<timestamp>.pgn`; the file is created during the run and populated as games finish. Matching FastChess config and log files are written beside it.
 
@@ -115,9 +115,9 @@ To start the local viewer before FastChess and open it against the exact PGN pat
 .\watch-fastchess-live-match.ps1
 ```
 
-The FastChess live wrapper uses the single dedicated local viewer URL `http://127.0.0.1:8766/`. If an older live-viewer process is already on that port, the wrapper restarts that viewer on the same port instead of moving to another URL. The wrapper does not expose a port selector.
+The FastChess live wrapper uses the single dedicated local viewer URL `http://127.0.0.1:8766/`. If an older live-viewer process is already on that port, the wrapper restarts that viewer on the same port instead of moving to another URL. The wrapper does not expose a port selector. While FastChess is still inside a game, the wrapper starts `tools\mirror_fastchess_live_pgn.py` and points the viewer at `out\live\<run>-live.pgn` so the board has a current position before FastChess writes the final `-pgnout` game.
 
-The viewer uses a three-column desktop layout: the left pane shows live bot thinking logs, the center pane shows the board, and the right pane keeps match data, leaderboard, analysis, moves, and config. The board shows the black-side player above the board and the white-side player below the board, matching the normal board orientation. Stockfish analysis stays switchable from the top toolbar and the analysis panel.
+The viewer uses a three-column desktop layout: the left pane shows bot thinking logs, the center pane shows the board, and the right pane keeps match data, leaderboard, analysis, moves, and config. In Follow Live mode the thinking pane shows recent live entries. During replay navigation, the thinking pane follows the selected ply and shows the prompt/comment/bestmove entries that match the move being replayed. The board shows the black-side player above the board and the white-side player below the board, matching the normal board orientation. Stockfish analysis stays switchable from the top toolbar and the analysis panel; if the server was started with analysis disabled, the UI controls show that disabled state instead of claiming analysis is on.
 
 For a short viewer smoke run, pass the same match options through the wrapper:
 
@@ -125,7 +125,7 @@ For a short viewer smoke run, pass the same match options through the wrapper:
 .\watch-fastchess-live-match.ps1 -Games 2 -MaxMoves 2
 ```
 
-FastChess `-pgnout` is not a current-game live feed. In FastChess v1.8.0-alpha, `-pgnout` is written after each game finishes, and `-autosaveinterval` saves tournament state every N games. For an already-running FastChess match, mirror the current game from the engine logs into `out\live` and point the viewer at that mirror PGN:
+FastChess `-pgnout` is not a current-game live feed. In FastChess v1.8.0-alpha, `-pgnout` is written after each game finishes, and `-autosaveinterval` saves tournament state every N games. The wrapper handles the mirror automatically; to do the same manually for an already-running FastChess match, mirror the current game from the engine logs into `out\live` and point the viewer at that mirror PGN:
 
 ```powershell
 python .\tools\mirror_fastchess_live_pgn.py `

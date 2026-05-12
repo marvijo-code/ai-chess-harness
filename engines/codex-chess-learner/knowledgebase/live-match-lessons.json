@@ -1,227 +1,68 @@
 {
-  "generated_at": "2026-05-12 08:16:29",
-  "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-learning200-rerun-20260512-072126.pgn",
-  "source_stdout": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-learning200-rerun-20260512-072126-launch.out.log",
-  "completed_games": 52,
-  "scheduled_games": 200,
-  "learner_points": 26.0,
-  "learner_score_percent": 50.0,
+  "generated_at": "2026-05-12 09:51:32",
+  "source_pgn": "out\\fastchess\\codex-vs-codex-learner-standard5-20260512-093035.pgn",
+  "source_stdout": "out\\fastchess\\codex-vs-codex-learner-standard5-20260512-093035-launch.out.log",
+  "completed_games": 3,
+  "scheduled_games": 6,
+  "learner_points": 0.5,
+  "learner_score_percent": 16.67,
   "reason_counts": {
-    "threefold repetition": 31,
     "mate": 1,
-    "illegal move": 20
+    "time": 1,
+    "illegal move": 1
   },
   "illegal_losses": [
     {
-      "game": 34,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 36,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 38,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 40,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 42,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 44,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 46,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 48,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 50,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 52,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
+      "game": 3,
+      "white": "Codex-chess",
+      "black": "Codex-chess-learner",
+      "result": "1-0",
+      "plies": 61,
+      "reason": "Black makes an illegal move",
+      "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 Nc6 5. Bxc4 e6"
     }
   ],
-  "illegal_wins": [
-    {
-      "game": 33,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 35,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 37,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 39,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 41,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 43,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 45,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 47,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 49,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    },
-    {
-      "game": 51,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 0,
-      "reason": "White makes an illegal move",
-      "opening": ""
-    }
-  ],
+  "illegal_wins": [],
+  "zero_ply_engine_failures": [],
   "mate_losses": [],
   "mate_wins": [],
-  "repetition_draws": 31,
+  "time_losses": [
+    {
+      "game": 2,
+      "white": "Codex-chess-learner",
+      "black": "Codex-chess",
+      "result": "0-1",
+      "plies": 40,
+      "reason": "White loses on time",
+      "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5"
+    }
+  ],
+  "time_wins": [],
+  "repetition_draws": 0,
   "repeated_opening_lines": [
     {
-      "line": "1. Nh3 Nh6 2. Ng5 Rg8 3. Nxh7 Rh8 4. Nxf8 Rg8 5. Nh7 Rh8",
-      "games": 31,
-      "learner_score": 15.5,
+      "line": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 Nc6 5. Bxc4 e6",
+      "games": 1,
+      "learner_score": 0.0,
       "wins": 0,
-      "draws": 31,
-      "losses": 0
-    },
-    {
-      "line": "",
-      "games": 20,
-      "learner_score": 10.0,
-      "wins": 10,
       "draws": 0,
-      "losses": 10
+      "losses": 1
     },
     {
-      "line": "1. Nf3 Nf6 2. Nc3 Nc6 3. e4 Nxe4 4. Nxe4 e5 5. Nxe5 Nxe5",
+      "line": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 c3 5. bxc3 e6",
       "games": 1,
       "learner_score": 0.5,
       "wins": 0,
       "draws": 1,
       "losses": 0
+    },
+    {
+      "line": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5",
+      "games": 1,
+      "learner_score": 0.0,
+      "wins": 0,
+      "draws": 0,
+      "losses": 1
     }
   ]
 }

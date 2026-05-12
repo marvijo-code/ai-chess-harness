@@ -62,6 +62,20 @@ def print_neutral_score_info() -> None:
     print("info depth 0 score cp 0 nodes 0 time 0", flush=True)
 
 
+class CodexTurnError(RuntimeError):
+    def __init__(self, message: str, code: str = ""):
+        super().__init__(message)
+        self.code = code
+
+
+def codex_error_message(error: dict | None) -> tuple[str, str]:
+    if not isinstance(error, dict):
+        return "unknown Codex app-server error", ""
+    message = str(error.get("message") or error)
+    code = str(error.get("codexErrorInfo") or error.get("code") or "")
+    return message, code
+
+
 def read_limited_text(path: Path, max_chars: int) -> str:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -240,13 +254,33 @@ class CodexAppServer:
                         text = extract_text_fragment(item) or self.turn_text.get(params["turnId"], "")
                         self.turn_text[params["turnId"]] = text
                 elif method == "turn/completed":
-                    turn_id = params["turn"]["id"]
+                    turn = params["turn"]
+                    turn_id = turn["id"]
                     fut = self.turn_done.get(turn_id)
                     if fut and not fut.done():
-                        fut.set_result(params["turn"])
+                        if turn.get("status") == "failed" or turn.get("error"):
+                            message, code = codex_error_message(turn.get("error"))
+                            fut.set_exception(CodexTurnError(message, code))
+                        else:
+                            fut.set_result(turn)
+                elif method == "error":
+                    message, code = codex_error_message(params.get("error"))
+                    turn_id = params.get("turnId")
+                    log(f"codex turn error: code={code or 'unknown'} willRetry={params.get('willRetry')} message={message}")
+                    fut = self.turn_done.get(turn_id)
+                    if fut and not fut.done():
+                        fut.set_exception(CodexTurnError(message, code))
                 elif method == "account/rateLimits/updated":
                     limits = params.get("rateLimits", {})
-                    log(f"account: planType={limits.get('planType')} credits={limits.get('credits')}")
+                    primary = limits.get("primary", {})
+                    secondary = limits.get("secondary", {})
+                    log(
+                        "account: "
+                        f"limit={limits.get('limitName')} "
+                        f"primary_used={primary.get('usedPercent')} reset={primary.get('resetsAt')} "
+                        f"secondary_used={secondary.get('usedPercent')} reset={secondary.get('resetsAt')} "
+                        f"planType={limits.get('planType')} credits={limits.get('credits')}"
+                    )
         except ConnectionClosed:
             return
 
@@ -376,6 +410,12 @@ class CodexAppServer:
                 data = parse_json_object(text)
                 move = str(data.get("uci", "")).strip()
                 comment = data.get("comment", "")
+            except CodexTurnError as exc:
+                code = f" code={exc.code}" if exc.code else ""
+                log(f"Codex app-server turn failed{code}; forfeiting without retry: {exc}")
+                print(f"info string Codex app-server turn failed{code}; forfeiting game", flush=True)
+                print_neutral_score_info()
+                return "0000"
             except Exception as exc:
                 self.invalid_model_moves += 1
                 log(

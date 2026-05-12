@@ -1,7 +1,7 @@
 param(
     [int]$Games = 10,
     [int]$Concurrency = 1,
-    [string]$Model = "gpt-5.3-codex-spark",
+    [string]$Model = "gpt-5.5",
     [string]$Effort = "low",
     [string]$TimeControl = "300+0",
     [int]$MaxMoves = 0,
@@ -15,7 +15,9 @@ param(
     [switch]$AttachLatest,
     [switch]$StartNewRun,
     [switch]$StopViewerWhenDone,
-    [switch]$NoLearnerAutoLearn
+    [switch]$NoLearnerAutoLearn,
+    [switch]$SkipModelPreflight,
+    [switch]$NoRepeat
 )
 
 $ErrorActionPreference = "Stop"
@@ -109,24 +111,32 @@ function Get-LatestFastChessPgnPath {
         Select-Object -First 1 -ExpandProperty FullName
 }
 
-if ($Games -lt 2) {
-    throw "-Games must be at least 2 because FastChess repeats paired colors."
+if ($Games -lt 1) {
+    throw "-Games must be at least 1."
 }
 
 $repoRoot = Resolve-RepoRoot
 $resultsRoot = Join-Path $repoRoot "out\fastchess"
 $viewerScript = Join-Path $repoRoot "tools\live_pgn_viewer.py"
+$mirrorScript = Join-Path $repoRoot "tools\mirror_fastchess_live_pgn.py"
 $runnerScript = Join-Path $repoRoot "install-and-run-fastchess-codex.ps1"
 $autolearnScript = Join-Path $repoRoot "tools\update_learner_knowledgebase.py"
+$preflightScript = Join-Path $repoRoot "tools\check_codex_model_available.py"
 
 if (-not (Test-Path $viewerScript)) {
     throw "Live PGN viewer script was not found: $viewerScript"
+}
+if (-not (Test-Path $mirrorScript)) {
+    throw "FastChess live mirror script was not found: $mirrorScript"
 }
 if (-not (Test-Path $runnerScript)) {
     throw "FastChess runner script was not found: $runnerScript"
 }
 if (-not (Test-Path $autolearnScript)) {
     throw "Learner autolearn script was not found: $autolearnScript"
+}
+if (-not (Test-Path $preflightScript)) {
+    throw "Codex model preflight script was not found: $preflightScript"
 }
 
 New-Item -ItemType Directory -Force -Path $resultsRoot | Out-Null
@@ -159,6 +169,16 @@ if (-not $pgnPath) {
     $runFastChess = $true
 }
 
+$modelAlreadyChecked = $false
+if ($runFastChess -and (-not $SkipModelPreflight)) {
+    Write-Host "Checking Codex model availability before starting viewer/run: $Model"
+    & python $preflightScript --model $Model --effort $Effort
+    if ($LASTEXITCODE -ne 0) {
+        throw "Codex model preflight failed for $Model. Choose another -Model or wait for the model limit reset before starting FastChess."
+    }
+    $modelAlreadyChecked = $true
+}
+
 $viewerPort = 8766
 if (-not (Test-PortAvailable -CandidatePort $viewerPort)) {
     $existingViewers = @(Get-LiveViewerProcessOnPort -ViewerPort $viewerPort)
@@ -178,10 +198,45 @@ $viewerErr = Join-Path $resultsRoot "$runName-$stamp-viewer.err.log"
 $launchOut = Join-Path $resultsRoot "$runName-$stamp-launch.out.log"
 $autolearnOut = Join-Path $resultsRoot "$runName-$stamp-autolearn.out.log"
 $autolearnErr = Join-Path $resultsRoot "$runName-$stamp-autolearn.err.log"
+$liveRoot = Join-Path $repoRoot "out\live"
+$engineLogRoot = Join-Path $repoRoot "out\codex-chess-logs"
+$mirrorProcess = $null
+$viewerPgnPath = $pgnPath
+$mirrorOut = Join-Path $resultsRoot "$runName-$stamp-mirror.out.log"
+$mirrorErr = Join-Path $resultsRoot "$runName-$stamp-mirror.err.log"
+
+New-Item -ItemType Directory -Force -Path $liveRoot | Out-Null
+
+$candidateLaunchOut = $launchOut
+if (-not $runFastChess) {
+    $candidateLaunchOut = [System.IO.Path]::ChangeExtension($pgnPath, $null) + "-launch.out.log"
+}
+
+if ($runFastChess -or (Test-Path $candidateLaunchOut)) {
+    $pgnLeaf = [System.IO.Path]::GetFileNameWithoutExtension($pgnPath)
+    $viewerPgnPath = Join-Path $liveRoot "$pgnLeaf-live.pgn"
+    $mirrorArgs = @(
+        $mirrorScript,
+        "--fastchess-stdout", $candidateLaunchOut,
+        "--engine-log-dir", $engineLogRoot,
+        "--output", $viewerPgnPath,
+        "--interval", "1"
+    )
+    $mirrorProcess = Start-Process `
+        -FilePath "python" `
+        -ArgumentList (ConvertTo-ProcessArguments -Arguments $mirrorArgs) `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $mirrorOut `
+        -RedirectStandardError $mirrorErr `
+        -WindowStyle Hidden `
+        -PassThru
+    Write-Host "FastChess live mirror is running as process $($mirrorProcess.Id)."
+    Write-Host "Viewer mirror PGN: $viewerPgnPath"
+}
 
 $viewerArgs = @(
     $viewerScript,
-    "--pgn", $pgnPath,
+    "--pgn", $viewerPgnPath,
     "--host", "127.0.0.1",
     "--port", "$viewerPort",
     "--stats-dir", (Join-Path $repoRoot "out"),
@@ -193,7 +248,8 @@ if ($NoAnalysis) {
 }
 
 Write-Host "Starting local live viewer: $viewerUrl"
-Write-Host "Viewer PGN: $pgnPath"
+Write-Host "FastChess PGN output: $pgnPath"
+Write-Host "Viewer PGN: $viewerPgnPath"
 Write-Host "FastChess PGN output updates as FastChess writes it; use play_codex_vs_stockfish.py for ply-by-ply live PGN."
 
 $viewerProcess = Start-Process `
@@ -235,21 +291,27 @@ if (-not $runFastChess) {
     return
 }
 
-$runArgs = @(
-    "-Games", "$Games",
-    "-Concurrency", "$Concurrency",
-    "-Model", $Model,
-    "-Effort", $Effort,
-    "-TimeControl", $TimeControl,
-    "-FastChessVersion", $FastChessVersion,
-    "-RunName", $runName,
-    "-Stamp", $stamp
-)
+$runParams = @{
+    Games            = $Games
+    Concurrency      = $Concurrency
+    Model            = $Model
+    Effort           = $Effort
+    TimeControl      = $TimeControl
+    FastChessVersion = $FastChessVersion
+    RunName          = $runName
+    Stamp            = $stamp
+}
 if ($MaxMoves -gt 0) {
-    $runArgs += @("-MaxMoves", "$MaxMoves")
+    $runParams.MaxMoves = $MaxMoves
 }
 if ($ForceInstall) {
-    $runArgs += "-ForceInstall"
+    $runParams.ForceInstall = $true
+}
+if ($SkipModelPreflight -or $modelAlreadyChecked) {
+    $runParams.SkipModelPreflight = $true
+}
+if ($NoRepeat) {
+    $runParams.NoRepeat = $true
 }
 
 $autolearnProcess = $null
@@ -268,7 +330,7 @@ if (-not $NoLearnerAutoLearn) {
 }
 
 try {
-    & $runnerScript @runArgs 2>&1 | Tee-Object -FilePath $launchOut
+    & $runnerScript @runParams 2>&1 | Tee-Object -FilePath $launchOut
 } finally {
     if ($StopViewerWhenDone -and -not $viewerProcess.HasExited) {
         Stop-Process -Id $viewerProcess.Id -Force
@@ -279,5 +341,11 @@ try {
     }
     if ($autolearnProcess -and -not $autolearnProcess.HasExited) {
         Write-Host "Learner autolearn is still running as process $($autolearnProcess.Id)."
+    }
+    if ($StopViewerWhenDone -and $mirrorProcess -and -not $mirrorProcess.HasExited) {
+        Stop-Process -Id $mirrorProcess.Id -Force
+        Write-Host "Stopped FastChess live mirror process $($mirrorProcess.Id)."
+    } elseif ($mirrorProcess -and -not $mirrorProcess.HasExited) {
+        Write-Host "FastChess live mirror is still running as process $($mirrorProcess.Id)."
     }
 }

@@ -1,14 +1,16 @@
 param(
     [int]$Games = 10,
     [int]$Concurrency = 1,
-    [string]$Model = "gpt-5.3-codex-spark",
+    [string]$Model = "gpt-5.5",
     [string]$Effort = "low",
     [string]$TimeControl = "300+0",
     [int]$MaxMoves = 0,
     [string]$FastChessVersion = "latest",
     [string]$RunName = "codex-vs-codex-learner",
     [string]$Stamp = "",
-    [switch]$ForceInstall
+    [switch]$ForceInstall,
+    [switch]$SkipModelPreflight,
+    [switch]$NoRepeat
 )
 
 $ErrorActionPreference = "Stop"
@@ -98,11 +100,11 @@ function Install-FastChess {
     return $fastChessExe
 }
 
-if ($Games -lt 2) {
-    throw "-Games must be at least 2 because FastChess repeats paired colors."
+if ($Games -lt 1) {
+    throw "-Games must be at least 1."
 }
 
-$rounds = [Math]::Ceiling($Games / 2)
+$rounds = if ($NoRepeat) { $Games } else { [Math]::Ceiling($Games / 2) }
 if ($RunName -match '[\\/:*?"<>|]') {
     throw "-RunName must be a file-name-safe value, without path separators or reserved characters."
 }
@@ -120,6 +122,15 @@ $configPath = Join-Path $resultsRoot "$outputBaseName-config.json"
 $logPath = Join-Path $resultsRoot "$outputBaseName.log"
 
 $fastChess = Install-FastChess -Version $FastChessVersion
+$preflight = Join-Path $repoRoot "tools\check_codex_model_available.py"
+
+if (-not $SkipModelPreflight) {
+    Write-Host "Checking Codex model availability: $Model"
+    & python $preflight --model $Model --effort $Effort
+    if ($LASTEXITCODE -ne 0) {
+        throw "Codex model preflight failed for $Model. Choose another -Model or wait for the model limit reset before starting FastChess."
+    }
+}
 
 $env:CODEX_CHESS_MODEL = $Model
 $env:CODEX_CHESS_EFFORT = $Effort
@@ -129,7 +140,11 @@ Write-Host "Engine model override: $Model"
 Write-Host "Effort: $Effort"
 Write-Host "TimeControl: $TimeControl"
 Write-Host "Games requested: $Games"
-Write-Host "Rounds: $rounds with -repeat, so FastChess will schedule $($rounds * 2) games."
+if ($NoRepeat) {
+    Write-Host "Rounds: $rounds without -repeat, so FastChess will schedule exactly $rounds games."
+} else {
+    Write-Host "Rounds: $rounds with -repeat, so FastChess will schedule $($rounds * 2) games."
+}
 if ($MaxMoves -gt 0) {
     Write-Host "MaxMoves: $MaxMoves"
 } else {
@@ -143,7 +158,6 @@ $fastChessArgs = @(
     "-engine", "cmd=$learnerEngine", "name=Codex-chess-learner", "proto=uci", "restart=on",
     "-each", "tc=$TimeControl", "timemargin=5000",
     "-rounds", "$rounds",
-    "-repeat",
     "-concurrency", "$Concurrency",
     "-ratinginterval", "1",
     "-pgnout", "file=$pgnPath", "notation=san", "append=false", "timeleft=true", "latency=true",
@@ -152,6 +166,15 @@ $fastChessArgs = @(
     "-recover",
     "-log", "file=$logPath", "level=info", "append=false"
 )
+
+if (-not $NoRepeat) {
+    $repeatInsertIndex = [Array]::IndexOf($fastChessArgs, "-concurrency")
+    $fastChessArgs = @(
+        $fastChessArgs[0..($repeatInsertIndex - 1)]
+        "-repeat"
+        $fastChessArgs[$repeatInsertIndex..($fastChessArgs.Count - 1)]
+    )
+}
 
 if ($MaxMoves -gt 0) {
     $concurrencyIndex = [Array]::IndexOf($fastChessArgs, "-concurrency")

@@ -722,6 +722,7 @@ INDEX_HTML = """<!doctype html>
     let configData = [];
     let rawConfigMode = false;
     let analysisEnabled = true;
+    let analysisAvailable = true;
     let activeTheme = "light";
     let followLive = true;
     let latestGame = null;
@@ -755,8 +756,7 @@ INDEX_HTML = """<!doctype html>
     function loadPreferences() {
       applyTheme(localStorage.getItem("livePgnTheme") || "light");
       analysisEnabled = localStorage.getItem("livePgnAnalysis") !== "off";
-      document.getElementById("analysis-toggle").checked = analysisEnabled;
-      document.getElementById("analysis-panel-toggle").checked = analysisEnabled;
+      updateAnalysisControls();
       followLive = localStorage.getItem("livePgnFollow") !== "off";
       document.getElementById("follow-toggle").checked = followLive;
       updateLogSideButtons();
@@ -775,11 +775,22 @@ INDEX_HTML = """<!doctype html>
       if (latestLearnerData) renderLearner(latestLearnerData);
     }
 
+    function updateAnalysisControls() {
+      for (const id of ["analysis-toggle", "analysis-panel-toggle"]) {
+        const el = document.getElementById(id);
+        el.checked = analysisAvailable && analysisEnabled;
+        el.disabled = !analysisAvailable;
+      }
+    }
+
     function setAnalysisEnabled(enabled) {
+      if (!analysisAvailable && enabled) {
+        updateAnalysisControls();
+        return;
+      }
       analysisEnabled = enabled;
       localStorage.setItem("livePgnAnalysis", analysisEnabled ? "on" : "off");
-      document.getElementById("analysis-toggle").checked = analysisEnabled;
-      document.getElementById("analysis-panel-toggle").checked = analysisEnabled;
+      updateAnalysisControls();
       refresh();
     }
 
@@ -874,6 +885,58 @@ INDEX_HTML = """<!doctype html>
       return Math.max(0, Math.min(viewedPly, maxPly));
     }
 
+    function fenPrefix(fen) {
+      return String(fen || "").split(" ").slice(0, 4).join(" ");
+    }
+
+    function logFen(text) {
+      const value = String(text || "");
+      const match = value.match(/\\bfen=(.*?)\\s+(?:legal_moves=|go=)/i) || value.match(/\\bfrom fen=(.*?)\\s+go=/i);
+      return match ? fenPrefix(match[1]) : "";
+    }
+
+    function logMove(text) {
+      const value = String(text || "");
+      const match = value.match(/\\b(?:bestmove|move)=([a-h][1-8][a-h][1-8][qrbn]?|0000)\\b/i);
+      return match ? match[1].toLowerCase() : "";
+    }
+
+    function logsForBoardPly(logs) {
+      if (!logs || !logs.length) return { logs: [], label: "No bot decisions logged yet." };
+      if (!latestGame || !latestGame.has_game || followLive) {
+        return { logs: logs.slice(0, 36), label: `${filterLogsBySide(logs.slice(0, 36)).length} / ${Math.min(logs.length, 36)} recent entries` };
+      }
+      const ply = selectedPly(latestGame);
+      const moves = latestGame.moves || [];
+      const positions = latestGame.positions || [];
+      const move = moves[ply - 1] || null;
+      const before = positions.find(item => item.ply === Math.max(0, ply - 1));
+      const targetFen = before ? fenPrefix(before.fen) : "";
+      const targetMove = move ? String(move.uci || "").toLowerCase() : "";
+      const targetSide = move ? String(move.side || "").toLowerCase() : "";
+      const matched = logs.filter(entry => {
+        const text = entry.text || "";
+        const entryFen = logFen(text);
+        const entryMove = logMove(text);
+        const entrySide = String(entry.side || "").toLowerCase();
+        if (entryMove && targetMove && entryMove === targetMove) return true;
+        if (entryFen && targetFen && entryFen === targetFen && (!targetSide || !entrySide || entrySide === targetSide)) return true;
+        return false;
+      }).sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
+      const moveLabel = move ? `${move.side} ${move.san || move.uci}` : "start position";
+      return {
+        logs: matched,
+        label: `${filterLogsBySide(matched).length} entries for ply ${ply}: ${moveLabel}`,
+      };
+    }
+
+    function renderBoardThinking() {
+      const logs = latestLearnerData && Array.isArray(latestLearnerData.logs) ? latestLearnerData.logs : [];
+      const selected = logsForBoardPly(logs);
+      document.getElementById("board-thinking-meta").textContent = selected.label;
+      document.getElementById("board-thinking-logs").innerHTML = logListHtml(selected.logs, "No bot decisions matched this replay move.");
+    }
+
     function formatClock(ms) {
       if (!Number.isFinite(ms)) return "--:--";
       const clamped = Math.max(0, Math.floor(ms));
@@ -949,7 +1012,8 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("next-move").disabled = ply >= data.moves.length;
       renderBoard(position.fen, position.last_move);
       renderMoves(data.moves, white, black);
-      renderAnalysis(analysisEnabled ? data.analysis : { enabled: false });
+      renderAnalysis(analysisEnabled ? data.analysis : { enabled: false }, analysisEnabled);
+      renderBoardThinking();
     }
 
     function setFollowLive(enabled) {
@@ -976,10 +1040,28 @@ INDEX_HTML = """<!doctype html>
       const container = document.getElementById("analysis");
       const meta = document.getElementById("analysis-meta");
       if (!analysis || analysis.enabled === false) {
+        if (!analysisAvailable) {
+          updateAnalysisControls();
+          meta.textContent = "Unavailable";
+          container.innerHTML = '<div class="empty">Analysis is unavailable. Start the viewer with Stockfish analysis enabled.</div>';
+          return;
+        }
+        if (analysisEnabled) {
+          analysisAvailable = false;
+          analysisEnabled = false;
+          localStorage.setItem("livePgnAnalysis", "off");
+          updateAnalysisControls();
+          meta.textContent = "Unavailable";
+          container.innerHTML = '<div class="empty">Analysis is unavailable. Start the viewer with Stockfish analysis enabled.</div>';
+          return;
+        }
+        updateAnalysisControls();
         meta.textContent = "";
-        container.innerHTML = '<div class="empty">Analysis is disabled.</div>';
+        container.innerHTML = '<div class="empty">Analysis is off.</div>';
         return;
       }
+      analysisAvailable = true;
+      updateAnalysisControls();
       if (analysis.error) {
         meta.textContent = "";
         container.innerHTML = `<div class="empty err">${escapeHtml(analysis.error)}</div>`;
@@ -1093,8 +1175,7 @@ INDEX_HTML = """<!doctype html>
       const filteredLogs = filterLogsBySide(logs);
       document.getElementById("learner-logs-meta").textContent = `${filteredLogs.length} / ${logs.length} entries`;
       document.getElementById("learner-logs").innerHTML = logListHtml(logs, "No learner log entries yet.");
-      document.getElementById("board-thinking-meta").textContent = `${filterLogsBySide(logs.slice(0, 36)).length} / ${Math.min(logs.length, 36)} recent entries`;
-      document.getElementById("board-thinking-logs").innerHTML = logListHtml(logs.slice(0, 36), "No bot decisions logged yet.");
+      renderBoardThinking();
     }
 
     async function loadLearner() {
@@ -1808,7 +1889,14 @@ def classify_log_line(line: str) -> str:
         return "prompt"
     if "decision comment" in lower:
         return "comment"
-    if "illegal codex move" in lower or "invalid codex response" in lower or "invalid model" in lower:
+    if (
+        "illegal codex move" in lower
+        or "invalid codex response" in lower
+        or "invalid model" in lower
+        or "codex turn error" in lower
+        or "codex app-server turn failed" in lower
+        or "usagelimitexceeded" in lower
+    ):
         return "repair"
     if "bestmove" in lower:
         return "move"
@@ -1873,6 +1961,8 @@ def collect_learner_logs(max_entries: int = 80) -> tuple[list[dict], int]:
                     "illegal Codex move",
                     "invalid Codex response",
                     "invalid model",
+                    "codex turn error",
+                    "Codex app-server turn failed",
                     "bestmove ",
                 )
             ):

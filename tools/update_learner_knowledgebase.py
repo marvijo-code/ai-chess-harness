@@ -30,6 +30,8 @@ THINKING_MARKERS = (
     "illegal Codex move",
     "invalid Codex response",
     "invalid model",
+    "codex turn error",
+    "Codex app-server turn failed",
     "bestmove ",
 )
 
@@ -152,8 +154,11 @@ def summarize(games: list[dict], total: int | None, pgn: Path, stdout: Path | No
     reason_counts = Counter(game["reason_class"] for game in completed)
     illegal_losses = []
     illegal_wins = []
+    zero_ply_engine_failures = []
     mate_losses = []
     mate_wins = []
+    time_losses = []
+    time_wins = []
     repetition_draws = []
     signatures = defaultdict(lambda: {"games": 0, "score": 0.0, "draws": 0, "losses": 0, "wins": 0})
 
@@ -161,19 +166,23 @@ def summarize(games: list[dict], total: int | None, pgn: Path, stdout: Path | No
         point = learner_points(game)
         if point is None:
             continue
-        signature = format_line(game["san"], max_plies=10)
-        entry = signatures[signature]
-        entry["games"] += 1
-        entry["score"] += point
-        if point == 0.5:
-            entry["draws"] += 1
-        elif point == 1.0:
-            entry["wins"] += 1
-        else:
-            entry["losses"] += 1
+        if game["plies"] > 0:
+            signature = format_line(game["san"], max_plies=10)
+            entry = signatures[signature]
+            entry["games"] += 1
+            entry["score"] += point
+            if point == 0.5:
+                entry["draws"] += 1
+            elif point == 1.0:
+                entry["wins"] += 1
+            else:
+                entry["losses"] += 1
 
         illegal_side = side_making_illegal(game["reason"])
         if illegal_side:
+            if game["plies"] == 0:
+                zero_ply_engine_failures.append(game)
+                continue
             learner_side = "white" if game["white"] == LEARNER else "black" if game["black"] == LEARNER else ""
             if illegal_side == learner_side:
                 illegal_losses.append(game)
@@ -184,6 +193,11 @@ def summarize(games: list[dict], total: int | None, pgn: Path, stdout: Path | No
                 mate_wins.append(game)
             elif point == 0.0:
                 mate_losses.append(game)
+        if game["reason_class"] == "time":
+            if point == 1.0:
+                time_wins.append(game)
+            elif point == 0.0:
+                time_losses.append(game)
         if game["reason_class"] == "threefold repetition":
             repetition_draws.append(game)
 
@@ -199,8 +213,11 @@ def summarize(games: list[dict], total: int | None, pgn: Path, stdout: Path | No
         "reason_counts": dict(reason_counts),
         "illegal_losses": [brief_game(game) for game in illegal_losses[-12:]],
         "illegal_wins": [brief_game(game) for game in illegal_wins[-12:]],
+        "zero_ply_engine_failures": [brief_game(game) for game in zero_ply_engine_failures[-12:]],
         "mate_losses": [brief_game(game) for game in mate_losses[-12:]],
         "mate_wins": [brief_game(game) for game in mate_wins[-12:]],
+        "time_losses": [brief_game(game) for game in time_losses[-12:]],
+        "time_wins": [brief_game(game) for game in time_wins[-12:]],
         "repetition_draws": len(repetition_draws),
         "repeated_opening_lines": [
             {
@@ -257,6 +274,15 @@ def render_markdown(summary: dict) -> str:
                 f"- {item['games']} games, score {item['learner_score']}: {item['line'] or '[empty line]'}"
             )
 
+    if summary.get("zero_ply_engine_failures"):
+        lines += [
+            "",
+            "## Engine Availability Failures",
+            "- Zero-ply illegal losses are engine/app-server failures, not chess-position lessons. Do not learn an empty opening line from them.",
+        ]
+        for game in summary["zero_ply_engine_failures"]:
+            lines.append(f"- Game {game['game']} as {learner_side(game)}: {game['reason']}")
+
     if summary["illegal_losses"]:
         lines += ["", "## Learner Illegal-Move Losses"]
         for game in summary["illegal_losses"]:
@@ -265,6 +291,15 @@ def render_markdown(summary: dict) -> str:
     if summary["mate_losses"]:
         lines += ["", "## Learner Mate Losses"]
         for game in summary["mate_losses"]:
+            lines.append(f"- Game {game['game']} as {learner_side(game)}: {game['reason']} after {game['plies']} plies; {game['opening']}")
+    if summary.get("time_losses"):
+        lines += [
+            "",
+            "## Learner Time Losses",
+            "- Time losses are move-selection failures. Below 25 seconds, return strict JSON immediately with any clearly legal non-repetition move; do not search for perfection.",
+            "- Prefer a forcing capture, check, passed-pawn push, king move toward passed pawns, or simple recapture that is copied exactly from `legal_moves`.",
+        ]
+        for game in summary["time_losses"]:
             lines.append(f"- Game {game['game']} as {learner_side(game)}: {game['reason']} after {game['plies']} plies; {game['opening']}")
     lines.append("")
     return "\n".join(lines)
@@ -312,7 +347,14 @@ def classify_log_line(line: str) -> str:
         return "prompt"
     if "decision comment" in lower:
         return "comment"
-    if "illegal codex move" in lower or "invalid codex response" in lower or "invalid model" in lower:
+    if (
+        "illegal codex move" in lower
+        or "invalid codex response" in lower
+        or "invalid model" in lower
+        or "codex turn error" in lower
+        or "codex app-server turn failed" in lower
+        or "usagelimitexceeded" in lower
+    ):
         return "repair"
     if "bestmove" in lower:
         return "move"
@@ -462,6 +504,7 @@ def update_memory(memory_path: Path, summary: dict) -> None:
             f"- Result reasons: {', '.join(f'{key}={value}' for key, value in sorted(summary['reason_counts'].items()))}.",
             "- Apply `knowledgebase/live-match-lessons.md` before choosing moves.",
             "- Avoid threefold repetition loops unless drawing is the only practical outcome.",
+            "- If own clock is below 25 seconds, output strict JSON immediately with a legal practical move.",
             "- Never return a move outside `legal_moves`; never return `0000` while legal moves exist.",
             MEMORY_END,
         ]
