@@ -115,9 +115,15 @@ To start the local viewer before FastChess and open it against the exact PGN pat
 .\watch-fastchess-live-match.ps1
 ```
 
+For the short command form, use `play-games.ps1`; `-n` is an alias for `-Games`:
+
+```powershell
+.\play-games.ps1 -n 100
+```
+
 The FastChess live wrapper uses the single dedicated local viewer URL `http://127.0.0.1:8766/`. If an older live-viewer process is already on that port, the wrapper restarts that viewer on the same port instead of moving to another URL. The wrapper does not expose a port selector. While FastChess is still inside a game, the wrapper starts `tools\mirror_fastchess_live_pgn.py` and points the viewer at `out\live\<run>-live.pgn` so the board has a current position before FastChess writes the final `-pgnout` game.
 
-The viewer uses a three-column desktop layout: the left pane shows fixed-height bot thinking logs and Engine Analysis, the center pane shows the board, and the right pane keeps the leaderboard, previous matches, moves, and config. In Follow Live mode the thinking pane shows recent live entries with the current move number. During replay navigation, the thinking pane follows the selected ply and shows the prompt/comment/bestmove entries that match the move being replayed, but it does not auto-refresh while Follow Live is off so the text stays copyable. Completed games show the winner as `<player> (<colour>) won`, for example `Codex-chess-learner (White) won`. Previous matches appear below the leaderboard, paginate 5 completed games per page, and each row can be clicked to load that archived game in the board viewer with matching bot logs. The board shows the black-side player above the board and the white-side player below the board, matching the normal board orientation. Engine Analysis stays switchable from the top toolbar and the analysis panel; if the server was started with analysis disabled, the UI controls show that disabled state instead of claiming analysis is on.
+The viewer uses a three-column desktop layout: the left pane shows fixed-height bot thinking logs and Engine Analysis, the center pane shows the board, and the right pane keeps the leaderboard, previous matches, moves, and config. In Follow Live mode the thinking pane shows recent live entries with the current move number. During replay navigation, the thinking pane follows the selected ply and shows the prompt/comment/bestmove entries that match the move being replayed, but it does not auto-refresh while Follow Live is off so the text stays copyable. Completed games show the winner as `<player> (<colour>) won`, for example `Codex-chess-learner (White) won`. Previous matches appear below the leaderboard, paginate 5 completed games per page, and each row can be clicked to load that archived game in the board viewer with matching bot logs. Each active live or archived game shows the tournament slug derived from the PGN filename, the browser URL hash mirrors that slug, and the header copy icon copies the full absolute PGN path. The board shows the black-side player above the board and the white-side player below the board, matching the normal board orientation. Engine Analysis stays switchable from the top toolbar and the analysis panel; if the server was started with analysis disabled, the UI controls show that disabled state instead of claiming analysis is on.
 
 For a short viewer smoke run, pass the same match options through the wrapper:
 
@@ -147,6 +153,24 @@ python .\tools\update_learner_knowledgebase.py `
   --pgn .\out\fastchess\<run>.pgn `
   --stdout .\out\fastchess\<run>-launch.out.log `
   --watch
+```
+
+## FEN interpretation curriculum
+
+Use the FEN curriculum when the learner needs to improve raw position interpretation before or between match runs. It generates 50 deterministic hidden-answer multiple-choice tests covering square occupancy, side to move, check state, material and total piece counts, king locations, castling rights, en-passant state, promotion syntax, and legal-move recognition.
+
+The model is prompted through local Codex app-server auth with explicit no-online-search and no-tool-use rules. Answers are graded locally with `python-chess`; after each cycle, missed-question lessons are written to `engines\codex-chess-learner\knowledgebase\fen-curriculum-lessons.md`, a JSON result is written beside it, and the learner `MEMORY.md` gets a concise FEN curriculum summary. The model itself is not given the hidden answers before answering.
+
+Run the intended GPT-5.3 Codex curriculum:
+
+```powershell
+python .\tools\run_fen_curriculum.py --model gpt-5.3-codex --effort medium --max-cycles 4
+```
+
+Run the offline validator without Codex app-server:
+
+```powershell
+python .\tools\run_fen_curriculum.py --offline-validate --no-write-memory --json .\out\fen-curriculum-offline.json --markdown .\out\fen-curriculum-offline.md
 ```
 
 Use `tools\play_codex_vs_stockfish.py` when a native move-by-move live PGN is required without FastChess log mirroring.

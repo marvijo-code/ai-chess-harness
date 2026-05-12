@@ -1,0 +1,1458 @@
+{
+  "generated_at": "2026-05-12 11:08:59",
+  "model": "gpt-5.3-codex",
+  "question_count": 50,
+  "final_score": 50,
+  "mastered": true,
+  "error": "",
+  "cycles": [
+    {
+      "cycle": 1,
+      "mode": "full",
+      "attempts": [
+        {
+          "question": {
+            "id": "fen-001",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "What is on e1?",
+            "concept": "square occupancy",
+            "explanation": "e1 contains White King. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "In the starting position FEN, e1 contains the White king.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "White King"
+        },
+        {
+          "question": {
+            "id": "fen-002",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "What is on d8?",
+            "concept": "square occupancy",
+            "explanation": "d8 contains Black Queen. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "On rank 8, file d is occupied by the Black queen.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "Black Queen"
+        },
+        {
+          "question": {
+            "id": "fen-003",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "What is on e5?",
+            "concept": "square occupancy",
+            "explanation": "e5 contains Empty. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "d",
+          "model_reason": "Square e5 is empty in the given starting-position board layout.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "Empty"
+        },
+        {
+          "question": {
+            "id": "fen-004",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "Which side is to move?",
+            "concept": "side to move",
+            "explanation": "The second FEN field is w, so white to move."
+          },
+          "model_answer": "b",
+          "model_reason": "The side-to-move field is 'w', meaning White to move.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "White to move"
+        },
+        {
+          "question": {
+            "id": "fen-005",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "Which castling rights are present?",
+            "concept": "castling rights",
+            "explanation": "The third FEN field is 'KQkq', meaning: White kingside, White queenside, Black kingside, Black queenside."
+          },
+          "model_answer": "b",
+          "model_reason": "Castling field is 'KQkq', so all four castling rights are present.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "White kingside, White queenside, Black kingside, Black queenside"
+        },
+        {
+          "question": {
+            "id": "fen-006",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "What is the en-passant target square?",
+            "concept": "en-passant field",
+            "explanation": "The fourth FEN field is '-', so the en-passant target is No en-passant square."
+          },
+          "model_answer": "c",
+          "model_reason": "En-passant field is '-', which means no en-passant target square.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "No en-passant square"
+        },
+        {
+          "question": {
+            "id": "fen-007",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 32 occupied squares."
+          },
+          "model_answer": "b",
+          "model_reason": "This is the standard initial setup with all pieces present: 32 total.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "32"
+        },
+        {
+          "question": {
+            "id": "fen-008",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "How many white pawns are on the board?",
+            "concept": "material count",
+            "explanation": "There are 8 white pawns in the piece-placement field."
+          },
+          "model_answer": "c",
+          "model_reason": "White has all eight pawns on rank 2 in this position.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "8"
+        },
+        {
+          "question": {
+            "id": "fen-009",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "What is on c4?",
+            "concept": "square occupancy",
+            "explanation": "c4 contains White Bishop. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "In '2B1P3' on rank 4, c4 is occupied by a White bishop.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "White Bishop"
+        },
+        {
+          "question": {
+            "id": "fen-010",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "What is on c6?",
+            "concept": "square occupancy",
+            "explanation": "c6 contains Black Knight. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "c",
+          "model_reason": "In '2n5' on rank 6, c6 is occupied by a Black knight.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "Black Knight"
+        },
+        {
+          "question": {
+            "id": "fen-011",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "Which side is to move?",
+            "concept": "side to move",
+            "explanation": "The second FEN field is b, so black to move."
+          },
+          "model_answer": "c",
+          "model_reason": "The side-to-move field is 'b', so Black moves.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "Black to move"
+        },
+        {
+          "question": {
+            "id": "fen-012",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "Where is the white king?",
+            "concept": "king location",
+            "explanation": "The white king is on e1."
+          },
+          "model_answer": "a",
+          "model_reason": "In the first-rank segment 'RNBQK2R', the white king is on e1.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "e1"
+        },
+        {
+          "question": {
+            "id": "fen-013",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "Which castling rights are present?",
+            "concept": "castling rights",
+            "explanation": "The third FEN field is 'KQkq', meaning: White kingside, White queenside, Black kingside, Black queenside."
+          },
+          "model_answer": "b",
+          "model_reason": "Castling rights are 'KQkq', meaning all four rights are available.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "White kingside, White queenside, Black kingside, Black queenside"
+        },
+        {
+          "question": {
+            "id": "fen-014",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "How many black knights are on the board?",
+            "concept": "material count",
+            "explanation": "There are 2 black knights in the piece-placement field."
+          },
+          "model_answer": "d",
+          "model_reason": "Black knights are on b8 and c6, so there are 2.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "2"
+        },
+        {
+          "question": {
+            "id": "fen-015",
+            "fen": "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1",
+            "prompt": "What is the check status in this position?",
+            "concept": "check status",
+            "explanation": "python-chess legal interpretation reports: Black king is in check. Check depends on attacks on the side-to-move king."
+          },
+          "model_answer": "b",
+          "model_reason": "White queen on e4 attacks e8 along the e-file with no blockers, so Black king is in check.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "Black king is in check"
+        },
+        {
+          "question": {
+            "id": "fen-016",
+            "fen": "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1",
+            "prompt": "What is on e4?",
+            "concept": "square occupancy",
+            "explanation": "e4 contains White Queen. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "c",
+          "model_reason": "Square e4 contains the white queen.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "White Queen"
+        },
+        {
+          "question": {
+            "id": "fen-017",
+            "fen": "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1",
+            "prompt": "Where is the black king?",
+            "concept": "king location",
+            "explanation": "The black king is on e8."
+          },
+          "model_answer": "d",
+          "model_reason": "In '4k3' on rank 8, the black king is on e8.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "e8"
+        },
+        {
+          "question": {
+            "id": "fen-018",
+            "fen": "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 3 occupied squares."
+          },
+          "model_answer": "a",
+          "model_reason": "Only three pieces remain: white king, white queen, black king.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "3"
+        },
+        {
+          "question": {
+            "id": "fen-019",
+            "fen": "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "e8d8 is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "c",
+          "model_reason": "From e8, moving to d8 escapes the e-file check and is legal; e8e7 and e8e6 stay on the attacked file, and a7a6 has no piece on a7.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "e8d8"
+        },
+        {
+          "question": {
+            "id": "fen-020",
+            "fen": "8/8/8/3k4/8/4K3/8/8 w - - 20 71",
+            "prompt": "What is on d5?",
+            "concept": "square occupancy",
+            "explanation": "d5 contains Black King. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "b",
+          "model_reason": "In '3k4' on rank 5, d5 is occupied by the black king.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "Black King"
+        },
+        {
+          "question": {
+            "id": "fen-021",
+            "fen": "8/8/8/3k4/8/4K3/8/8 w - - 20 71",
+            "prompt": "Which side is to move?",
+            "concept": "side to move",
+            "explanation": "The second FEN field is w, so white to move."
+          },
+          "model_answer": "c",
+          "model_reason": "The FEN side-to-move field is 'w', so White to move.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "White to move"
+        },
+        {
+          "question": {
+            "id": "fen-022",
+            "fen": "8/8/8/3k4/8/4K3/8/8 w - - 20 71",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 2 occupied squares."
+          },
+          "model_answer": "b",
+          "model_reason": "Only two kings are on the board (black king on d5, white king on e3).",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "2"
+        },
+        {
+          "question": {
+            "id": "fen-023",
+            "fen": "8/8/8/3k4/8/4K3/8/8 w - - 20 71",
+            "prompt": "What is the check status in this position?",
+            "concept": "check status",
+            "explanation": "python-chess legal interpretation reports: No king is in check. Check depends on attacks on the side-to-move king."
+          },
+          "model_answer": "c",
+          "model_reason": "Kings are not adjacent and neither attacks the other, so no king is in check.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "No king is in check"
+        },
+        {
+          "question": {
+            "id": "fen-024",
+            "fen": "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3",
+            "prompt": "What is the en-passant target square?",
+            "concept": "en-passant field",
+            "explanation": "The fourth FEN field is 'd6', so the en-passant target is d6."
+          },
+          "model_answer": "c",
+          "model_reason": "The en-passant field in the FEN is 'd6'.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "d6"
+        },
+        {
+          "question": {
+            "id": "fen-025",
+            "fen": "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3",
+            "prompt": "What is on e5?",
+            "concept": "square occupancy",
+            "explanation": "e5 contains White Pawn. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "In '3pP3' on rank 5, e5 contains a white pawn.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "White Pawn"
+        },
+        {
+          "question": {
+            "id": "fen-026",
+            "fen": "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "e5d6 is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "d",
+          "model_reason": "White to move can capture en passant from e5 to d6 because the target square is d6.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "e5d6"
+        },
+        {
+          "question": {
+            "id": "fen-027",
+            "fen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            "prompt": "Which castling rights are present?",
+            "concept": "castling rights",
+            "explanation": "The third FEN field is 'KQkq', meaning: White kingside, White queenside, Black kingside, Black queenside."
+          },
+          "model_answer": "d",
+          "model_reason": "Castling rights field is 'KQkq', meaning all four castling rights are present.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "White kingside, White queenside, Black kingside, Black queenside"
+        },
+        {
+          "question": {
+            "id": "fen-028",
+            "fen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "e1g1 is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "d",
+          "model_reason": "White can castle kingside from e1 to g1 in this position.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "e1g1"
+        },
+        {
+          "question": {
+            "id": "fen-029",
+            "fen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            "prompt": "Where is the black king?",
+            "concept": "king location",
+            "explanation": "The black king is on e8."
+          },
+          "model_answer": "c",
+          "model_reason": "In 'r3k2r' on rank 8, the black king is on e8.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "e8"
+        },
+        {
+          "question": {
+            "id": "fen-030",
+            "fen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            "prompt": "How many white rooks are on the board?",
+            "concept": "material count",
+            "explanation": "There are 2 white rooks in the piece-placement field."
+          },
+          "model_answer": "b",
+          "model_reason": "White rooks are on a1 and h1, so there are 2.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "2"
+        },
+        {
+          "question": {
+            "id": "fen-031",
+            "fen": "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+            "prompt": "What is on a7?",
+            "concept": "square occupancy",
+            "explanation": "a7 contains White Pawn. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "In the FEN rank 7 is \"P7\", so a7 has a white pawn.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "White Pawn"
+        },
+        {
+          "question": {
+            "id": "fen-032",
+            "fen": "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "a7a8q is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "b",
+          "model_reason": "White pawn on a7 can legally advance to a8 and must promote; a7a8q is legal.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "a7a8q"
+        },
+        {
+          "question": {
+            "id": "fen-033",
+            "fen": "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 3 occupied squares."
+          },
+          "model_answer": "c",
+          "model_reason": "Pieces present: white king e1, white pawn a7, black king e8 = 3 total.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "3"
+        },
+        {
+          "question": {
+            "id": "fen-034",
+            "fen": "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1",
+            "prompt": "What is the check status in this position?",
+            "concept": "check status",
+            "explanation": "python-chess legal interpretation reports: White king is in check. Check depends on attacks on the side-to-move king."
+          },
+          "model_answer": "c",
+          "model_reason": "Black rook on e2 attacks e1 directly, so the white king is in check.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "White king is in check"
+        },
+        {
+          "question": {
+            "id": "fen-035",
+            "fen": "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1",
+            "prompt": "What is on e2?",
+            "concept": "square occupancy",
+            "explanation": "e2 contains Black Rook. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "The FEN segment \"4r3\" on rank 2 places a black rook on e2.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "Black Rook"
+        },
+        {
+          "question": {
+            "id": "fen-036",
+            "fen": "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "e1f1 is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "a",
+          "model_reason": "White king can capture on f2? wait no piece there; legal king move out of check is e1f2 since f2 is empty and not attacked by black king on e8 or rook e2.",
+          "correct": false,
+          "correct_letter": "d",
+          "correct_text": "e1f1"
+        },
+        {
+          "question": {
+            "id": "fen-037",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "What is on c8?",
+            "concept": "square occupancy",
+            "explanation": "c8 contains Black Rook. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "d",
+          "model_reason": "On rank 8, \"2r2rk1\" means c8 contains a black rook.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "Black Rook"
+        },
+        {
+          "question": {
+            "id": "fen-038",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "What is on a7?",
+            "concept": "square occupancy",
+            "explanation": "a7 contains Black Pawn. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "b",
+          "model_reason": "On rank 7, \"pp1n1ppp\" means a7 is a black pawn.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "Black Pawn"
+        },
+        {
+          "question": {
+            "id": "fen-039",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "Which side is to move?",
+            "concept": "side to move",
+            "explanation": "The second FEN field is w, so white to move."
+          },
+          "model_answer": "a",
+          "model_reason": "Side-to-move field is \"w\", so White to move.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "White to move"
+        },
+        {
+          "question": {
+            "id": "fen-040",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "How many black bishops are on the board?",
+            "concept": "material count",
+            "explanation": "There are 1 black bishops in the piece-placement field."
+          },
+          "model_answer": "b",
+          "model_reason": "Black bishops are on c6 and d6? Wait string \"2pbpn2\" on rank 6 gives c6 pawn, d6 bishop, e6 pawn, f6 knight: so only 1 black bishop.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "1"
+        },
+        {
+          "question": {
+            "id": "fen-041",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "How many white knights are on the board?",
+            "concept": "material count",
+            "explanation": "There are 2 white knights in the piece-placement field."
+          },
+          "model_answer": "a",
+          "model_reason": "White knights are on c3 and f3, so there are 2.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "2"
+        },
+        {
+          "question": {
+            "id": "fen-042",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 28 occupied squares."
+          },
+          "model_answer": "d",
+          "model_reason": "There are 14 white pieces and 14 black pieces, totaling 28.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "28"
+        },
+        {
+          "question": {
+            "id": "fen-043",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "What is the check status in this position?",
+            "concept": "check status",
+            "explanation": "python-chess legal interpretation reports: No king is in check. Check depends on attacks on the side-to-move king."
+          },
+          "model_answer": "c",
+          "model_reason": "Neither king is currently attacked by an enemy piece.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "No king is in check"
+        },
+        {
+          "question": {
+            "id": "fen-044",
+            "fen": "8/5pk1/6p1/8/3R4/6P1/5PK1/8 b - - 1 42",
+            "prompt": "Which side is to move?",
+            "concept": "side to move",
+            "explanation": "The second FEN field is b, so black to move."
+          },
+          "model_answer": "b",
+          "model_reason": "The side-to-move field is 'b', so Black to move.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "Black to move"
+        },
+        {
+          "question": {
+            "id": "fen-045",
+            "fen": "8/5pk1/6p1/8/3R4/6P1/5PK1/8 b - - 1 42",
+            "prompt": "What is on d4?",
+            "concept": "square occupancy",
+            "explanation": "d4 contains White Rook. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "b",
+          "model_reason": "Square d4 is occupied by a White rook.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "White Rook"
+        },
+        {
+          "question": {
+            "id": "fen-046",
+            "fen": "8/5pk1/6p1/8/3R4/6P1/5PK1/8 b - - 1 42",
+            "prompt": "How many black pawns are on the board?",
+            "concept": "material count",
+            "explanation": "There are 2 black pawns in the piece-placement field."
+          },
+          "model_answer": "c",
+          "model_reason": "Black pawns are on f7 and g6, so there are 2.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "2"
+        },
+        {
+          "question": {
+            "id": "fen-047",
+            "fen": "8/5pk1/6p1/8/3R4/6P1/5PK1/8 b - - 1 42",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 7 occupied squares."
+          },
+          "model_answer": "b",
+          "model_reason": "Total pieces: Black (king + 2 pawns) = 3, White (king + rook + 2 pawns) = 4, so 7.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "7"
+        },
+        {
+          "question": {
+            "id": "fen-048",
+            "fen": "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
+            "prompt": "What is the check status in this position?",
+            "concept": "check status",
+            "explanation": "python-chess legal interpretation reports: Black king is in check. Check depends on attacks on the side-to-move king."
+          },
+          "model_answer": "c",
+          "model_reason": "Black king on h8 is attacked by the White queen on g7.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "Black king is in check"
+        },
+        {
+          "question": {
+            "id": "fen-049",
+            "fen": "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
+            "prompt": "What is on g7?",
+            "concept": "square occupancy",
+            "explanation": "g7 contains White Queen. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "c",
+          "model_reason": "Square g7 contains a White queen.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "White Queen"
+        },
+        {
+          "question": {
+            "id": "fen-050",
+            "fen": "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 3 occupied squares."
+          },
+          "model_answer": "d",
+          "model_reason": "Only three pieces remain: black king, white queen, white king.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "3"
+        }
+      ]
+    },
+    {
+      "cycle": 2,
+      "mode": "misses",
+      "attempts": [
+        {
+          "question": {
+            "id": "fen-036",
+            "fen": "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "e1f1 is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "d",
+          "model_reason": "White is in check from the rook on e2; e1f1 is a legal king move that escapes check.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "e1f1"
+        }
+      ]
+    },
+    {
+      "cycle": 3,
+      "mode": "full",
+      "attempts": [
+        {
+          "question": {
+            "id": "fen-001",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "What is on e1?",
+            "concept": "square occupancy",
+            "explanation": "e1 contains White King. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "Square e1 has the White king in the initial setup.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "White King"
+        },
+        {
+          "question": {
+            "id": "fen-002",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "What is on d8?",
+            "concept": "square occupancy",
+            "explanation": "d8 contains Black Queen. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "Square d8 has the Black queen in the initial setup.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "Black Queen"
+        },
+        {
+          "question": {
+            "id": "fen-003",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "What is on e5?",
+            "concept": "square occupancy",
+            "explanation": "e5 contains Empty. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "d",
+          "model_reason": "Square e5 is empty in the starting position.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "Empty"
+        },
+        {
+          "question": {
+            "id": "fen-004",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "Which side is to move?",
+            "concept": "side to move",
+            "explanation": "The second FEN field is w, so white to move."
+          },
+          "model_answer": "b",
+          "model_reason": "The side-to-move field is 'w'.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "White to move"
+        },
+        {
+          "question": {
+            "id": "fen-005",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "Which castling rights are present?",
+            "concept": "castling rights",
+            "explanation": "The third FEN field is 'KQkq', meaning: White kingside, White queenside, Black kingside, Black queenside."
+          },
+          "model_answer": "b",
+          "model_reason": "Castling field 'KQkq' means all four castling rights are present.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "White kingside, White queenside, Black kingside, Black queenside"
+        },
+        {
+          "question": {
+            "id": "fen-006",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "What is the en-passant target square?",
+            "concept": "en-passant field",
+            "explanation": "The fourth FEN field is '-', so the en-passant target is No en-passant square."
+          },
+          "model_answer": "c",
+          "model_reason": "En-passant field is '-' meaning no target square.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "No en-passant square"
+        },
+        {
+          "question": {
+            "id": "fen-007",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 32 occupied squares."
+          },
+          "model_answer": "b",
+          "model_reason": "Standard starting position has all 32 pieces.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "32"
+        },
+        {
+          "question": {
+            "id": "fen-008",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "prompt": "How many white pawns are on the board?",
+            "concept": "material count",
+            "explanation": "There are 8 white pawns in the piece-placement field."
+          },
+          "model_answer": "c",
+          "model_reason": "White has 8 pawns on rank 2.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "8"
+        },
+        {
+          "question": {
+            "id": "fen-009",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "What is on c4?",
+            "concept": "square occupancy",
+            "explanation": "c4 contains White Bishop. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "In rank 4 segment '2B1P3', c4 contains a White bishop.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "White Bishop"
+        },
+        {
+          "question": {
+            "id": "fen-010",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "What is on c6?",
+            "concept": "square occupancy",
+            "explanation": "c6 contains Black Knight. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "c",
+          "model_reason": "In rank 6 segment '2n5', c6 contains a Black knight.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "Black Knight"
+        },
+        {
+          "question": {
+            "id": "fen-011",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "Which side is to move?",
+            "concept": "side to move",
+            "explanation": "The second FEN field is b, so black to move."
+          },
+          "model_answer": "c",
+          "model_reason": "The side-to-move field is 'b', so Black moves.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "Black to move"
+        },
+        {
+          "question": {
+            "id": "fen-012",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "Where is the white king?",
+            "concept": "king location",
+            "explanation": "The white king is on e1."
+          },
+          "model_answer": "a",
+          "model_reason": "In 'RNBQK2R' on rank 1, the white king is on e1.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "e1"
+        },
+        {
+          "question": {
+            "id": "fen-013",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "Which castling rights are present?",
+            "concept": "castling rights",
+            "explanation": "The third FEN field is 'KQkq', meaning: White kingside, White queenside, Black kingside, Black queenside."
+          },
+          "model_answer": "b",
+          "model_reason": "Castling rights are 'KQkq', meaning all four rights are available.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "White kingside, White queenside, Black kingside, Black queenside"
+        },
+        {
+          "question": {
+            "id": "fen-014",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 2 3",
+            "prompt": "How many black knights are on the board?",
+            "concept": "material count",
+            "explanation": "There are 2 black knights in the piece-placement field."
+          },
+          "model_answer": "d",
+          "model_reason": "Black knights are on b8 and c6, so there are 2.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "2"
+        },
+        {
+          "question": {
+            "id": "fen-015",
+            "fen": "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1",
+            "prompt": "What is the check status in this position?",
+            "concept": "check status",
+            "explanation": "python-chess legal interpretation reports: Black king is in check. Check depends on attacks on the side-to-move king."
+          },
+          "model_answer": "b",
+          "model_reason": "White queen on e4 attacks e8 along the e-file, so black king is in check.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "Black king is in check"
+        },
+        {
+          "question": {
+            "id": "fen-016",
+            "fen": "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1",
+            "prompt": "What is on e4?",
+            "concept": "square occupancy",
+            "explanation": "e4 contains White Queen. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "c",
+          "model_reason": "Square e4 contains the white queen.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "White Queen"
+        },
+        {
+          "question": {
+            "id": "fen-017",
+            "fen": "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1",
+            "prompt": "Where is the black king?",
+            "concept": "king location",
+            "explanation": "The black king is on e8."
+          },
+          "model_answer": "d",
+          "model_reason": "The black king is on e8 from '4k3' on rank 8.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "e8"
+        },
+        {
+          "question": {
+            "id": "fen-018",
+            "fen": "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 3 occupied squares."
+          },
+          "model_answer": "a",
+          "model_reason": "Only three pieces remain: white king, white queen, black king.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "3"
+        },
+        {
+          "question": {
+            "id": "fen-019",
+            "fen": "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "e8d8 is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "c",
+          "model_reason": "e8d8 moves the king out of the e-file check; the other listed king moves are illegal or impossible.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "e8d8"
+        },
+        {
+          "question": {
+            "id": "fen-020",
+            "fen": "8/8/8/3k4/8/4K3/8/8 w - - 20 71",
+            "prompt": "What is on d5?",
+            "concept": "square occupancy",
+            "explanation": "d5 contains Black King. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "b",
+          "model_reason": "From '3k4' on rank 5, d5 is occupied by the black king.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "Black King"
+        },
+        {
+          "question": {
+            "id": "fen-021",
+            "fen": "8/8/8/3k4/8/4K3/8/8 w - - 20 71",
+            "prompt": "Which side is to move?",
+            "concept": "side to move",
+            "explanation": "The second FEN field is w, so white to move."
+          },
+          "model_answer": "c",
+          "model_reason": "The FEN has 'w' as side to move, so White moves.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "White to move"
+        },
+        {
+          "question": {
+            "id": "fen-022",
+            "fen": "8/8/8/3k4/8/4K3/8/8 w - - 20 71",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 2 occupied squares."
+          },
+          "model_answer": "b",
+          "model_reason": "Only two kings are present: black king on d5 and white king on e3.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "2"
+        },
+        {
+          "question": {
+            "id": "fen-023",
+            "fen": "8/8/8/3k4/8/4K3/8/8 w - - 20 71",
+            "prompt": "What is the check status in this position?",
+            "concept": "check status",
+            "explanation": "python-chess legal interpretation reports: No king is in check. Check depends on attacks on the side-to-move king."
+          },
+          "model_answer": "c",
+          "model_reason": "The kings are not attacking each other, so no king is in check.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "No king is in check"
+        },
+        {
+          "question": {
+            "id": "fen-024",
+            "fen": "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3",
+            "prompt": "What is the en-passant target square?",
+            "concept": "en-passant field",
+            "explanation": "The fourth FEN field is 'd6', so the en-passant target is d6."
+          },
+          "model_answer": "c",
+          "model_reason": "The en-passant target field is 'd6'.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "d6"
+        },
+        {
+          "question": {
+            "id": "fen-025",
+            "fen": "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3",
+            "prompt": "What is on e5?",
+            "concept": "square occupancy",
+            "explanation": "e5 contains White Pawn. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "In '3pP3' on rank 5, e5 contains a white pawn.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "White Pawn"
+        },
+        {
+          "question": {
+            "id": "fen-026",
+            "fen": "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "e5d6 is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "d",
+          "model_reason": "White can capture en passant from e5 to d6 because the target square is d6.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "e5d6"
+        },
+        {
+          "question": {
+            "id": "fen-027",
+            "fen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            "prompt": "Which castling rights are present?",
+            "concept": "castling rights",
+            "explanation": "The third FEN field is 'KQkq', meaning: White kingside, White queenside, Black kingside, Black queenside."
+          },
+          "model_answer": "d",
+          "model_reason": "Castling field is 'KQkq', so all four castling rights are present.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "White kingside, White queenside, Black kingside, Black queenside"
+        },
+        {
+          "question": {
+            "id": "fen-028",
+            "fen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "e1g1 is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "d",
+          "model_reason": "White to move can legally castle kingside: e1g1.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "e1g1"
+        },
+        {
+          "question": {
+            "id": "fen-029",
+            "fen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            "prompt": "Where is the black king?",
+            "concept": "king location",
+            "explanation": "The black king is on e8."
+          },
+          "model_answer": "c",
+          "model_reason": "In rank 8 string 'r3k2r', the black king is on e8.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "e8"
+        },
+        {
+          "question": {
+            "id": "fen-030",
+            "fen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            "prompt": "How many white rooks are on the board?",
+            "concept": "material count",
+            "explanation": "There are 2 white rooks in the piece-placement field."
+          },
+          "model_answer": "b",
+          "model_reason": "White rooks are on a1 and h1, giving 2 white rooks.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "2"
+        },
+        {
+          "question": {
+            "id": "fen-031",
+            "fen": "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+            "prompt": "What is on a7?",
+            "concept": "square occupancy",
+            "explanation": "a7 contains White Pawn. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "Square a7 contains a White pawn.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "White Pawn"
+        },
+        {
+          "question": {
+            "id": "fen-032",
+            "fen": "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "a7a8q is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "b",
+          "model_reason": "The pawn on a7 can move to a8 and must promote, so a7a8q is legal.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "a7a8q"
+        },
+        {
+          "question": {
+            "id": "fen-033",
+            "fen": "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 3 occupied squares."
+          },
+          "model_answer": "c",
+          "model_reason": "Only three pieces remain: White king, White pawn, Black king.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "3"
+        },
+        {
+          "question": {
+            "id": "fen-034",
+            "fen": "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1",
+            "prompt": "What is the check status in this position?",
+            "concept": "check status",
+            "explanation": "python-chess legal interpretation reports: White king is in check. Check depends on attacks on the side-to-move king."
+          },
+          "model_answer": "c",
+          "model_reason": "The black rook on e2 attacks e1, so the White king is in check.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "White king is in check"
+        },
+        {
+          "question": {
+            "id": "fen-035",
+            "fen": "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1",
+            "prompt": "What is on e2?",
+            "concept": "square occupancy",
+            "explanation": "e2 contains Black Rook. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "a",
+          "model_reason": "Square e2 is occupied by a Black rook.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "Black Rook"
+        },
+        {
+          "question": {
+            "id": "fen-036",
+            "fen": "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1",
+            "prompt": "Which listed move is legal in this position?",
+            "concept": "legal move recognition",
+            "explanation": "e1f1 is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+          },
+          "model_answer": "d",
+          "model_reason": "White must respond to check; e1f1 is a legal king move that escapes it.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "e1f1"
+        },
+        {
+          "question": {
+            "id": "fen-037",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "What is on c8?",
+            "concept": "square occupancy",
+            "explanation": "c8 contains Black Rook. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "d",
+          "model_reason": "Square c8 is occupied by a Black rook.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "Black Rook"
+        },
+        {
+          "question": {
+            "id": "fen-038",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "What is on a7?",
+            "concept": "square occupancy",
+            "explanation": "a7 contains Black Pawn. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "b",
+          "model_reason": "Square a7 contains a Black pawn.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "Black Pawn"
+        },
+        {
+          "question": {
+            "id": "fen-039",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "Which side is to move?",
+            "concept": "side to move",
+            "explanation": "The second FEN field is w, so white to move."
+          },
+          "model_answer": "a",
+          "model_reason": "The side-to-move field is 'w', so White to move.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "White to move"
+        },
+        {
+          "question": {
+            "id": "fen-040",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "How many black bishops are on the board?",
+            "concept": "material count",
+            "explanation": "There are 1 black bishops in the piece-placement field."
+          },
+          "model_answer": "b",
+          "model_reason": "Black has one bishop on d6.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "1"
+        },
+        {
+          "question": {
+            "id": "fen-041",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "How many white knights are on the board?",
+            "concept": "material count",
+            "explanation": "There are 2 white knights in the piece-placement field."
+          },
+          "model_answer": "a",
+          "model_reason": "White knights are on c3 and f3, so there are 2.",
+          "correct": true,
+          "correct_letter": "a",
+          "correct_text": "2"
+        },
+        {
+          "question": {
+            "id": "fen-042",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 28 occupied squares."
+          },
+          "model_answer": "d",
+          "model_reason": "There are 28 total pieces in this position.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "28"
+        },
+        {
+          "question": {
+            "id": "fen-043",
+            "fen": "2r2rk1/pp1n1ppp/2pbpn2/q7/3P4/2N1PN2/PPQ1BPPP/2R2RK1 w - - 4 12",
+            "prompt": "What is the check status in this position?",
+            "concept": "check status",
+            "explanation": "python-chess legal interpretation reports: No king is in check. Check depends on attacks on the side-to-move king."
+          },
+          "model_answer": "c",
+          "model_reason": "Neither king is currently attacked.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "No king is in check"
+        },
+        {
+          "question": {
+            "id": "fen-044",
+            "fen": "8/5pk1/6p1/8/3R4/6P1/5PK1/8 b - - 1 42",
+            "prompt": "Which side is to move?",
+            "concept": "side to move",
+            "explanation": "The second FEN field is b, so black to move."
+          },
+          "model_answer": "b",
+          "model_reason": "The side-to-move field is 'b', so Black to move.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "Black to move"
+        },
+        {
+          "question": {
+            "id": "fen-045",
+            "fen": "8/5pk1/6p1/8/3R4/6P1/5PK1/8 b - - 1 42",
+            "prompt": "What is on d4?",
+            "concept": "square occupancy",
+            "explanation": "d4 contains White Rook. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "b",
+          "model_reason": "Square d4 contains a White rook.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "White Rook"
+        },
+        {
+          "question": {
+            "id": "fen-046",
+            "fen": "8/5pk1/6p1/8/3R4/6P1/5PK1/8 b - - 1 42",
+            "prompt": "How many black pawns are on the board?",
+            "concept": "material count",
+            "explanation": "There are 2 black pawns in the piece-placement field."
+          },
+          "model_answer": "c",
+          "model_reason": "Black pawns are on f7 and g6, so there are 2.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "2"
+        },
+        {
+          "question": {
+            "id": "fen-047",
+            "fen": "8/5pk1/6p1/8/3R4/6P1/5PK1/8 b - - 1 42",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 7 occupied squares."
+          },
+          "model_answer": "b",
+          "model_reason": "Pieces: Black king + 2 pawns (3), White king + rook + 2 pawns (4), total 7.",
+          "correct": true,
+          "correct_letter": "b",
+          "correct_text": "7"
+        },
+        {
+          "question": {
+            "id": "fen-048",
+            "fen": "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
+            "prompt": "What is the check status in this position?",
+            "concept": "check status",
+            "explanation": "python-chess legal interpretation reports: Black king is in check. Check depends on attacks on the side-to-move king."
+          },
+          "model_answer": "c",
+          "model_reason": "The White queen on g7 gives check to the Black king on h8.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "Black king is in check"
+        },
+        {
+          "question": {
+            "id": "fen-049",
+            "fen": "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
+            "prompt": "What is on g7?",
+            "concept": "square occupancy",
+            "explanation": "g7 contains White Queen. Read FEN ranks from 8 down to 1 and files from a to h; digits skip empty squares."
+          },
+          "model_answer": "c",
+          "model_reason": "Square g7 is occupied by a White queen.",
+          "correct": true,
+          "correct_letter": "c",
+          "correct_text": "White Queen"
+        },
+        {
+          "question": {
+            "id": "fen-050",
+            "fen": "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
+            "prompt": "How many total pieces are left on the board?",
+            "concept": "piece count",
+            "explanation": "The board has 3 occupied squares."
+          },
+          "model_answer": "d",
+          "model_reason": "Only Black king, White queen, and White king remain: 3 pieces.",
+          "correct": true,
+          "correct_letter": "d",
+          "correct_text": "3"
+        }
+      ]
+    }
+  ],
+  "misses": [
+    {
+      "question": {
+        "id": "fen-036",
+        "fen": "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1",
+        "prompt": "Which listed move is legal in this position?",
+        "concept": "legal move recognition",
+        "explanation": "e1f1 is legal for the side to move in this FEN. Legal moves must match side, piece movement, blockers, check rules, and promotion syntax."
+      },
+      "model_answer": "a",
+      "model_reason": "White king can capture on f2? wait no piece there; legal king move out of check is e1f2 since f2 is empty and not attacked by black king on e8 or rook e2.",
+      "correct": false,
+      "correct_letter": "d",
+      "correct_text": "e1f1"
+    }
+  ]
+}

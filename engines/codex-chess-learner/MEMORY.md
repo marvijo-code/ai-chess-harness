@@ -29,3 +29,16 @@ Durable lessons:
 - Manage the clock while still choosing a move intentionally; there is no fallback or client-picked move.
 - Never return a move outside `legal_moves`; never return `0000` while legal moves exist.
 <!-- learner-autolearn:end -->
+
+<!-- fen-curriculum:start -->
+## FEN Curriculum Summary
+- Last updated: 2026-05-12 11:08:59
+- Model: gpt-5.3-codex
+- Final score: 50 / 50.
+- Mastered held-out set: yes.
+- Apply `knowledgebase/fen-curriculum-lessons.md` before interpreting any chess position.
+- FEN piece placement is read rank 8 to rank 1, with files a through h inside each rank and digits as empty-square skips.
+- Uppercase FEN letters are White pieces; lowercase letters are Black pieces.
+- Always account for side-to-move, check status, castling rights, en-passant field, material counts, and legal-move constraints before choosing a move.
+- Most recent weak concepts: legal move recognition.
+<!-- fen-curriculum:end -->

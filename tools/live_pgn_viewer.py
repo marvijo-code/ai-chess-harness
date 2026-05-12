@@ -172,7 +172,18 @@ INDEX_HTML = """<!doctype html>
     }
     [data-theme="dark"] .brand-icon { background: var(--surface-alt); border: 1px solid var(--line); }
     .brand-name { font-size: 15px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
-    .brand-path { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+    .brand-meta {
+      display: flex; align-items: center; gap: 6px;
+      min-width: 0; max-width: 420px;
+    }
+    .brand-path { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .copy-path-btn {
+      flex-shrink: 0;
+      width: 24px; height: 24px; padding: 0;
+      border-radius: var(--r-sm);
+      font-size: 14px; line-height: 1;
+    }
+    .copy-path-btn.copied { border-color: var(--ok); color: var(--ok); }
 
     .top-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
@@ -530,6 +541,7 @@ INDEX_HTML = """<!doctype html>
       .topbar { flex-direction: column; align-items: flex-start; }
       .brand { width: 100%; }
       .top-right { width: 100%; justify-content: space-between; }
+      .brand-meta { max-width: 100%; }
       .brand-path { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
       .main, .learner-main { grid-template-columns: 1fr; padding: 12px; gap: 14px; }
       .board-shell { padding: 10px; }
@@ -553,7 +565,10 @@ INDEX_HTML = """<!doctype html>
         <div class="brand-icon">&#9823;</div>
         <div>
           <div class="brand-name">Chess Engine Viewer</div>
-          <div id="pgn-path" class="brand-path"></div>
+          <div class="brand-meta">
+            <div id="pgn-path" class="brand-path"></div>
+            <button id="copy-pgn-path" class="copy-path-btn" type="button" title="Copy full PGN path" aria-label="Copy full PGN path" disabled>&#10697;</button>
+          </div>
         </div>
       </div>
       <div class="top-right">
@@ -608,6 +623,7 @@ INDEX_HTML = """<!doctype html>
               <span id="result" class="game-result">&#42;</span>
             </div>
             <div class="player-chips">
+              <span id="tournament-chip" class="chip">Tournament: &#8212;</span>
               <span id="white-player" class="chip"><span class="dot-w"></span>White: &#8212;</span>
               <span id="black-player" class="chip"><span class="dot-b"></span>Black: &#8212;</span>
             </div>
@@ -774,6 +790,8 @@ INDEX_HTML = """<!doctype html>
     let selectedMatch = null;
     let previousMatches = [];
     let previousMatchesPage = 0;
+    let activePgnPath = "";
+    let suppressHashChange = false;
     const previousMatchesPageSize = 5;
 
     function escapeHtml(value) {
@@ -846,6 +864,76 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("learner-view-tab").classList.toggle("active", activeView === "learner");
       localStorage.setItem("livePgnView", activeView);
       if (activeView === "learner") loadLearner();
+    }
+
+    function setActivePgnPath(path) {
+      activePgnPath = path || "";
+      document.getElementById("pgn-path").textContent = activePgnPath;
+      document.getElementById("copy-pgn-path").disabled = !activePgnPath;
+    }
+
+    function encodeMatchHash(slug, gameIndex = null) {
+      if (!slug) return "";
+      const suffix = gameIndex && Number(gameIndex) > 1 ? `--game-${Number(gameIndex)}` : "";
+      return `#${encodeURIComponent(`${slug}${suffix}`)}`;
+    }
+
+    function parseMatchHash() {
+      const raw = decodeURIComponent((window.location.hash || "").replace(/^#/, "")).trim();
+      if (!raw) return { slug: "", gameIndex: null };
+      const match = raw.match(/^(.*)--game-(\\d+)$/);
+      if (!match) return { slug: raw, gameIndex: null };
+      return { slug: match[1], gameIndex: Number(match[2]) || null };
+    }
+
+    function setMatchHash(slug, gameIndex = null) {
+      const next = encodeMatchHash(slug, gameIndex);
+      if (!next || window.location.hash === next) return;
+      suppressHashChange = true;
+      window.history.replaceState(null, "", next);
+      window.setTimeout(() => { suppressHashChange = false; }, 0);
+    }
+
+    function activeGameHashIndex(data) {
+      if (selectedMatch && !followLive) return selectedMatch.game_index || 1;
+      return null;
+    }
+
+    function syncMatchHash(data) {
+      if (!data || !data.tournament_slug) return;
+      setMatchHash(data.tournament_slug, activeGameHashIndex(data));
+    }
+
+    function fallbackCopy(text) {
+      const box = document.createElement("textarea");
+      box.value = text;
+      box.setAttribute("readonly", "");
+      box.style.position = "fixed";
+      box.style.left = "-9999px";
+      document.body.appendChild(box);
+      box.select();
+      try {
+        return document.execCommand("copy");
+      } finally {
+        document.body.removeChild(box);
+      }
+    }
+
+    async function copyActivePgnPath() {
+      if (!activePgnPath) return;
+      const button = document.getElementById("copy-pgn-path");
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(activePgnPath);
+        } else if (!fallbackCopy(activePgnPath)) {
+          throw new Error("copy unavailable");
+        }
+        button.classList.add("copied");
+        setStatus(true, "Path copied");
+        setTimeout(() => button.classList.remove("copied"), 900);
+      } catch {
+        setStatus(false, "Copy failed");
+      }
     }
 
     function squareName(file, rank) {
@@ -1070,6 +1158,7 @@ INDEX_HTML = """<!doctype html>
       viewedPly = ply;
 
       document.getElementById("players").textContent = `${white} vs ${black}`;
+      document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
       document.getElementById("white-player").innerHTML = `<span class="dot-w"></span>White: ${escapeHtml(white)}`;
       document.getElementById("black-player").innerHTML = `<span class="dot-b"></span>Black: ${escapeHtml(black)}`;
       document.getElementById("top-player").innerHTML = `<span class="dot-b"></span><span class="bar-name">Black: ${escapeHtml(black)}</span><span id="black-clock" class="clock">--:--</span>`;
@@ -1169,6 +1258,7 @@ INDEX_HTML = """<!doctype html>
       const container = document.getElementById("stats");
       document.getElementById("stats-meta").textContent = `${data.games} games`;
       previousMatches = data.matches || [];
+      selectPreviousMatchFromHash();
       renderPreviousMatches();
       if (data.error) {
         container.innerHTML = `<div class="empty err">${escapeHtml(data.error)}</div>`;
@@ -1210,7 +1300,7 @@ INDEX_HTML = """<!doctype html>
       container.innerHTML = `<div class="match-list">${pageRows.map(match => `
         <button class="match-row ${matchKey(match) === activeKey ? "active" : ""}" type="button" data-match-index="${escapeAttr(previousMatches.indexOf(match))}">
           <div class="match-main"><span>${escapeHtml(match.winner_label)}</span><span>${escapeHtml(match.result)}</span></div>
-          <div class="match-sub">${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · game ${escapeHtml(match.game_index || 1)} · ${escapeHtml(match.date)} · ${escapeHtml(match.file)}</div>
+          <div class="match-sub">${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · ${escapeHtml(match.tournament_slug || "unknown")} · game ${escapeHtml(match.game_index || 1)} · ${escapeHtml(match.date)} · ${escapeHtml(match.file)}</div>
         </button>`).join("")}</div>`;
     }
 
@@ -1233,8 +1323,28 @@ INDEX_HTML = """<!doctype html>
       replayThinkingKey = "";
       localStorage.setItem("livePgnFollow", "off");
       document.getElementById("follow-toggle").checked = false;
+      setMatchHash(match.tournament_slug || "", match.game_index || 1);
       renderPreviousMatches();
       refresh(true);
+    }
+
+    function selectPreviousMatchFromHash() {
+      const parsed = parseMatchHash();
+      if (!parsed.slug || !previousMatches.length) return false;
+      if (!parsed.gameIndex && latestGame && latestGame.tournament_slug === parsed.slug && followLive) return false;
+      const match = previousMatches.find(item => {
+        if ((item.tournament_slug || "") !== parsed.slug) return false;
+        return parsed.gameIndex ? Number(item.game_index || 1) === parsed.gameIndex : true;
+      });
+      if (!match) return false;
+      if (selectedMatch && matchKey(selectedMatch) === matchKey(match)) return true;
+      selectedMatch = match;
+      followLive = false;
+      viewedPly = null;
+      replayThinkingKey = "";
+      localStorage.setItem("livePgnFollow", "off");
+      document.getElementById("follow-toggle").checked = false;
+      return true;
     }
 
     function fileListHtml(files) {
@@ -1330,7 +1440,7 @@ INDEX_HTML = """<!doctype html>
         if (!followLive && viewedPly !== null) params.set("ply", String(viewedPly));
         const resp = await fetch(`/api/game?${params}`, { cache: "no-store" });
         const data = await resp.json();
-        document.getElementById("pgn-path").textContent = data.path || "";
+        setActivePgnPath(data.path || "");
         if (data.error) {
           setStatus(false, "Error");
           document.getElementById("moves").innerHTML = `<div class="card-body"><div class="empty err">${escapeHtml(data.error)}</div></div>`;
@@ -1339,8 +1449,10 @@ INDEX_HTML = """<!doctype html>
         }
         if (!data.exists || !data.has_game) {
           latestGame = data;
+          syncMatchHash(data);
           setStatus(false, data.exists ? "No game" : "No PGN");
           document.getElementById("players").textContent = "No game loaded";
+          document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
           document.getElementById("white-player").innerHTML = '<span class="dot-w"></span>White: —';
           document.getElementById("black-player").innerHTML = '<span class="dot-b"></span>Black: —';
           document.getElementById("top-player").innerHTML = '<span class="dot-b"></span><span class="bar-name">Black: —</span><span id="black-clock" class="clock">--:--</span>';
@@ -1356,6 +1468,7 @@ INDEX_HTML = """<!doctype html>
         }
         if (followLive || viewedPly === null) viewedPly = data.moves.length;
         renderGame(data);
+        syncMatchHash(data);
         const changed = data.fen !== lastFen;
         lastFen = data.fen;
         setStatus(true, selectedMatch && !followLive ? "Archive" : (changed ? "Updated" : "Watching"));
@@ -1515,6 +1628,7 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("analysis-panel-toggle").addEventListener("change", e => setAnalysisEnabled(e.target.checked));
     document.getElementById("matches-prev").addEventListener("click", () => setPreviousMatchesPage(-1));
     document.getElementById("matches-next").addEventListener("click", () => setPreviousMatchesPage(1));
+    document.getElementById("copy-pgn-path").addEventListener("click", copyActivePgnPath);
     document.getElementById("matches").addEventListener("click", event => {
       const row = event.target.closest("[data-match-index]");
       if (row) loadPreviousMatch(row.dataset.matchIndex);
@@ -1532,6 +1646,13 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("config-controls").addEventListener("input", e => updateConfigFromInput(e.target));
     document.getElementById("config-controls").addEventListener("change", e => updateConfigFromInput(e.target));
     document.getElementById("config-save").addEventListener("click", saveConfig);
+    window.addEventListener("hashchange", () => {
+      if (suppressHashChange) return;
+      if (selectPreviousMatchFromHash()) {
+        renderPreviousMatches();
+        refresh(true);
+      }
+    });
 
     loadPreferences();
     setActiveView(localStorage.getItem("livePgnView") || "board");
@@ -1761,6 +1882,13 @@ def clock_from_headers(headers: chess.pgn.Headers, completed: bool) -> dict | No
     }
 
 
+def tournament_slug(path: Path) -> str:
+    slug = path.stem
+    if slug.endswith("-live"):
+        slug = slug.removesuffix("-live")
+    return slug or path.name
+
+
 def read_game(
     path: Path,
     analyzer: StockfishAnalyzer | None = None,
@@ -1770,7 +1898,7 @@ def read_game(
     include_logs: bool = False,
 ) -> dict:
     if not path.exists():
-        result = {"exists": False, "has_game": False, "path": str(path)}
+        result = {"exists": False, "has_game": False, "path": str(path), "tournament_slug": tournament_slug(path)}
         if analyzer is not None and include_analysis:
             result["analysis"] = {"enabled": analyzer.enabled, "message": "No board to analyze."}
         return result
@@ -1788,7 +1916,7 @@ def read_game(
         selected_index = game_count if game_index is None else max(1, min(game_index, game_count))
         game = games[selected_index - 1] if games else None
     except Exception as exc:
-        return {"exists": True, "has_game": False, "path": str(path), "error": str(exc)}
+        return {"exists": True, "has_game": False, "path": str(path), "tournament_slug": tournament_slug(path), "error": str(exc)}
 
     if game is None:
         stat = path.stat()
@@ -1796,6 +1924,7 @@ def read_game(
             "exists": True,
             "has_game": False,
             "path": str(path),
+            "tournament_slug": tournament_slug(path),
             "mtime": stat.st_mtime,
             "size": stat.st_size,
         }
@@ -1839,6 +1968,7 @@ def read_game(
         "exists": True,
         "has_game": True,
         "path": str(path),
+        "tournament_slug": tournament_slug(path),
         "mtime": stat.st_mtime,
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
         "size": stat.st_size,
@@ -1944,6 +2074,7 @@ def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None) -
                             "result": result,
                             "winner_label": result_label(result, white, black),
                             "round": round_name,
+                            "tournament_slug": tournament_slug(pgn_path),
                             "file": str(pgn_path.relative_to(out_dir)),
                             "path": str(pgn_path.resolve()),
                             "game_index": game_index,

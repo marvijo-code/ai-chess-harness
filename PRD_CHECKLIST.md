@@ -11,3 +11,11 @@
 - [x] Update README and chess-harness skill guidance for the new UI and engine-boundary contract.
 - [x] Validate compile/parser/skill checks and browser E2E behavior.
 - [x] Update durable memory, commit, and push.
+- [x] Show the tournament slug on every live or archived game loaded in the viewer.
+- [x] Add a compact copy icon that copies the active game's full absolute PGN path.
+- [x] Keep the browser URL hash synced to the active live or archived match slug.
+- [x] Add a 50-test hidden-answer FEN interpretation curriculum for `gpt-5.3-codex`.
+- [x] Ensure the curriculum forbids online search and tool use by the model.
+- [x] Write missed-question correction lessons into learner memory and knowledgebase.
+- [x] Validate the FEN curriculum offline without Codex app-server.
+- [x] Run or preflight the `gpt-5.3-codex` curriculum and record any app-server/model blocker.

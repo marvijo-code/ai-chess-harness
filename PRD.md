@@ -18,13 +18,20 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 9. Completed games show the winner as `<player> (<colour>) won`; draws show `Draw`.
 10. The learner must always choose its own move from the prompt context. There is no fallback legal move, no client-picked shortcut, and no Stockfish-provided move advice.
 11. Repetition/threefold detection belongs to the chess client/logging layer and must not be injected as a `repetition_risk` prompt field.
+12. The FEN learner curriculum must test position interpretation with hidden locally graded answers, including square occupancy, side to move, check state, material counts, piece locations, castling rights, en-passant state, legal move recognition, and basic position facts.
+13. FEN curriculum prompts must forbid online search and tool use. Learning happens through local writeback of concise missed-question lessons into the learner memory and knowledgebase after grading.
+14. The curriculum should contain at least 50 multiple-choice tests and should repeat only the missed concepts until the selected Codex model can generalise across the full held-out set or a clear model/app-server blocker is recorded.
+15. Every game loaded in the viewer, live or archived, shows the tournament slug derived from its PGN path.
+16. The viewer provides a compact copy icon that copies the full absolute PGN path for the currently loaded game.
+17. The viewer URL hash mirrors the active match slug, for example `#codex-vs-codex-learner-standard5-patched-20260512-100210`, and archived game selections include a stable game suffix.
 
 ## Validation Requirements
 
 1. Python files compile.
 2. PowerShell wrappers parse.
 3. The `chess-harness-codex` source and installed skills validate.
-4. Browser E2E verifies:
+4. FEN curriculum offline validation proves the 50 hidden-answer questions are generated, graded, and written to learner output files without calling Codex.
+5. Browser E2E verifies:
    - 64 board squares render.
    - Bot Thinking has fixed height and includes move number text.
    - Engine Analysis appears in the left column and shows the analysis engine name.
@@ -32,4 +39,6 @@ Keep the local FastChess viewer useful during live play and replay without leaki
    - Clicking Previous Matches loads the archived game and matching bot logs.
    - Bot Thinking does not auto-refresh while replaying or viewing archived games.
    - Completed winner text uses `<player> (<colour>) won`.
+   - Active games show a tournament slug and a copy-path control that copies the full PGN path.
+   - The browser URL hash updates to the active match slug for live games and archived match selections.
    - No horizontal overflow at desktop width.
