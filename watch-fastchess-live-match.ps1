@@ -128,6 +128,7 @@ $forceInstallEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters
 $analysisDisabled = if ($PSBoundParameters.ContainsKey("NoAnalysis")) { [bool]$NoAnalysis } else { -not [bool](Get-HarnessConfigValue -Config $config -Path "viewer.analysisEnabled" -Default $true) }
 $browserDisabled = if ($PSBoundParameters.ContainsKey("NoBrowser")) { [bool]$NoBrowser } else { -not [bool](Get-HarnessConfigValue -Config $config -Path "viewer.openBrowser" -Default $true) }
 $stopViewerWhenDoneEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "StopViewerWhenDone" -CurrentValue $StopViewerWhenDone -Config $config -Path "viewer.stopWhenDone" -Default $false
+$hotReloadEnabled = [bool](Get-HarnessConfigValue -Config $config -Path "viewer.hotReload" -Default $true)
 $learnerAutoLearnDisabled = if ($PSBoundParameters.ContainsKey("NoLearnerAutoLearn")) { [bool]$NoLearnerAutoLearn } else { -not [bool](Get-HarnessConfigValue -Config $config -Path "learner.autoLearn" -Default $true) }
 $skipModelPreflightEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "SkipModelPreflight" -CurrentValue $SkipModelPreflight -Config $config -Path "fastChess.skipModelPreflight" -Default $false
 $noRepeatEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "NoRepeat" -CurrentValue $NoRepeat -Config $config -Path "fastChess.noRepeat" -Default $false
@@ -268,6 +269,9 @@ $viewerArgs = @(
 if ($analysisDisabled) {
     $viewerArgs += "--no-analysis"
 }
+if ($hotReloadEnabled) {
+    $viewerArgs += "--hot-reload"
+}
 
 Write-Host "Starting local live viewer: $viewerUrl"
 Write-Host "FastChess PGN output: $pgnPath"
@@ -354,12 +358,17 @@ if (-not $learnerAutoLearnDisabled) {
 try {
     & $runnerScript @runParams 2>&1 | Tee-Object -FilePath $launchOut
 } finally {
-    if ($stopViewerWhenDoneEnabled -and -not $viewerProcess.HasExited) {
-        Stop-Process -Id $viewerProcess.Id -Force
-        Write-Host "Stopped local live viewer process $($viewerProcess.Id)."
+    if ($stopViewerWhenDoneEnabled) {
+        $viewerStopTargets = @(Get-LiveViewerProcessOnPort -ViewerPort $viewerPort)
+        foreach ($target in $viewerStopTargets) {
+            Stop-Process -Id $target.ProcessId -Force
+        }
+        if ($viewerStopTargets.Count -gt 0) {
+            Write-Host "Stopped local live viewer process(es): $($viewerStopTargets.ProcessId -join ', ')."
+        }
     } elseif (-not $viewerProcess.HasExited) {
         Write-Host "Viewer is still running at $viewerUrl"
-        Write-Host "Stop it later with: Stop-Process -Id $($viewerProcess.Id)"
+        Write-Host "Stop it later by rerunning this wrapper, or stop live_pgn_viewer.py processes on port $viewerPort."
     }
     if ($autolearnProcess -and -not $autolearnProcess.HasExited) {
         Write-Host "Learner autolearn is still running as process $($autolearnProcess.Id)."

@@ -27,7 +27,8 @@
     "analysisMovetimeMs": 250,
     "analysisMultipv": 3,
     "openBrowser": true,
-    "stopWhenDone": false
+    "stopWhenDone": false,
+    "hotReload": true
   },
   "learner": {
     "autoLearn": true,

@@ -27,6 +27,15 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 18. The viewer defaults to the live match URL hash when opened without a hash, preserves archived `#slug--game-N` deep links during startup, and shows a compact copy icon on the active archived match row.
 19. Runner defaults that make sense to persist, including Codex model/effort, preflight timeout, FastChess defaults, viewer defaults, and learner autolearn settings, live in root `chess-harness.config.json`; generated per-run FastChess config JSON remains an artifact, not the source of defaults.
 20. Live mirrored PGNs store player clock times in standard PGN `[%clk ...]` move comments, while keeping live ticking clock headers for the viewer.
+21. OpenRouter-backed chess models have a first-class UCI path that can be searched by model name/provider and launched into a match without editing engine code.
+22. OpenRouter match play must reflect model output only. Missing keys, API failures, invalid JSON, or illegal moves must forfeit with `bestmove 0000` instead of using heuristic fallback moves.
+23. Bot Thinking includes a multi-select message-type filter that composes with the side filter, defaults to only `Comment`, persists in `localStorage`, and lets the `All` control toggle between all-selected and none-selected.
+24. The board view includes flip-board functionality above the Leaderboard, persists the selected orientation in `localStorage`, and keeps coordinates, player bars, and last-move highlighting consistent with the chosen orientation.
+25. Frequent PRD/checklist changes are a repo workflow rule and should be recorded in `AGENTS.md` so future work updates `PRD.md` and `PRD_CHECKLIST.md` before implementation.
+26. Previous Matches rows keep the same compact height, with the match date in the top/header line and the winner shown on the next line.
+27. Learner autolearn continuously collects neutral frozen-self-play observations, uses Codex app-server to synthesize generalized concepts and value adjustments into compact bounded `strategy-lessons` knowledgebase files, and feeds those model-discovered concepts into future learner prompts without hardcoding FEN-specific move answers.
+28. Initial continuous strategy learning uses only `Codex-chess` with memory/skills/learning disabled as the opponent; Stockfish analysis stays viewer-only and must not seed learner strategy lessons in this phase.
+29. The dedicated FastChess viewer workflow supports hot reload for viewer source/config/doc changes so UI edits become visible without manually finding and restarting stale `live_pgn_viewer.py` processes.
 
 ## Validation Requirements
 
@@ -35,7 +44,9 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 3. The `chess-harness-codex` source and installed skills validate.
 4. FEN curriculum offline validation proves the 50 hidden-answer questions are generated, graded, and written to learner output files without calling Codex.
 5. Config validation proves PowerShell and Python runners read defaults from `chess-harness.config.json`, and direct Codex model preflight succeeds without Windows shim launch errors.
-6. Browser E2E verifies:
+6. OpenRouter model search can find a target model such as `x-ai/grok-4.3`, and the generic UCI match runner can pass that model into `llm-chess-engine` against `Codex-chess-learner`.
+7. Continuous strategy learning validation proves the autolearn script collects neutral self-play evidence, deduplicates repeated evidence, writes `strategy-lessons.md/json` with model-discovered concepts when synthesis is available, and includes those concepts in learner prompt context without Stockfish PVs.
+8. Browser E2E verifies:
    - 64 board squares render.
    - Bot Thinking has fixed height and includes move number text.
    - Engine Analysis appears in the left column and shows the analysis engine name.
@@ -46,5 +57,9 @@ Keep the local FastChess viewer useful during live play and replay without leaki
    - Active games show a tournament slug and a copy control that copies the full absolute viewer URL.
    - The browser URL hash updates to the active match slug for live games and to a stable `--game-N` hash for replay or archived match selections.
    - The active archived match row has a copy icon that copies its absolute viewer URL without changing the selected match.
+   - Bot Thinking type filters default to only `Comment`, can select multiple message kinds, let `All` toggle all-selected to none-selected, survive reload through `localStorage`, and update board and learner log counts.
+   - The flip-board control above Leaderboard reverses board coordinates, preserves exactly 64 board squares, keeps the side-to-move board state intact, and survives reload through `localStorage`.
+   - Previous Matches rows show the date on the first line, then the winner on the next line, without adding row height.
+   - The viewer launched by the FastChess wrapper advertises hot reload through `/api/viewer-version`, restarts after a viewer source/config/doc change, and the browser reloads to the updated UI.
    - Live mirrored PGNs contain `[%clk ...]` comments on completed moves when FastChess clock state is available.
    - No horizontal overflow at desktop width.

@@ -25,6 +25,7 @@ MEMORY_PATH = CONTEXT_DIR / "MEMORY.md"
 SKILLS_DIR = CONTEXT_DIR / "skills"
 KNOWLEDGEBASE_DIR = CONTEXT_DIR / "knowledgebase"
 FEN_KNOWLEDGE_PATH = KNOWLEDGEBASE_DIR / "fen-curriculum-lessons.md"
+STRATEGY_LESSONS_PATH = KNOWLEDGEBASE_DIR / "strategy-lessons.md"
 DEFAULT_USE_MEMORY = os.environ.get("CODEX_CHESS_USE_MEMORY", "false").lower() in {"1", "true", "yes", "on"}
 DEFAULT_USE_SKILLS = os.environ.get("CODEX_CHESS_USE_SKILLS", "false").lower() in {"1", "true", "yes", "on"}
 DEFAULT_LEARNING_MODE = os.environ.get("CODEX_CHESS_LEARNING_MODE", "false").lower() in {"1", "true", "yes", "on"}
@@ -311,17 +312,21 @@ class CodexAppServer:
         if not (self.use_memory or self.use_skills or self.learning_mode):
             return {}
         fen_knowledge = read_limited_text(FEN_KNOWLEDGE_PATH, 3500)
+        strategy_lessons = read_limited_text(STRATEGY_LESSONS_PATH, 4500)
         return {
             "memory_path": str(MEMORY_PATH),
             "memory": read_limited_text(MEMORY_PATH, 6000),
             "knowledgebase_path": str(KNOWLEDGEBASE_DIR),
             "fen_knowledge_path": str(FEN_KNOWLEDGE_PATH),
             "fen_knowledge": fen_knowledge,
+            "strategy_lessons_path": str(STRATEGY_LESSONS_PATH),
+            "strategy_lessons": strategy_lessons,
             "knowledgebase": collect_text_context(KNOWLEDGEBASE_DIR, max_files=8, max_chars_per_file=2500),
             "skills_path": str(SKILLS_DIR),
             "skills": collect_text_context(SKILLS_DIR, max_files=4, max_chars_per_file=1800),
             "policy": (
-                "Apply the learner memory, fen_knowledge, and knowledgebase directly. "
+                "Apply the learner memory, fen_knowledge, strategy_lessons, and knowledgebase directly. "
+                "Use model-discovered strategy_lessons as generic value adjustments before finalizing a move, not as memorized move answers. "
                 "Never invent UCI: copy uci exactly from legal_moves, and never return 0000 while legal moves exist."
             ),
         }

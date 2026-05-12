@@ -52,50 +52,21 @@ def parse_go_args(tokens: list[str]) -> dict:
     return args
 
 
-PIECE_VALUES = {
-    chess.PAWN: 100,
-    chess.KNIGHT: 320,
-    chess.BISHOP: 330,
-    chess.ROOK: 500,
-    chess.QUEEN: 900,
-    chess.KING: 0,
-}
+def print_neutral_score_info() -> None:
+    print("info depth 0 score cp 0 nodes 0 time 0", flush=True)
 
 
-def fallback_move(board: chess.Board) -> str:
-    legal_moves = list(board.legal_moves)
-    if not legal_moves:
-        return "0000"
+def forfeit_move(reason: str) -> tuple[str, str]:
+    return "0000", reason
 
-    for move in legal_moves:
-        candidate = board.copy()
-        candidate.push(move)
-        if candidate.is_checkmate():
-            return move.uci()
 
-    def score(move: chess.Move) -> tuple[int, str]:
-        value = 0
-        if board.is_capture(move):
-            victim = board.piece_at(move.to_square)
-            attacker = board.piece_at(move.from_square)
-            if victim:
-                value += PIECE_VALUES[victim.piece_type] * 10
-            if attacker:
-                value -= PIECE_VALUES[attacker.piece_type]
-        if board.gives_check(move):
-            value += 80
-        if move.promotion:
-            value += PIECE_VALUES.get(move.promotion, 0)
-        if move.to_square in (chess.D4, chess.E4, chess.D5, chess.E5):
-            value += 20
-        return value, move.uci()
-
-    return max(legal_moves, key=score).uci()
+def normalize_model_name(model: str) -> str:
+    return model.strip()
 
 
 class OpenRouterChessClient:
     def __init__(self) -> None:
-        self.model = os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
+        self.model = normalize_model_name(os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL))
         self.temperature = int(os.environ.get("OPENROUTER_TEMPERATURE", "20"))
         self.max_retries = int(os.environ.get("OPENROUTER_MAX_RETRIES", "1"))
         self.invalid_model_moves = 0
@@ -103,7 +74,7 @@ class OpenRouterChessClient:
     def set_option(self, name: str, value: str) -> None:
         lowered = name.lower()
         if lowered in {"model", "openrouter_model"} and value:
-            self.model = value
+            self.model = normalize_model_name(value)
         elif lowered == "temperature":
             try:
                 self.temperature = max(0, min(100, int(value)))
@@ -122,14 +93,9 @@ class OpenRouterChessClient:
 
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
-            move = fallback_move(board)
-            return move, "OPENROUTER_API_KEY is not set; used deterministic fallback"
+            return forfeit_move("OPENROUTER_API_KEY is not set; forfeiting")
 
         remaining = go_args.get("wtime") if board.turn == chess.WHITE else go_args.get("btime")
-        if remaining is not None and remaining <= 2500:
-            move = fallback_move(board)
-            return move, f"low clock {remaining}ms; used deterministic fallback"
-
         payload = self._build_payload(board, go_args, history, legal_moves, with_schema=True)
         timeout = self._timeout_seconds(go_args, remaining)
         last_error = None
@@ -154,10 +120,9 @@ class OpenRouterChessClient:
         if saw_illegal_move:
             self.invalid_model_moves += 1
             if self.invalid_model_moves >= 3:
-                return "0000", "invalid model move limit reached; forfeiting game"
+                return forfeit_move("invalid model move limit reached; forfeiting game")
 
-        move = fallback_move(board)
-        return move, f"OpenRouter failed; used fallback ({last_error})"
+        return forfeit_move(f"OpenRouter failed; forfeiting ({last_error})")
 
     def new_game(self) -> None:
         self.invalid_model_moves = 0
@@ -364,17 +329,19 @@ def main() -> None:
                 engine.set_position(tokens)
             elif command == "go":
                 bestmove = engine.go(tokens)
+                print_neutral_score_info()
                 print(f"bestmove {bestmove}", flush=True)
             elif command == "stop":
+                print_neutral_score_info()
+                print("bestmove 0000", flush=True)
                 continue
             elif command == "quit":
                 break
         except Exception as exc:
-            legal = [move.uci() for move in engine.board.legal_moves]
-            fallback = fallback_move(engine.board) if legal else "0000"
-            log(f"error for command {line!r}: {type(exc).__name__}: {exc}; fallback={fallback}")
+            log(f"error for command {line!r}: {type(exc).__name__}: {exc}; forfeiting with bestmove 0000")
             if command == "go":
-                print(f"bestmove {fallback}", flush=True)
+                print_neutral_score_info()
+                print("bestmove 0000", flush=True)
 
     log("llm-chess-engine UCI stopped")
 

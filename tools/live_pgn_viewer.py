@@ -1,8 +1,10 @@
 import argparse
 import io
 import json
+import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from datetime import date, datetime
@@ -25,6 +27,15 @@ LEARNER_SKILLS_DIR = LEARNER_DIR / "skills"
 LEARNER_KNOWLEDGEBASE_DIR = LEARNER_DIR / "knowledgebase"
 ENGINE_LOG_DIR = OUT_DIR / "codex-chess-logs"
 CLK_COMMENT_RE = re.compile(r"\[%clk\s+(?P<value>\d+(?::\d{1,2}){1,2}(?:\.\d+)?)\]")
+HOT_RELOAD_ENV = "CHESS_VIEWER_HOT_RELOAD_CHILD"
+HOT_RELOAD_FILES = (
+    Path(__file__).resolve(),
+    ROOT / "README.md",
+    ROOT / "PRD.md",
+    ROOT / "PRD_CHECKLIST.md",
+    ROOT / "AGENTS.md",
+    ROOT / "chess-harness.config.json",
+)
 
 
 INDEX_HTML = """<!doctype html>
@@ -243,7 +254,7 @@ INDEX_HTML = """<!doctype html>
     .thinking-card {
       position: sticky; top: 70px;
       height: 520px;
-      display: grid; grid-template-rows: auto minmax(0, 1fr);
+      display: grid; grid-template-rows: auto auto auto minmax(0, 1fr);
     }
     .thinking-card .card-body { overflow: auto; min-height: 0; }
     .view-panel.hidden { display: none !important; }
@@ -288,6 +299,31 @@ INDEX_HTML = """<!doctype html>
     .segmented button.active {
       color: var(--text); background: var(--surface);
       box-shadow: 0 1px 3px rgba(15, 23, 42, .12);
+    }
+    .log-filter-row {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .log-filter-label {
+      color: var(--muted); font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    .multi-filter {
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    }
+    .multi-filter button {
+      min-height: 24px; padding: 2px 8px;
+      border: 1px solid var(--line); border-radius: 7px;
+      background: var(--surface-alt);
+      color: var(--muted); font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em; cursor: pointer;
+    }
+    .multi-filter button.active {
+      color: var(--text);
+      background: var(--surface);
+      border-color: var(--text);
     }
     .file-row {
       border: 1px solid var(--line); border-radius: var(--r-md);
@@ -383,7 +419,6 @@ INDEX_HTML = """<!doctype html>
     .board-turn { font-size: 12px; color: var(--muted); }
 
     .board-shell { padding: 14px; display: grid; gap: 8px; }
-
     .player-bar {
       width: min(100%, 66vh); margin: 0 auto;
       display: flex; align-items: center; gap: 8px;
@@ -486,6 +521,9 @@ INDEX_HTML = """<!doctype html>
       background: var(--surface); color: var(--text); cursor: pointer;
     }
     .pager button:disabled { opacity: .45; cursor: not-allowed; }
+    .side-controls {
+      display: flex; justify-content: flex-end;
+    }
     .match-list { display: grid; gap: 8px; }
     .match-row {
       border: 1px solid var(--line); border-radius: var(--r-md);
@@ -506,6 +544,7 @@ INDEX_HTML = """<!doctype html>
       font-size: 13px; font-weight: 700;
     }
     .match-main span { min-width: 0; overflow-wrap: anywhere; }
+    .match-winner { color: var(--text); font-weight: 700; }
     .match-sub {
       display: block; min-width: 0; max-width: 100%;
       font-size: 11px; line-height: 1.35; color: var(--muted);
@@ -619,6 +658,19 @@ INDEX_HTML = """<!doctype html>
               <button type="button" data-log-side="black">Black</button>
             </div>
           </div>
+          <div class="log-filter-row" aria-label="Thinking message type filter">
+            <span class="log-filter-label">Type</span>
+            <div class="multi-filter log-kind-filter">
+              <button type="button" data-log-kind="all">All</button>
+              <button type="button" data-log-kind="setup">Setup</button>
+              <button type="button" data-log-kind="prompt">Prompt</button>
+              <button type="button" data-log-kind="comment">Comment</button>
+              <button type="button" data-log-kind="move">Move</button>
+              <button type="button" data-log-kind="repair">Repair</button>
+              <button type="button" data-log-kind="account">Account</button>
+              <button type="button" data-log-kind="log">Log</button>
+            </div>
+          </div>
           <div id="board-thinking-meta" class="card-sub" style="padding:0 16px 8px"></div>
           <div id="board-thinking-logs" class="card-body"></div>
         </section>
@@ -664,6 +716,9 @@ INDEX_HTML = """<!doctype html>
       </div>
 
       <div class="side-col">
+        <div class="side-controls">
+          <button id="flip-board" type="button" title="Flip board" aria-label="Flip board">Flip Board</button>
+        </div>
         <section class="card">
           <div class="card-hd">
             <span class="card-title">Leaderboard</span>
@@ -761,6 +816,19 @@ INDEX_HTML = """<!doctype html>
               <button type="button" data-log-side="black">Black</button>
             </div>
           </div>
+          <div class="log-filter-row" aria-label="Learner log message type filter">
+            <span class="log-filter-label">Type</span>
+            <div class="multi-filter log-kind-filter">
+              <button type="button" data-log-kind="all">All</button>
+              <button type="button" data-log-kind="setup">Setup</button>
+              <button type="button" data-log-kind="prompt">Prompt</button>
+              <button type="button" data-log-kind="comment">Comment</button>
+              <button type="button" data-log-kind="move">Move</button>
+              <button type="button" data-log-kind="repair">Repair</button>
+              <button type="button" data-log-kind="account">Account</button>
+              <button type="button" data-log-kind="log">Log</button>
+            </div>
+          </div>
           <div id="learner-logs-meta" class="card-sub" style="padding:0 16px 8px"></div>
           <div id="learner-logs" class="card-body"></div>
         </section>
@@ -804,6 +872,10 @@ INDEX_HTML = """<!doctype html>
     let activeView = "board";
     let latestLearnerData = null;
     let logSideFilter = localStorage.getItem("livePgnLogSide") || "all";
+    const logKindOptions = ["setup", "prompt", "comment", "move", "repair", "account", "log"];
+    const logKindStorageKey = "livePgnLogKindsV2";
+    let logKindFilter = new Set(loadLogKindFilter());
+    let boardOrientation = localStorage.getItem("livePgnBoardOrientation") === "black" ? "black" : "white";
     let replayThinkingKey = "";
     let selectedMatch = null;
     let previousMatches = [];
@@ -826,6 +898,15 @@ INDEX_HTML = """<!doctype html>
       return escapeHtml(value).replaceAll("`", "&#96;");
     }
 
+    function loadLogKindFilter() {
+      const stored = localStorage.getItem(logKindStorageKey);
+      if (stored === null) return ["comment"];
+      if (stored === "all") return logKindOptions;
+      if (stored === "") return [];
+      const values = stored.split(",").map(item => item.trim()).filter(item => logKindOptions.includes(item));
+      return values.length ? Array.from(new Set(values)) : ["comment"];
+    }
+
     function applyTheme(theme) {
       activeTheme = theme === "dark" ? "dark" : "light";
       document.body.dataset.theme = activeTheme;
@@ -841,6 +922,8 @@ INDEX_HTML = """<!doctype html>
       followLive = !(parsedHash.slug && parsedHash.gameIndex);
       document.getElementById("follow-toggle").checked = followLive;
       updateLogSideButtons();
+      updateLogKindButtons();
+      updateBoardOrientationButton();
     }
 
     function updateLogSideButtons() {
@@ -855,6 +938,50 @@ INDEX_HTML = """<!doctype html>
       updateLogSideButtons();
       replayThinkingKey = "";
       if (latestLearnerData) renderLearner(latestLearnerData);
+    }
+
+    function allLogKindsSelected() {
+      return logKindOptions.every(kind => logKindFilter.has(kind));
+    }
+
+    function updateLogKindButtons() {
+      const allSelected = allLogKindsSelected();
+      document.querySelectorAll("[data-log-kind]").forEach(button => {
+        const kind = button.dataset.logKind;
+        button.classList.toggle("active", kind === "all" ? allSelected : logKindFilter.has(kind));
+      });
+    }
+
+    function saveLogKindFilter() {
+      localStorage.setItem(logKindStorageKey, allLogKindsSelected() ? "all" : logKindOptions.filter(kind => logKindFilter.has(kind)).join(","));
+    }
+
+    function setLogKindFilter(kind) {
+      if (kind === "all") {
+        logKindFilter = allLogKindsSelected() ? new Set() : new Set(logKindOptions);
+      } else if (logKindOptions.includes(kind)) {
+        if (logKindFilter.has(kind)) logKindFilter.delete(kind);
+        else logKindFilter.add(kind);
+      }
+      saveLogKindFilter();
+      updateLogKindButtons();
+      replayThinkingKey = "";
+      if (latestLearnerData) renderLearner(latestLearnerData);
+      else renderBoardThinking(true);
+    }
+
+    function updateBoardOrientationButton() {
+      const button = document.getElementById("flip-board");
+      button.textContent = boardOrientation === "white" ? "Flip Board" : "White View";
+      button.title = boardOrientation === "white" ? "Flip board to Black" : "Flip board to White";
+    }
+
+    function setBoardOrientation(orientation) {
+      boardOrientation = orientation === "black" ? "black" : "white";
+      localStorage.setItem("livePgnBoardOrientation", boardOrientation);
+      updateBoardOrientationButton();
+      if (latestGame && latestGame.has_game) renderGame(latestGame);
+      else renderBoard("8/8/8/8/8/8/8/8 w - - 0 1", null);
     }
 
     function updateAnalysisControls() {
@@ -1017,8 +1144,10 @@ INDEX_HTML = """<!doctype html>
       boardEl.innerHTML = "";
       for (let rank = 0; rank < 8; rank++) {
         for (let file = 0; file < 8; file++) {
-          const sq = squareName(file, rank);
-          const isLight = (rank + file) % 2 === 0;
+          const displayRank = boardOrientation === "black" ? 7 - rank : rank;
+          const displayFile = boardOrientation === "black" ? 7 - file : file;
+          const sq = squareName(displayFile, displayRank);
+          const isLight = (displayRank + displayFile) % 2 === 0;
           const isLast = lastMove && (sq === lastMove.from || sq === lastMove.to);
           const el = document.createElement("div");
           el.className = "sq " + (isLight ? "light" : "dark") + (isLast ? " last" : "");
@@ -1035,13 +1164,13 @@ INDEX_HTML = """<!doctype html>
           if (file === 0) {
             const r = document.createElement("span");
             r.className = "coord rank";
-            r.textContent = String(8 - rank);
+            r.textContent = String(8 - displayRank);
             el.appendChild(r);
           }
           if (rank === 7) {
             const f = document.createElement("span");
             f.className = "coord file";
-            f.textContent = "abcdefgh"[file];
+            f.textContent = "abcdefgh"[displayFile];
             el.appendChild(f);
           }
           boardEl.appendChild(el);
@@ -1097,7 +1226,7 @@ INDEX_HTML = """<!doctype html>
       if (!latestGame || !latestGame.has_game || followLive) {
         const liveMove = latestGame && latestGame.moves ? latestGame.moves[Math.max(0, latestGame.moves.length - 1)] : null;
         const liveMoveText = liveMove ? ` · current ${moveNumberLabel(liveMove)}` : "";
-        return { logs: logs.slice(0, 36), label: `${filterLogsBySide(logs.slice(0, 36)).length} / ${Math.min(logs.length, 36)} recent entries${liveMoveText}` };
+        return { logs: logs.slice(0, 36), label: `${filterLogs(logs.slice(0, 36)).length} / ${Math.min(logs.length, 36)} recent entries${liveMoveText}` };
       }
       const ply = selectedPly(latestGame);
       const moves = latestGame.moves || [];
@@ -1119,7 +1248,7 @@ INDEX_HTML = """<!doctype html>
       const moveLabel = moveNumberLabel(move);
       return {
         logs: matched,
-        label: `${filterLogsBySide(matched).length} entries for ${moveLabel} (ply ${ply})`,
+        label: `${filterLogs(matched).length} entries for ${moveLabel} (ply ${ply})`,
       };
     }
 
@@ -1130,6 +1259,7 @@ INDEX_HTML = """<!doctype html>
         latestGame.game_index || 0,
         selectedPly(latestGame),
         logSideFilter,
+        logKindOptions.filter(kind => logKindFilter.has(kind)).join(","),
       ].join("|");
     }
 
@@ -1184,10 +1314,42 @@ INDEX_HTML = """<!doctype html>
       updateClockElement("white-clock", "White");
     }
 
+    let viewerVersion = "";
+    async function checkViewerVersion() {
+      try {
+        const resp = await fetch("/api/viewer-version", { cache: "no-store" });
+        const data = await resp.json();
+        if (!data.hot_reload || !data.version) return;
+        if (!viewerVersion) {
+          viewerVersion = data.version;
+          return;
+        }
+        if (data.version !== viewerVersion) window.location.reload();
+      } catch {
+        // The hot-reload supervisor may be between child processes.
+      }
+    }
+
     function renderClock(data) {
       latestClock = data.clock || null;
       if (latestClock && Number.isFinite(Number(latestClock.server_now_epoch_ms))) {
         serverClockOffsetMs = Number(latestClock.server_now_epoch_ms) - Date.now();
+      }
+      updateClockDisplays();
+    }
+
+    function playerBarHtml(side, name) {
+      const isWhite = side === "White";
+      return `<span class="${isWhite ? "dot-w" : "dot-b"}"></span><span class="bar-name">${side}: ${escapeHtml(name)}</span><span id="${isWhite ? "white-clock" : "black-clock"}" class="clock">--:--</span>`;
+    }
+
+    function renderPlayerBars(white, black) {
+      if (boardOrientation === "black") {
+        document.getElementById("top-player").innerHTML = playerBarHtml("White", white);
+        document.getElementById("bottom-player").innerHTML = playerBarHtml("Black", black);
+      } else {
+        document.getElementById("top-player").innerHTML = playerBarHtml("Black", black);
+        document.getElementById("bottom-player").innerHTML = playerBarHtml("White", white);
       }
       updateClockDisplays();
     }
@@ -1216,8 +1378,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
       document.getElementById("white-player").innerHTML = `<span class="dot-w"></span>White: ${escapeHtml(white)}`;
       document.getElementById("black-player").innerHTML = `<span class="dot-b"></span>Black: ${escapeHtml(black)}`;
-      document.getElementById("top-player").innerHTML = `<span class="dot-b"></span><span class="bar-name">Black: ${escapeHtml(black)}</span><span id="black-clock" class="clock">--:--</span>`;
-      document.getElementById("bottom-player").innerHTML = `<span class="dot-w"></span><span class="bar-name">White: ${escapeHtml(white)}</span><span id="white-clock" class="clock">--:--</span>`;
+      renderPlayerBars(white, black);
       renderClock(data);
       document.getElementById("turn").textContent = followLive
         ? (data.completed ? "Game over" : `${data.turn} to move`)
@@ -1357,8 +1518,8 @@ INDEX_HTML = """<!doctype html>
         const index = previousMatches.indexOf(match);
         return `<div class="match-row ${matchKey(match) === activeKey ? "active" : ""}">
           <button class="match-select" type="button" data-match-index="${escapeAttr(index)}">
-            <div class="match-main"><span>${escapeHtml(match.winner_label)}</span><span>${escapeHtml(match.result)}</span></div>
-            <div class="match-sub">${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · ${escapeHtml(match.tournament_slug || "unknown")} · game ${escapeHtml(match.game_index || 1)} · ${escapeHtml(match.date)} · ${escapeHtml(match.file)}</div>
+            <div class="match-main"><span>${escapeHtml(match.date || "unknown date")}</span><span>${escapeHtml(match.result)}</span></div>
+            <div class="match-sub"><span class="match-winner">${escapeHtml(match.winner_label)}</span> · ${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · ${escapeHtml(match.tournament_slug || "unknown")} · game ${escapeHtml(match.game_index || 1)} · ${escapeHtml(match.file)}</div>
           </button>
           <button class="match-copy-btn" type="button" title="Copy match URL" aria-label="Copy archived match URL" data-match-copy-index="${escapeAttr(index)}">&#10697;</button>
         </div>`;
@@ -1423,8 +1584,18 @@ INDEX_HTML = """<!doctype html>
       return logs.filter(entry => String(entry.side || "").toLowerCase() === logSideFilter);
     }
 
+    function filterLogsByKind(logs) {
+      if (!logs || allLogKindsSelected()) return logs || [];
+      if (!logKindFilter.size) return [];
+      return logs.filter(entry => logKindFilter.has(String(entry.kind || "log").toLowerCase()));
+    }
+
+    function filterLogs(logs) {
+      return filterLogsByKind(filterLogsBySide(logs));
+    }
+
     function logListHtml(logs, emptyText = "No bot log entries yet.") {
-      const visibleLogs = filterLogsBySide(logs);
+      const visibleLogs = filterLogs(logs);
       if (!visibleLogs || !visibleLogs.length) return `<div class="empty">${escapeHtml(emptyText)}</div>`;
       return `<div class="log-list">${visibleLogs.map(entry => {
         const bot = entry.bot || "unknown";
@@ -1474,7 +1645,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("learner-skills").innerHTML = fileListHtml(skills);
 
       const logs = data.logs || [];
-      const filteredLogs = filterLogsBySide(logs);
+      const filteredLogs = filterLogs(logs);
       document.getElementById("learner-logs-meta").textContent = `${filteredLogs.length} / ${logs.length} entries`;
       document.getElementById("learner-logs").innerHTML = logListHtml(logs, "No learner log entries yet.");
       renderBoardThinking();
@@ -1517,9 +1688,8 @@ INDEX_HTML = """<!doctype html>
           document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
           document.getElementById("white-player").innerHTML = '<span class="dot-w"></span>White: —';
           document.getElementById("black-player").innerHTML = '<span class="dot-b"></span>Black: —';
-          document.getElementById("top-player").innerHTML = '<span class="dot-b"></span><span class="bar-name">Black: —</span><span id="black-clock" class="clock">--:--</span>';
-          document.getElementById("bottom-player").innerHTML = '<span class="dot-w"></span><span class="bar-name">White: —</span><span id="white-clock" class="clock">--:--</span>';
           latestClock = null;
+          renderPlayerBars("—", "—");
           document.getElementById("turn").textContent = "—";
           document.getElementById("result").textContent = "*";
           document.getElementById("meta").textContent = "";
@@ -1686,6 +1856,7 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("follow-toggle").addEventListener("change", e => setFollowLive(e.target.checked));
     document.getElementById("prev-move").addEventListener("click", () => navigateMove(-1));
     document.getElementById("next-move").addEventListener("click", () => navigateMove(1));
+    document.getElementById("flip-board").addEventListener("click", () => setBoardOrientation(boardOrientation === "white" ? "black" : "white"));
     document.getElementById("analysis-toggle").addEventListener("change", e => setAnalysisEnabled(e.target.checked));
     document.getElementById("analysis-panel-toggle").addEventListener("change", e => setAnalysisEnabled(e.target.checked));
     document.getElementById("matches-prev").addEventListener("click", () => setPreviousMatchesPage(-1));
@@ -1704,6 +1875,9 @@ INDEX_HTML = """<!doctype html>
     });
     document.querySelectorAll("[data-log-side]").forEach(button => {
       button.addEventListener("click", () => setLogSideFilter(button.dataset.logSide));
+    });
+    document.querySelectorAll("[data-log-kind]").forEach(button => {
+      button.addEventListener("click", () => setLogKindFilter(button.dataset.logKind));
     });
     window.addEventListener("keydown", e => {
       const tag = document.activeElement ? document.activeElement.tagName : "";
@@ -1732,6 +1906,8 @@ INDEX_HTML = """<!doctype html>
     setInterval(refresh, 1000);
     setInterval(updateClockDisplays, 250);
     setInterval(loadLearner, 2500);
+    checkViewerVersion();
+    setInterval(checkViewerVersion, 1200);
   </script>
 </body>
 </html>
@@ -2533,6 +2709,8 @@ class LivePgnHandler(BaseHTTPRequestHandler):
     config_path = DEFAULT_ENGINE_CONFIG
     stats_dir = OUT_DIR
     analyzer: StockfishAnalyzer | None = None
+    viewer_version = ""
+    hot_reload = False
 
     def log_message(self, format: str, *args) -> None:
         return
@@ -2601,6 +2779,10 @@ class LivePgnHandler(BaseHTTPRequestHandler):
                 self.send_json({"root": str(LEARNER_DIR), "error": str(exc)})
             return
 
+        if parsed.path == "/api/viewer-version":
+            self.send_json({"version": self.viewer_version, "hot_reload": self.hot_reload})
+            return
+
         self.send_bytes(b"Not found", "text/plain; charset=utf-8", HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
@@ -2618,6 +2800,48 @@ class LivePgnHandler(BaseHTTPRequestHandler):
         self.send_bytes(b"Not found", "text/plain; charset=utf-8", HTTPStatus.NOT_FOUND)
 
 
+def hot_reload_stamp() -> str:
+    parts: list[str] = []
+    for path in HOT_RELOAD_FILES:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        parts.append(f"{path.name}:{stat.st_mtime_ns}:{stat.st_size}")
+    return "|".join(parts)
+
+
+def run_hot_reload_supervisor(argv: list[str]) -> int:
+    env = os.environ.copy()
+    env[HOT_RELOAD_ENV] = "1"
+    command = [sys.executable, *argv]
+    stamp = hot_reload_stamp()
+    child: subprocess.Popen | None = None
+    try:
+        while True:
+            child = subprocess.Popen(command, cwd=str(ROOT), env=env)
+            while True:
+                code = child.poll()
+                if code is not None:
+                    return int(code)
+                time.sleep(0.8)
+                next_stamp = hot_reload_stamp()
+                if next_stamp != stamp:
+                    stamp = next_stamp
+                    print("Viewer source changed; restarting local viewer.", flush=True)
+                    child.terminate()
+                    try:
+                        child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        child.kill()
+                        child.wait(timeout=5)
+                    break
+    except KeyboardInterrupt:
+        if child and child.poll() is None:
+            child.terminate()
+        return 130
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pgn", type=Path, default=DEFAULT_PGN_PATH)
@@ -2628,7 +2852,11 @@ def main() -> None:
     parser.add_argument("--analysis-movetime-ms", type=int, default=250)
     parser.add_argument("--analysis-multipv", type=int, default=3)
     parser.add_argument("--no-analysis", action="store_true")
+    parser.add_argument("--hot-reload", action="store_true", help="Restart the viewer server and reload the page when viewer source files change.")
     args = parser.parse_args()
+
+    if args.hot_reload and os.environ.get(HOT_RELOAD_ENV) != "1":
+        raise SystemExit(run_hot_reload_supervisor(sys.argv))
 
     analyzer = StockfishAnalyzer(
         config_path=args.config,
@@ -2640,6 +2868,8 @@ def main() -> None:
     LivePgnHandler.config_path = args.config
     LivePgnHandler.stats_dir = args.stats_dir
     LivePgnHandler.analyzer = analyzer
+    LivePgnHandler.viewer_version = hot_reload_stamp()
+    LivePgnHandler.hot_reload = args.hot_reload
 
     server = ThreadingHTTPServer((args.host, args.port), LivePgnHandler)
     print(f"Live PGN viewer: http://{args.host}:{args.port}/")

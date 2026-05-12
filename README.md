@@ -23,6 +23,13 @@ $env:OPENROUTER_API_KEY = "..."
 $env:OPENROUTER_MODEL = "moonshotai/kimi-k2.6"
 ```
 
+Search available OpenRouter models without editing engine code:
+
+```powershell
+python .\tools\search_openrouter_models.py grok 4.3
+python .\tools\search_openrouter_models.py grok 4.3 --first-id
+```
+
 ## UCI commands
 
 Codex-chess:
@@ -59,6 +66,18 @@ Run a short LLM-vs-Stockfish match:
 $env:OPENROUTER_MODEL = "moonshotai/kimi-k2.6"
 python .\tools\play_engine_match.py --max-plies 8
 ```
+
+Run an OpenRouter model directly against the Codex learner UCI engine:
+
+```powershell
+python .\tools\play_engine_match.py `
+  --openrouter-model x-ai/grok-4.3 `
+  --codex-learner-black `
+  --black-movetime-ms 30000 `
+  --max-plies 8
+```
+
+`play_engine_match.py` accepts `--white-option NAME=VALUE`, `--black-option NAME=VALUE`, `--white-env NAME=VALUE`, and `--black-env NAME=VALUE` for one-off UCI and environment overrides. `llm-chess-engine` exposes a `Model` UCI option and also reads `OPENROUTER_MODEL`. Missing OpenRouter keys, API failures, invalid JSON, and illegal model moves forfeit with `bestmove 0000`; the engine does not pick a heuristic fallback move.
 
 Outputs are written under `out/`, which is intentionally ignored.
 
@@ -125,7 +144,9 @@ For the short command form, use `play-games.ps1`; `-n` is an alias for `-Games`:
 
 The FastChess live wrapper uses the single dedicated local viewer URL `http://127.0.0.1:8766/`. If an older live-viewer process is already on that port, the wrapper restarts that viewer on the same port instead of moving to another URL. The wrapper does not expose a port selector. While FastChess is still inside a game, the wrapper starts `tools\mirror_fastchess_live_pgn.py` and points the viewer at `out\live\<run>-live.pgn` so the board has a current position before FastChess writes the final `-pgnout` game.
 
-The viewer uses a three-column desktop layout: the left pane shows fixed-height bot thinking logs and Engine Analysis, the center pane shows the board, and the right pane keeps the leaderboard, previous matches, moves, and config. In Follow Live mode the thinking pane shows recent live entries with the current move number. During replay navigation, the thinking pane follows the selected ply and shows the prompt/comment/bestmove entries that match the move being replayed, but it does not auto-refresh while Follow Live is off so the text stays copyable. Completed games show the winner as `<player> (<colour>) won`, for example `Codex-chess-learner (White) won`. Previous matches appear below the leaderboard, paginate 5 completed games per page, and each row can be clicked to load that archived game in the board viewer with matching bot logs. Each active live or archived game shows the tournament slug derived from the PGN filename, opening the viewer without a hash defaults to the live match `#slug`, replay or archived games use a stable `#slug--game-N` hash, the header copy icon copies the full absolute viewer URL for the active match, and the active archived match row shows its own copy icon. The board shows the black-side player above the board and the white-side player below the board, matching the normal board orientation. Engine Analysis stays switchable from the top toolbar and the analysis panel; if the server was started with analysis disabled, the UI controls show that disabled state instead of claiming analysis is on.
+The wrapper starts the viewer with hot reload by default through `viewer.hotReload` in `chess-harness.config.json`. When `tools\live_pgn_viewer.py` or the viewer docs/config change, the local viewer server restarts and the browser page reloads against the updated UI instead of continuing to show stale in-memory HTML. For direct viewer work, use `python .\tools\live_pgn_viewer.py --hot-reload`.
+
+The viewer uses a three-column desktop layout: the left pane shows fixed-height bot thinking logs and Engine Analysis, the center pane shows the board, and the right pane keeps the leaderboard, previous matches, moves, and config. In Follow Live mode the thinking pane shows recent live entries with the current move number. During replay navigation, the thinking pane follows the selected ply and shows the prompt/comment/bestmove entries that match the move being replayed, but it does not auto-refresh while Follow Live is off so the text stays copyable. Bot Thinking has persisted side and multi-select message-type filters; message type defaults to only `Comment`, and clicking `All` while all types are selected clears all selected types. Completed games show the winner as `<player> (<colour>) won`, for example `Codex-chess-learner (White) won`. Previous matches appear below the leaderboard, paginate 5 completed games per page, show the date on the compact header line and the winner on the next line, and each row can be clicked to load that archived game in the board viewer with matching bot logs. Each active live or archived game shows the tournament slug derived from the PGN filename, opening the viewer without a hash defaults to the live match `#slug`, replay or archived games use a stable `#slug--game-N` hash, the header copy icon copies the full absolute viewer URL for the active match, and the active archived match row shows its own copy icon. The board can be flipped from the `Flip Board` button above the Leaderboard and persists the chosen white/black orientation while keeping coordinates, clocks, and player bars aligned. Engine Analysis stays switchable from the top toolbar and the analysis panel; if the server was started with analysis disabled, the UI controls show that disabled state instead of claiming analysis is on.
 
 For a short viewer smoke run, pass the same match options through the wrapper:
 
@@ -146,9 +167,9 @@ python .\tools\live_pgn_viewer.py --pgn .\out\live\<run>-live.pgn --port 8766
 
 The mirror also writes standard PGN clock comments such as `{ [%clk 0:04:58.125] }` on completed moves. It keeps `WhiteClockMs`, `BlackClockMs`, `ClockUpdatedAtEpochMs`, and `ClockRunningSide` headers from the latest UCI `go wtime ... btime ...` line as live-viewer metadata, so the viewer can show running clocks above and below the board while still preserving per-move clock times in PGN notation.
 
-The viewer has a `Learner` screen on the top toolbar and also mirrors the latest bot log rows into the board view's left pane. It reads the learner's real `MEMORY.md`, `skills/`, `knowledgebase/`, and recent `out\codex-chess-logs` entries. Bot log rows are colored by source: learner and baseline entries are separated by their active engine context, and engine processes log observable prompt snapshots, repetition-risk counts, invalid-move repairs, bestmove lines, and returned short move comments without claiming hidden chain-of-thought access.
+The viewer has a `Learner` screen on the top toolbar and also mirrors the latest bot log rows into the board view's left pane. It reads the learner's real `MEMORY.md`, `skills/`, `knowledgebase/`, and recent `out\codex-chess-logs` entries. Bot log rows are colored by source: learner and baseline entries are separated by their active engine context, and engine processes log observable prompt snapshots, repetition-risk counts, invalid-move repairs, bestmove lines, and returned short move comments without claiming hidden chain-of-thought access. The same persisted side and message-type filters apply to the board Bot Thinking pane and the Learner Bot Logs pane.
 
-Learner improvement is handled by `tools\update_learner_knowledgebase.py`. It reads the FastChess PGN plus the redirected launch stdout, writes `engines\codex-chess-learner\knowledgebase\live-match-lessons.md`, writes a JSON copy, and refreshes the learner `MEMORY.md` autolearn block. Run it once or as a watcher:
+Learner improvement is handled by `tools\update_learner_knowledgebase.py`. It reads the FastChess PGN plus the redirected launch stdout, writes `engines\codex-chess-learner\knowledgebase\live-match-lessons.md`, writes compact `strategy-lessons.md/json`, and refreshes the learner `MEMORY.md` autolearn block. The updater collects neutral frozen-self-play observations without Stockfish PVs or hardcoded move answers, then asks Codex app-server to synthesize model-discovered concepts and value adjustments from that evidence. Run it once or as a watcher:
 
 ```powershell
 python .\tools\update_learner_knowledgebase.py `

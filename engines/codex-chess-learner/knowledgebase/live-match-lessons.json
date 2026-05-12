@@ -1,77 +1,85 @@
 {
-  "generated_at": "2026-05-12 10:30:20",
-  "source_pgn": "out\\fastchess\\codex-vs-codex-learner-standard5-patched-20260512-100210.pgn",
-  "source_stdout": "out\\fastchess\\codex-vs-codex-learner-standard5-patched-20260512-100210-launch.out.log",
-  "completed_games": 5,
-  "scheduled_games": 6,
-  "learner_points": 3.5,
-  "learner_score_percent": 70.0,
+  "generated_at": "2026-05-12 13:06:06",
+  "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-122911.pgn",
+  "source_stdout": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-122911-launch.out.log",
+  "completed_games": 4,
+  "scheduled_games": 10,
+  "learner_points": 0.5,
+  "learner_score_percent": 12.5,
   "reason_counts": {
-    "mate": 4,
-    "threefold repetition": 1
+    "illegal move": 2,
+    "threefold repetition": 1,
+    "mate": 1
   },
-  "illegal_losses": [],
-  "illegal_wins": [],
-  "zero_ply_engine_failures": [],
-  "mate_losses": [
+  "illegal_losses": [
+    {
+      "game": 1,
+      "white": "Codex-chess",
+      "black": "Codex-chess-learner",
+      "result": "1-0",
+      "plies": 125,
+      "reason": "Black makes an illegal move",
+      "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5"
+    },
     {
       "game": 4,
       "white": "Codex-chess-learner",
       "black": "Codex-chess",
       "result": "0-1",
-      "plies": 42,
-      "reason": "Black mates",
-      "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5"
+      "plies": 108,
+      "reason": "White makes an illegal move",
+      "opening": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O"
     }
   ],
-  "mate_wins": [
-    {
-      "game": 1,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 48,
-      "reason": "Black mates",
-      "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5"
-    },
+  "illegal_wins": [],
+  "zero_ply_engine_failures": [],
+  "mate_losses": [
     {
       "game": 3,
       "white": "Codex-chess",
       "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 30,
-      "reason": "Black mates",
-      "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5"
-    },
-    {
-      "game": 5,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "0-1",
-      "plies": 44,
-      "reason": "Black mates",
-      "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5"
+      "result": "1-0",
+      "plies": 43,
+      "reason": "White mates",
+      "opening": "1. Nf3 Nf6 2. d4 d5 3. c4 e6 4. Nc3 Be7 5. Bf4 O-O"
     }
   ],
+  "mate_wins": [],
   "time_losses": [],
   "time_wins": [],
   "repetition_draws": 1,
   "repeated_opening_lines": [
     {
       "line": "1. Nf3 Nf6 2. d4 d5 3. c4 dxc4 4. e3 e6 5. Bxc4 c5",
-      "games": 4,
-      "learner_score": 3.0,
-      "wins": 3,
+      "games": 1,
+      "learner_score": 0.0,
+      "wins": 0,
       "draws": 0,
       "losses": 1
     },
     {
-      "line": "1. Nf3 d5 2. d4 Nf6 3. c4 e6 4. Nc3 Be7 5. Bf4 O-O",
+      "line": "1. Nf3 Nf6 2. d4 d5 3. c4 e6 4. Nc3 Be7 5. Bf4 O-O",
+      "games": 1,
+      "learner_score": 0.0,
+      "wins": 0,
+      "draws": 0,
+      "losses": 1
+    },
+    {
+      "line": "1. Nf3 d5 2. d4 Nf6 3. c4 e6 4. Nc3 Be7 5. Bg5 O-O",
       "games": 1,
       "learner_score": 0.5,
       "wins": 0,
       "draws": 1,
       "losses": 0
+    },
+    {
+      "line": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O",
+      "games": 1,
+      "learner_score": 0.0,
+      "wins": 0,
+      "draws": 0,
+      "losses": 1
     }
   ]
 }

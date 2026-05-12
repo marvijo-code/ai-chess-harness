@@ -26,3 +26,22 @@
 - [x] Make PowerShell launchers and Python Codex runners read model/effort and related defaults from the JSON config.
 - [x] Fix Windows Codex preflight launch to resolve `codex.cmd` instead of bare `codex`.
 - [x] Store FastChess live mirror clock times in standard PGN `[%clk ...]` move comments and read them in the viewer.
+- [x] Add OpenRouter model search for selecting chess-capable OpenRouter model IDs.
+- [x] Make OpenRouter UCI match play fail by forfeit instead of heuristic fallback.
+- [x] Make the generic UCI match runner pass OpenRouter model options and launch Codex-chess-learner as an opponent.
+- [x] Test `x-ai/grok-4.3` against Codex-chess-learner.
+- [x] Add a persisted multi-select message-type filter to Bot Thinking.
+- [x] Add persisted flip-board functionality to the viewer.
+- [x] Add the frequent PRD/checklist update rule to repo `AGENTS.md`.
+- [x] Move Previous Matches dates to the row header while keeping compact row height.
+- [x] Validate compile checks and focused viewer behavior for Bot Thinking filters, flip-board, and Previous Matches row layout.
+- [x] Add continuous frozen-self evidence collection plus Codex concept synthesis to learner autolearn.
+- [x] Write bounded `strategy-lessons.md/json` outputs with model-discovered concepts and deduped evidence.
+- [x] Feed compact strategy concepts into learner prompts without Stockfish analysis or hardcoded move answers.
+- [x] Add focused tests for neutral evidence capture and repeated-game dedupe counts.
+- [ ] Validate py_compile, archived-PGN autolearn output, and a short frozen-self autolearn run.
+- [x] Add hot reload for the local FastChess viewer workflow.
+- [x] Verify a running viewer exposes the Bot Thinking type filter after restart and reports hot reload through `/api/viewer-version`.
+- [ ] Change Bot Thinking type filter default to only `Comment` and make `All` toggle all-selected to none-selected.
+- [ ] Move `Flip Board` from the header toolbar to above the Leaderboard.
+- [ ] Verify filter defaults, `All` toggle semantics, persistence, and above-Leaderboard flip placement in the browser.

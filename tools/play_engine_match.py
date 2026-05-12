@@ -14,11 +14,39 @@ ENGINE_CONFIG = Path(os.environ["APPDATA"]) / "org.encroissant.app" / "engines" 
 OUT_DIR = ROOT / "out"
 
 
+def parse_assignment(value: str, label: str) -> tuple[str, str]:
+    if "=" not in value:
+        raise argparse.ArgumentTypeError(f"{label} must use NAME=VALUE syntax: {value!r}")
+    name, assigned = value.split("=", 1)
+    name = name.strip()
+    if not name:
+        raise argparse.ArgumentTypeError(f"{label} name is empty: {value!r}")
+    return name, assigned
+
+
+def parse_assignments(values: list[str], label: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values:
+        name, assigned = parse_assignment(value, label)
+        parsed[name] = assigned
+    return parsed
+
+
 class UciEngine:
-    def __init__(self, name: str, path: Path, movetime_ms: int) -> None:
+    def __init__(
+        self,
+        name: str,
+        path: Path,
+        movetime_ms: int,
+        options: dict[str, str] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> None:
         self.name = name
         self.path = path
         self.movetime_ms = movetime_ms
+        process_env = os.environ.copy()
+        if env:
+            process_env.update(env)
         self.proc = subprocess.Popen(
             [str(path)],
             stdin=subprocess.PIPE,
@@ -28,9 +56,12 @@ class UciEngine:
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            env=process_env,
         )
         self.command("uci")
         self.read_until("uciok", 30)
+        for option_name, option_value in (options or {}).items():
+            self.command(f"setoption name {option_name} value {option_value}")
         self.command("isready")
         self.read_until("readyok", 30)
 
@@ -98,16 +129,40 @@ def main() -> None:
     parser.add_argument("--white-name", default="llm-chess-engine")
     parser.add_argument("--white-path", type=Path, default=ROOT / "engines" / "llm-chess-engine" / "llm-chess-engine.cmd")
     parser.add_argument("--white-movetime-ms", type=int, default=30000)
+    parser.add_argument("--white-option", action="append", default=[], help="UCI option for White, as NAME=VALUE.")
+    parser.add_argument("--white-env", action="append", default=[], help="Environment override for White, as NAME=VALUE.")
     parser.add_argument("--black-name", default="Stockfish")
     parser.add_argument("--black-path", type=Path)
     parser.add_argument("--black-movetime-ms", type=int, default=150)
+    parser.add_argument("--black-option", action="append", default=[], help="UCI option for Black, as NAME=VALUE.")
+    parser.add_argument("--black-env", action="append", default=[], help="Environment override for Black, as NAME=VALUE.")
+    parser.add_argument("--openrouter-model", help="Shortcut for --white-option Model=<id> and a readable White name.")
+    parser.add_argument("--codex-learner-black", action="store_true", help="Use Codex-chess-learner as Black.")
     parser.add_argument("--max-plies", type=int, default=8)
     args = parser.parse_args()
 
     OUT_DIR.mkdir(exist_ok=True)
-    black_path = args.black_path or load_engine_path(args.black_name)
-    white = UciEngine(args.white_name, args.white_path, args.white_movetime_ms)
-    black = UciEngine(args.black_name, black_path, args.black_movetime_ms)
+    white_options = parse_assignments(args.white_option, "--white-option")
+    black_options = parse_assignments(args.black_option, "--black-option")
+    white_env = parse_assignments(args.white_env, "--white-env")
+    black_env = parse_assignments(args.black_env, "--black-env")
+
+    white_name = args.white_name
+    if args.openrouter_model:
+        white_options["Model"] = args.openrouter_model
+        white_env["OPENROUTER_MODEL"] = args.openrouter_model
+        if white_name == "llm-chess-engine":
+            white_name = f"OpenRouter {args.openrouter_model}"
+
+    black_name = args.black_name
+    black_path = args.black_path
+    if args.codex_learner_black:
+        black_name = "Codex-chess-learner"
+        black_path = ROOT / "engines" / "codex-chess-learner" / "codex-chess-learner.cmd"
+    black_path = black_path or load_engine_path(black_name)
+
+    white = UciEngine(white_name, args.white_path, args.white_movetime_ms, options=white_options, env=white_env)
+    black = UciEngine(black_name, black_path, args.black_movetime_ms, options=black_options, env=black_env)
     white.new_game()
     black.new_game()
 
@@ -116,8 +171,8 @@ def main() -> None:
     game.headers["Event"] = "AI chess harness engine match"
     game.headers["Site"] = str(ROOT)
     game.headers["Date"] = time.strftime("%Y.%m.%d")
-    game.headers["White"] = args.white_name
-    game.headers["Black"] = args.black_name
+    game.headers["White"] = white_name
+    game.headers["Black"] = black_name
     node = game
     moves = []
 
@@ -155,6 +210,12 @@ def main() -> None:
             "fen": board.fen(),
             "white": str(args.white_path),
             "black": str(black_path),
+            "white_name": white_name,
+            "black_name": black_name,
+            "white_options": white_options,
+            "black_options": black_options,
+            "white_env_keys": sorted(white_env),
+            "black_env_keys": sorted(black_env),
             "pgn": str(pgn_path),
             "json": str(json_path),
             "moves": moves,
