@@ -1,12 +1,12 @@
 param(
-    [int]$Games = 10,
-    [int]$Concurrency = 1,
-    [string]$Model = "gpt-5.5",
-    [string]$Effort = "low",
-    [string]$TimeControl = "300+0",
-    [int]$MaxMoves = 0,
-    [string]$FastChessVersion = "latest",
-    [string]$RunName = "codex-vs-codex-learner",
+    [Nullable[int]]$Games = $null,
+    [Nullable[int]]$Concurrency = $null,
+    [string]$Model = $null,
+    [string]$Effort = $null,
+    [string]$TimeControl = $null,
+    [Nullable[int]]$MaxMoves = $null,
+    [string]$FastChessVersion = $null,
+    [string]$RunName = $null,
     [string]$Stamp = "",
     [switch]$ForceInstall,
     [switch]$SkipModelPreflight,
@@ -31,6 +31,25 @@ function Resolve-RepoRoot {
 }
 
 $repoRoot = Resolve-RepoRoot
+. (Join-Path $repoRoot "tools\harness_config.ps1")
+$config = Get-ChessHarnessConfig -RepoRoot $repoRoot
+
+$Games = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Games" -CurrentValue $Games -Config $config -Path "fastChess.games" -Default 10)
+$Concurrency = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Concurrency" -CurrentValue $Concurrency -Config $config -Path "fastChess.concurrency" -Default 1)
+$Model = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Model" -CurrentValue $Model -Config $config -Path "codex.model" -Default "gpt-5.3-codex")
+$Effort = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Effort" -CurrentValue $Effort -Config $config -Path "codex.effort" -Default "low")
+$TimeControl = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "TimeControl" -CurrentValue $TimeControl -Config $config -Path "fastChess.timeControl" -Default "300+0")
+$MaxMoves = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "MaxMoves" -CurrentValue $MaxMoves -Config $config -Path "fastChess.maxMoves" -Default 0)
+$FastChessVersion = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "FastChessVersion" -CurrentValue $FastChessVersion -Config $config -Path "fastChess.version" -Default "latest")
+$RunName = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "RunName" -CurrentValue $RunName -Config $config -Path "fastChess.runName" -Default "codex-vs-codex-learner")
+$ForceInstall = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "ForceInstall" -CurrentValue $ForceInstall -Config $config -Path "fastChess.forceInstall" -Default $false
+$SkipModelPreflight = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "SkipModelPreflight" -CurrentValue $SkipModelPreflight -Config $config -Path "fastChess.skipModelPreflight" -Default $false
+$NoRepeat = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "NoRepeat" -CurrentValue $NoRepeat -Config $config -Path "fastChess.noRepeat" -Default $false
+$timeMarginMs = [int](Get-HarnessConfigValue -Config $config -Path "fastChess.timeMarginMs" -Default 5000)
+$ratingInterval = [int](Get-HarnessConfigValue -Config $config -Path "fastChess.ratingInterval" -Default 1)
+$autosaveInterval = [int](Get-HarnessConfigValue -Config $config -Path "fastChess.autosaveInterval" -Default 2)
+$logLevel = [string](Get-HarnessConfigValue -Config $config -Path "fastChess.logLevel" -Default "info")
+
 $installRoot = Join-Path $repoRoot "tools\.fastchess"
 $resultsRoot = Join-Path $repoRoot "out\fastchess"
 $codexEngine = Join-Path $repoRoot "engines\codex-chess\codex-chess.cmd"
@@ -156,15 +175,15 @@ Write-Host "Log: $logPath"
 $fastChessArgs = @(
     "-engine", "cmd=$codexEngine", "name=Codex-chess", "proto=uci", "restart=on",
     "-engine", "cmd=$learnerEngine", "name=Codex-chess-learner", "proto=uci", "restart=on",
-    "-each", "tc=$TimeControl", "timemargin=5000",
+    "-each", "tc=$TimeControl", "timemargin=$timeMarginMs",
     "-rounds", "$rounds",
     "-concurrency", "$Concurrency",
-    "-ratinginterval", "1",
+    "-ratinginterval", "$ratingInterval",
     "-pgnout", "file=$pgnPath", "notation=san", "append=false", "timeleft=true", "latency=true",
     "-config", "outname=$configPath", "stats=true",
-    "-autosaveinterval", "2",
+    "-autosaveinterval", "$autosaveInterval",
     "-recover",
-    "-log", "file=$logPath", "level=info", "append=false"
+    "-log", "file=$logPath", "level=$logLevel", "append=false"
 )
 
 if (-not $NoRepeat) {

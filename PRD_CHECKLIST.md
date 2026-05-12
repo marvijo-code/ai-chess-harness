@@ -12,10 +12,17 @@
 - [x] Validate compile/parser/skill checks and browser E2E behavior.
 - [x] Update durable memory, commit, and push.
 - [x] Show the tournament slug on every live or archived game loaded in the viewer.
-- [x] Add a compact copy icon that copies the active game's full absolute PGN path.
-- [x] Keep the browser URL hash synced to the active live or archived match slug.
+- [x] Add a compact copy icon that copies the active game's full absolute viewer URL.
+- [x] Keep the browser URL hash synced to the active live match slug and a stable `--game-N` replay/archive hash.
+- [x] Add a copy icon to the active archived match row.
+- [x] Default no-hash viewer loads to the live `#slug` and preserve archive deep links during startup.
+- [x] Ensure `Previous Matches` metadata rows wrap instead of clipping or overflowing.
 - [x] Add a 50-test hidden-answer FEN interpretation curriculum for `gpt-5.3-codex`.
 - [x] Ensure the curriculum forbids online search and tool use by the model.
 - [x] Write missed-question correction lessons into learner memory and knowledgebase.
 - [x] Validate the FEN curriculum offline without Codex app-server.
 - [x] Run or preflight the `gpt-5.3-codex` curriculum and record any app-server/model blocker.
+- [x] Add root `chess-harness.config.json` for durable runner defaults.
+- [x] Make PowerShell launchers and Python Codex runners read model/effort and related defaults from the JSON config.
+- [x] Fix Windows Codex preflight launch to resolve `codex.cmd` instead of bare `codex`.
+- [x] Store FastChess live mirror clock times in standard PGN `[%clk ...]` move comments and read them in the viewer.

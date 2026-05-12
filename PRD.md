@@ -22,8 +22,11 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 13. FEN curriculum prompts must forbid online search and tool use. Learning happens through local writeback of concise missed-question lessons into the learner memory and knowledgebase after grading.
 14. The curriculum should contain at least 50 multiple-choice tests and should repeat only the missed concepts until the selected Codex model can generalise across the full held-out set or a clear model/app-server blocker is recorded.
 15. Every game loaded in the viewer, live or archived, shows the tournament slug derived from its PGN path.
-16. The viewer provides a compact copy icon that copies the full absolute PGN path for the currently loaded game.
-17. The viewer URL hash mirrors the active match slug, for example `#codex-vs-codex-learner-standard5-patched-20260512-100210`, and archived game selections include a stable game suffix.
+16. The viewer provides a compact copy icon that copies the full absolute viewer URL for the currently loaded game.
+17. The viewer URL hash mirrors the active match slug, for example `#codex-vs-codex-learner-standard5-patched-20260512-100210`, and replay or archived game selections include a stable `--game-N` suffix.
+18. The viewer defaults to the live match URL hash when opened without a hash, preserves archived `#slug--game-N` deep links during startup, and shows a compact copy icon on the active archived match row.
+19. Runner defaults that make sense to persist, including Codex model/effort, preflight timeout, FastChess defaults, viewer defaults, and learner autolearn settings, live in root `chess-harness.config.json`; generated per-run FastChess config JSON remains an artifact, not the source of defaults.
+20. Live mirrored PGNs store player clock times in standard PGN `[%clk ...]` move comments, while keeping live ticking clock headers for the viewer.
 
 ## Validation Requirements
 
@@ -31,7 +34,8 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 2. PowerShell wrappers parse.
 3. The `chess-harness-codex` source and installed skills validate.
 4. FEN curriculum offline validation proves the 50 hidden-answer questions are generated, graded, and written to learner output files without calling Codex.
-5. Browser E2E verifies:
+5. Config validation proves PowerShell and Python runners read defaults from `chess-harness.config.json`, and direct Codex model preflight succeeds without Windows shim launch errors.
+6. Browser E2E verifies:
    - 64 board squares render.
    - Bot Thinking has fixed height and includes move number text.
    - Engine Analysis appears in the left column and shows the analysis engine name.
@@ -39,6 +43,8 @@ Keep the local FastChess viewer useful during live play and replay without leaki
    - Clicking Previous Matches loads the archived game and matching bot logs.
    - Bot Thinking does not auto-refresh while replaying or viewing archived games.
    - Completed winner text uses `<player> (<colour>) won`.
-   - Active games show a tournament slug and a copy-path control that copies the full PGN path.
-   - The browser URL hash updates to the active match slug for live games and archived match selections.
+   - Active games show a tournament slug and a copy control that copies the full absolute viewer URL.
+   - The browser URL hash updates to the active match slug for live games and to a stable `--game-N` hash for replay or archived match selections.
+   - The active archived match row has a copy icon that copies its absolute viewer URL without changing the selected match.
+   - Live mirrored PGNs contain `[%clk ...]` comments on completed moves when FastChess clock state is available.
    - No horizontal overflow at desktop width.

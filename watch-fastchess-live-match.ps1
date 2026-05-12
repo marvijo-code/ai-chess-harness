@@ -1,13 +1,13 @@
 param(
-    [int]$Games = 10,
-    [int]$Concurrency = 1,
-    [string]$Model = "gpt-5.5",
-    [string]$Effort = "low",
-    [string]$TimeControl = "300+0",
-    [int]$MaxMoves = 0,
-    [string]$FastChessVersion = "latest",
-    [int]$AnalysisMovetimeMs = 250,
-    [int]$AnalysisMultipv = 3,
+    [Nullable[int]]$Games = $null,
+    [Nullable[int]]$Concurrency = $null,
+    [string]$Model = $null,
+    [string]$Effort = $null,
+    [string]$TimeControl = $null,
+    [Nullable[int]]$MaxMoves = $null,
+    [string]$FastChessVersion = $null,
+    [Nullable[int]]$AnalysisMovetimeMs = $null,
+    [Nullable[int]]$AnalysisMultipv = $null,
     [string]$PgnPath = "",
     [switch]$ForceInstall,
     [switch]$NoAnalysis,
@@ -111,11 +111,35 @@ function Get-LatestFastChessPgnPath {
         Select-Object -First 1 -ExpandProperty FullName
 }
 
+$repoRoot = Resolve-RepoRoot
+. (Join-Path $repoRoot "tools\harness_config.ps1")
+$config = Get-ChessHarnessConfig -RepoRoot $repoRoot
+
+$Games = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Games" -CurrentValue $Games -Config $config -Path "fastChess.games" -Default 10)
+$Concurrency = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Concurrency" -CurrentValue $Concurrency -Config $config -Path "fastChess.concurrency" -Default 1)
+$Model = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Model" -CurrentValue $Model -Config $config -Path "codex.model" -Default "gpt-5.3-codex")
+$Effort = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "Effort" -CurrentValue $Effort -Config $config -Path "codex.effort" -Default "low")
+$TimeControl = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "TimeControl" -CurrentValue $TimeControl -Config $config -Path "fastChess.timeControl" -Default "300+0")
+$MaxMoves = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "MaxMoves" -CurrentValue $MaxMoves -Config $config -Path "fastChess.maxMoves" -Default 0)
+$FastChessVersion = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "FastChessVersion" -CurrentValue $FastChessVersion -Config $config -Path "fastChess.version" -Default "latest")
+$AnalysisMovetimeMs = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "AnalysisMovetimeMs" -CurrentValue $AnalysisMovetimeMs -Config $config -Path "viewer.analysisMovetimeMs" -Default 250)
+$AnalysisMultipv = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "AnalysisMultipv" -CurrentValue $AnalysisMultipv -Config $config -Path "viewer.analysisMultipv" -Default 3)
+$forceInstallEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "ForceInstall" -CurrentValue $ForceInstall -Config $config -Path "fastChess.forceInstall" -Default $false
+$analysisDisabled = if ($PSBoundParameters.ContainsKey("NoAnalysis")) { [bool]$NoAnalysis } else { -not [bool](Get-HarnessConfigValue -Config $config -Path "viewer.analysisEnabled" -Default $true) }
+$browserDisabled = if ($PSBoundParameters.ContainsKey("NoBrowser")) { [bool]$NoBrowser } else { -not [bool](Get-HarnessConfigValue -Config $config -Path "viewer.openBrowser" -Default $true) }
+$stopViewerWhenDoneEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "StopViewerWhenDone" -CurrentValue $StopViewerWhenDone -Config $config -Path "viewer.stopWhenDone" -Default $false
+$learnerAutoLearnDisabled = if ($PSBoundParameters.ContainsKey("NoLearnerAutoLearn")) { [bool]$NoLearnerAutoLearn } else { -not [bool](Get-HarnessConfigValue -Config $config -Path "learner.autoLearn" -Default $true) }
+$skipModelPreflightEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "SkipModelPreflight" -CurrentValue $SkipModelPreflight -Config $config -Path "fastChess.skipModelPreflight" -Default $false
+$noRepeatEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "NoRepeat" -CurrentValue $NoRepeat -Config $config -Path "fastChess.noRepeat" -Default $false
+$viewerHost = [string](Get-HarnessConfigValue -Config $config -Path "viewer.host" -Default "127.0.0.1")
+$viewerPort = [int](Get-HarnessConfigValue -Config $config -Path "viewer.port" -Default 8766)
+$runName = [string](Get-HarnessConfigValue -Config $config -Path "fastChess.liveRunName" -Default "codex-vs-codex-learner-live")
+$autoLearnIntervalSeconds = [int](Get-HarnessConfigValue -Config $config -Path "learner.autoLearnIntervalSeconds" -Default 10)
+
 if ($Games -lt 1) {
     throw "-Games must be at least 1."
 }
 
-$repoRoot = Resolve-RepoRoot
 $resultsRoot = Join-Path $repoRoot "out\fastchess"
 $viewerScript = Join-Path $repoRoot "tools\live_pgn_viewer.py"
 $mirrorScript = Join-Path $repoRoot "tools\mirror_fastchess_live_pgn.py"
@@ -142,7 +166,6 @@ if (-not (Test-Path $preflightScript)) {
 New-Item -ItemType Directory -Force -Path $resultsRoot | Out-Null
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$runName = "codex-vs-codex-learner-live"
 $pgnPath = $null
 $runFastChess = $false
 
@@ -170,7 +193,7 @@ if (-not $pgnPath) {
 }
 
 $modelAlreadyChecked = $false
-if ($runFastChess -and (-not $SkipModelPreflight)) {
+if ($runFastChess -and (-not $skipModelPreflightEnabled)) {
     Write-Host "Checking Codex model availability before starting viewer/run: $Model"
     & python $preflightScript --model $Model --effort $Effort
     if ($LASTEXITCODE -ne 0) {
@@ -179,7 +202,6 @@ if ($runFastChess -and (-not $SkipModelPreflight)) {
     $modelAlreadyChecked = $true
 }
 
-$viewerPort = 8766
 if (-not (Test-PortAvailable -CandidatePort $viewerPort)) {
     $existingViewers = @(Get-LiveViewerProcessOnPort -ViewerPort $viewerPort)
     if ($existingViewers.Count -gt 0) {
@@ -192,7 +214,7 @@ if (-not (Test-PortAvailable -CandidatePort $viewerPort)) {
 if (-not (Test-PortAvailable -CandidatePort $viewerPort)) {
     throw "Dedicated live viewer port $viewerPort is already in use by another process. Stop that process before starting the FastChess live viewer."
 }
-$viewerUrl = "http://127.0.0.1:$viewerPort/"
+$viewerUrl = "http://${viewerHost}:$viewerPort/"
 $viewerOut = Join-Path $resultsRoot "$runName-$stamp-viewer.out.log"
 $viewerErr = Join-Path $resultsRoot "$runName-$stamp-viewer.err.log"
 $launchOut = Join-Path $resultsRoot "$runName-$stamp-launch.out.log"
@@ -237,13 +259,13 @@ if ($runFastChess -or (Test-Path $candidateLaunchOut)) {
 $viewerArgs = @(
     $viewerScript,
     "--pgn", $viewerPgnPath,
-    "--host", "127.0.0.1",
+    "--host", $viewerHost,
     "--port", "$viewerPort",
     "--stats-dir", (Join-Path $repoRoot "out"),
     "--analysis-movetime-ms", "$AnalysisMovetimeMs",
     "--analysis-multipv", "$AnalysisMultipv"
 )
-if ($NoAnalysis) {
+if ($analysisDisabled) {
     $viewerArgs += "--no-analysis"
 }
 
@@ -268,14 +290,14 @@ if ($viewerProcess.HasExited) {
     throw "Live PGN viewer exited early with code $($viewerProcess.ExitCode). $errorText"
 }
 
-if (-not $NoBrowser) {
+if (-not $browserDisabled) {
     Start-Process $viewerUrl
 }
 
 if (-not $runFastChess) {
     $candidateStdout = [System.IO.Path]::ChangeExtension($pgnPath, $null) + "-launch.out.log"
-    if ((-not $NoLearnerAutoLearn) -and (Test-Path $candidateStdout)) {
-        $autolearnArgs = @($autolearnScript, "--pgn", $pgnPath, "--stdout", $candidateStdout, "--watch", "--interval", "10")
+    if ((-not $learnerAutoLearnDisabled) -and (Test-Path $candidateStdout)) {
+        $autolearnArgs = @($autolearnScript, "--pgn", $pgnPath, "--stdout", $candidateStdout, "--watch", "--interval", "$autoLearnIntervalSeconds")
         $autolearnProcess = Start-Process `
             -FilePath "python" `
             -ArgumentList (ConvertTo-ProcessArguments -Arguments $autolearnArgs) `
@@ -304,19 +326,19 @@ $runParams = @{
 if ($MaxMoves -gt 0) {
     $runParams.MaxMoves = $MaxMoves
 }
-if ($ForceInstall) {
+if ($forceInstallEnabled) {
     $runParams.ForceInstall = $true
 }
-if ($SkipModelPreflight -or $modelAlreadyChecked) {
+if ($skipModelPreflightEnabled -or $modelAlreadyChecked) {
     $runParams.SkipModelPreflight = $true
 }
-if ($NoRepeat) {
+if ($noRepeatEnabled) {
     $runParams.NoRepeat = $true
 }
 
 $autolearnProcess = $null
-if (-not $NoLearnerAutoLearn) {
-    $autolearnArgs = @($autolearnScript, "--pgn", $pgnPath, "--stdout", $launchOut, "--watch", "--interval", "10")
+if (-not $learnerAutoLearnDisabled) {
+    $autolearnArgs = @($autolearnScript, "--pgn", $pgnPath, "--stdout", $launchOut, "--watch", "--interval", "$autoLearnIntervalSeconds")
     $autolearnProcess = Start-Process `
         -FilePath "python" `
         -ArgumentList (ConvertTo-ProcessArguments -Arguments $autolearnArgs) `
@@ -332,7 +354,7 @@ if (-not $NoLearnerAutoLearn) {
 try {
     & $runnerScript @runParams 2>&1 | Tee-Object -FilePath $launchOut
 } finally {
-    if ($StopViewerWhenDone -and -not $viewerProcess.HasExited) {
+    if ($stopViewerWhenDoneEnabled -and -not $viewerProcess.HasExited) {
         Stop-Process -Id $viewerProcess.Id -Force
         Write-Host "Stopped local live viewer process $($viewerProcess.Id)."
     } elseif (-not $viewerProcess.HasExited) {

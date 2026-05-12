@@ -15,6 +15,8 @@ from PIL import Image, ImageDraw, ImageFont
 import websockets
 from websockets.exceptions import ConnectionClosed
 
+from harness_config import config_value
+
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE_CONFIG = Path.home() / "AppData/Roaming/org.encroissant.app/engines/engines.json"
@@ -432,7 +434,7 @@ async def play(args: argparse.Namespace) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="gpt-5.5")
+    parser.add_argument("--model", default=str(config_value("codex.model", "gpt-5.3-codex")))
     parser.add_argument("--max-plies", type=int, default=80)
     parser.add_argument("--stockfish-movetime-ms", type=int, default=150)
     parser.add_argument("--live-pgn-path", type=Path, default=DEFAULT_LIVE_PGN_PATH)

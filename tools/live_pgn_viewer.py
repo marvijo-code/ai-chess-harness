@@ -24,6 +24,7 @@ LEARNER_MEMORY_PATH = LEARNER_DIR / "MEMORY.md"
 LEARNER_SKILLS_DIR = LEARNER_DIR / "skills"
 LEARNER_KNOWLEDGEBASE_DIR = LEARNER_DIR / "knowledgebase"
 ENGINE_LOG_DIR = OUT_DIR / "codex-chess-logs"
+CLK_COMMENT_RE = re.compile(r"\[%clk\s+(?P<value>\d+(?::\d{1,2}){1,2}(?:\.\d+)?)\]")
 
 
 INDEX_HTML = """<!doctype html>
@@ -489,18 +490,35 @@ INDEX_HTML = """<!doctype html>
     .match-row {
       border: 1px solid var(--line); border-radius: var(--r-md);
       padding: 9px 10px; background: var(--surface);
-      display: grid; gap: 4px;
-      width: 100%; color: var(--text); text-align: left; cursor: pointer;
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px;
+      align-items: start;
+      width: 100%; color: var(--text); text-align: left;
     }
-    button.match-row { font: inherit; }
     .match-row:hover, .match-row.active { border-color: var(--accent); background: rgba(10, 132, 255, .08); }
+    .match-select {
+      min-width: 0; width: 100%; max-width: 100%; padding: 0; border: 0; background: transparent;
+      color: inherit; text-align: left; cursor: pointer; display: grid; gap: 4px;
+      font: inherit;
+    }
     .match-main {
+      min-width: 0;
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
       font-size: 13px; font-weight: 700;
     }
+    .match-main span { min-width: 0; overflow-wrap: anywhere; }
     .match-sub {
-      font-size: 11px; color: var(--muted); overflow-wrap: anywhere;
+      display: block; min-width: 0; max-width: 100%;
+      font-size: 11px; line-height: 1.35; color: var(--muted);
+      white-space: normal; overflow: visible;
+      overflow-wrap: anywhere; word-break: break-word;
     }
+    .match-copy-btn {
+      display: none; align-self: center; place-items: center;
+      width: 24px; height: 24px; padding: 0; flex-shrink: 0;
+      border-radius: var(--r-sm); font-size: 14px; line-height: 1;
+    }
+    .match-row.active .match-copy-btn { display: grid; }
+    .match-copy-btn.copied { border-color: var(--ok); color: var(--ok); }
 
     /* === ANALYSIS === */
     .analysis-list { display: grid; gap: 0; }
@@ -567,7 +585,7 @@ INDEX_HTML = """<!doctype html>
           <div class="brand-name">Chess Engine Viewer</div>
           <div class="brand-meta">
             <div id="pgn-path" class="brand-path"></div>
-            <button id="copy-pgn-path" class="copy-path-btn" type="button" title="Copy full PGN path" aria-label="Copy full PGN path" disabled>&#10697;</button>
+            <button id="copy-pgn-path" class="copy-path-btn" type="button" title="Copy match URL" aria-label="Copy match URL" disabled>&#10697;</button>
           </div>
         </div>
       </div>
@@ -791,6 +809,7 @@ INDEX_HTML = """<!doctype html>
     let previousMatches = [];
     let previousMatchesPage = 0;
     let activePgnPath = "";
+    let activeMatchUrl = "";
     let suppressHashChange = false;
     const previousMatchesPageSize = 5;
 
@@ -818,7 +837,8 @@ INDEX_HTML = """<!doctype html>
       applyTheme(localStorage.getItem("livePgnTheme") || "light");
       analysisEnabled = localStorage.getItem("livePgnAnalysis") !== "off";
       updateAnalysisControls();
-      followLive = localStorage.getItem("livePgnFollow") !== "off";
+      const parsedHash = parseMatchHash();
+      followLive = !(parsedHash.slug && parsedHash.gameIndex);
       document.getElementById("follow-toggle").checked = followLive;
       updateLogSideButtons();
     }
@@ -869,13 +889,26 @@ INDEX_HTML = """<!doctype html>
     function setActivePgnPath(path) {
       activePgnPath = path || "";
       document.getElementById("pgn-path").textContent = activePgnPath;
-      document.getElementById("copy-pgn-path").disabled = !activePgnPath;
+    }
+
+    function setActiveMatchUrl(url) {
+      activeMatchUrl = url || "";
+      document.getElementById("copy-pgn-path").disabled = !activeMatchUrl;
     }
 
     function encodeMatchHash(slug, gameIndex = null) {
       if (!slug) return "";
-      const suffix = gameIndex && Number(gameIndex) > 1 ? `--game-${Number(gameIndex)}` : "";
+      const index = Number(gameIndex);
+      const suffix = Number.isFinite(index) && index > 0 ? `--game-${index}` : "";
       return `#${encodeURIComponent(`${slug}${suffix}`)}`;
+    }
+
+    function matchUrlFor(slug, gameIndex = null) {
+      const hash = encodeMatchHash(slug, gameIndex);
+      if (!hash) return "";
+      const url = new URL(window.location.href);
+      url.hash = hash;
+      return url.href;
     }
 
     function parseMatchHash() {
@@ -895,13 +928,24 @@ INDEX_HTML = """<!doctype html>
     }
 
     function activeGameHashIndex(data) {
-      if (selectedMatch && !followLive) return selectedMatch.game_index || 1;
+      if (selectedMatch && !followLive) return data.game_index || selectedMatch.game_index || 1;
+      if (!followLive && data && data.has_game) return data.game_index || 1;
       return null;
     }
 
     function syncMatchHash(data) {
-      if (!data || !data.tournament_slug) return;
-      setMatchHash(data.tournament_slug, activeGameHashIndex(data));
+      if (!data || !data.tournament_slug || !data.has_game) {
+        setActiveMatchUrl("");
+        return;
+      }
+      const parsedHash = parseMatchHash();
+      if (!selectedMatch && parsedHash.slug && parsedHash.gameIndex && !previousMatches.length) {
+        setActiveMatchUrl(window.location.href);
+        return;
+      }
+      const gameIndex = activeGameHashIndex(data);
+      setActiveMatchUrl(matchUrlFor(data.tournament_slug, gameIndex));
+      setMatchHash(data.tournament_slug, gameIndex);
     }
 
     function fallbackCopy(text) {
@@ -919,21 +963,30 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
-    async function copyActivePgnPath() {
-      if (!activePgnPath) return;
-      const button = document.getElementById("copy-pgn-path");
+    async function copyTextToClipboard(text, button) {
+      if (!text) return;
       try {
         if (navigator.clipboard && window.isSecureContext) {
-          await navigator.clipboard.writeText(activePgnPath);
-        } else if (!fallbackCopy(activePgnPath)) {
+          await navigator.clipboard.writeText(text);
+        } else if (!fallbackCopy(text)) {
           throw new Error("copy unavailable");
         }
-        button.classList.add("copied");
-        setStatus(true, "Path copied");
-        setTimeout(() => button.classList.remove("copied"), 900);
+        if (button) button.classList.add("copied");
+        setStatus(true, "URL copied");
+        if (button) setTimeout(() => button.classList.remove("copied"), 900);
       } catch {
         setStatus(false, "Copy failed");
       }
+    }
+
+    async function copyActiveMatchUrl() {
+      await copyTextToClipboard(activeMatchUrl, document.getElementById("copy-pgn-path"));
+    }
+
+    async function copyMatchRowUrl(index, button) {
+      const match = previousMatches[Number(index)];
+      if (!match) return;
+      await copyTextToClipboard(matchUrlFor(match.tournament_slug || "", match.game_index || 1), button);
     }
 
     function squareName(file, rank) {
@@ -1106,7 +1159,9 @@ INDEX_HTML = """<!doctype html>
 
     function clockValue(clock, side) {
       if (!clock) return NaN;
-      const base = side === "White" ? Number(clock.white_ms) : Number(clock.black_ms);
+      const raw = side === "White" ? clock.white_ms : clock.black_ms;
+      if (raw === null || raw === undefined || raw === "") return NaN;
+      const base = Number(raw);
       if (!Number.isFinite(base)) return NaN;
       if (clock.completed || clock.running_side !== side || !Number.isFinite(Number(clock.updated_at_epoch_ms))) return base;
       const serverNow = Date.now() + serverClockOffsetMs;
@@ -1200,6 +1255,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("follow-toggle").checked = false;
       replayThinkingKey = "";
       renderGame(latestGame);
+      syncMatchHash(latestGame);
       refresh(true);
     }
 
@@ -1297,11 +1353,16 @@ INDEX_HTML = """<!doctype html>
         container.innerHTML = '<div class="empty">No previous matches found.</div>';
         return;
       }
-      container.innerHTML = `<div class="match-list">${pageRows.map(match => `
-        <button class="match-row ${matchKey(match) === activeKey ? "active" : ""}" type="button" data-match-index="${escapeAttr(previousMatches.indexOf(match))}">
-          <div class="match-main"><span>${escapeHtml(match.winner_label)}</span><span>${escapeHtml(match.result)}</span></div>
-          <div class="match-sub">${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · ${escapeHtml(match.tournament_slug || "unknown")} · game ${escapeHtml(match.game_index || 1)} · ${escapeHtml(match.date)} · ${escapeHtml(match.file)}</div>
-        </button>`).join("")}</div>`;
+      container.innerHTML = `<div class="match-list">${pageRows.map(match => {
+        const index = previousMatches.indexOf(match);
+        return `<div class="match-row ${matchKey(match) === activeKey ? "active" : ""}">
+          <button class="match-select" type="button" data-match-index="${escapeAttr(index)}">
+            <div class="match-main"><span>${escapeHtml(match.winner_label)}</span><span>${escapeHtml(match.result)}</span></div>
+            <div class="match-sub">${escapeHtml(match.white)} vs ${escapeHtml(match.black)} · ${escapeHtml(match.tournament_slug || "unknown")} · game ${escapeHtml(match.game_index || 1)} · ${escapeHtml(match.date)} · ${escapeHtml(match.file)}</div>
+          </button>
+          <button class="match-copy-btn" type="button" title="Copy match URL" aria-label="Copy archived match URL" data-match-copy-index="${escapeAttr(index)}">&#10697;</button>
+        </div>`;
+      }).join("")}</div>`;
     }
 
     function setPreviousMatchesPage(delta) {
@@ -1324,6 +1385,7 @@ INDEX_HTML = """<!doctype html>
       localStorage.setItem("livePgnFollow", "off");
       document.getElementById("follow-toggle").checked = false;
       setMatchHash(match.tournament_slug || "", match.game_index || 1);
+      setActiveMatchUrl(matchUrlFor(match.tournament_slug || "", match.game_index || 1));
       renderPreviousMatches();
       refresh(true);
     }
@@ -1628,8 +1690,15 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("analysis-panel-toggle").addEventListener("change", e => setAnalysisEnabled(e.target.checked));
     document.getElementById("matches-prev").addEventListener("click", () => setPreviousMatchesPage(-1));
     document.getElementById("matches-next").addEventListener("click", () => setPreviousMatchesPage(1));
-    document.getElementById("copy-pgn-path").addEventListener("click", copyActivePgnPath);
+    document.getElementById("copy-pgn-path").addEventListener("click", copyActiveMatchUrl);
     document.getElementById("matches").addEventListener("click", event => {
+      const copyButton = event.target.closest("[data-match-copy-index]");
+      if (copyButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        copyMatchRowUrl(copyButton.dataset.matchCopyIndex, copyButton);
+        return;
+      }
       const row = event.target.closest("[data-match-index]");
       if (row) loadPreviousMatch(row.dataset.matchIndex);
     });
@@ -1882,6 +1951,53 @@ def clock_from_headers(headers: chess.pgn.Headers, completed: bool) -> dict | No
     }
 
 
+def parse_clk_comment(comment: str) -> int | None:
+    match = CLK_COMMENT_RE.search(comment or "")
+    if not match:
+        return None
+    parts = match.group("value").split(":")
+    try:
+        seconds = float(parts[-1])
+        minutes = int(parts[-2])
+        hours = int(parts[-3]) if len(parts) == 3 else 0
+    except (ValueError, IndexError):
+        return None
+    return int(round(((hours * 60 + minutes) * 60 + seconds) * 1000))
+
+
+def clock_from_comments(game: chess.pgn.Game, completed: bool) -> dict | None:
+    white_ms: int | None = None
+    black_ms: int | None = None
+    ply = 0
+    for node in game.mainline():
+        ply += 1
+        clock_ms = parse_clk_comment(node.comment)
+        if clock_ms is None:
+            continue
+        if ply % 2:
+            white_ms = clock_ms
+        else:
+            black_ms = clock_ms
+    if white_ms is None and black_ms is None:
+        return None
+    running_side = ""
+    if not completed:
+        running_side = "White" if ply % 2 == 0 else "Black"
+    now_ms = int(time.time() * 1000)
+    return {
+        "white_ms": white_ms,
+        "black_ms": black_ms,
+        "updated_at_epoch_ms": now_ms,
+        "server_now_epoch_ms": now_ms,
+        "running_side": running_side,
+        "completed": completed,
+    }
+
+
+def clock_from_game(game: chess.pgn.Game, completed: bool) -> dict | None:
+    return clock_from_headers(game.headers, completed) or clock_from_comments(game, completed)
+
+
 def tournament_slug(path: Path) -> str:
     slug = path.stem
     if slug.endswith("-live"):
@@ -1982,7 +2098,7 @@ def read_game(
         "moves": moves,
         "positions": positions,
     }
-    clock = clock_from_headers(game.headers, completed)
+    clock = clock_from_game(game, completed)
     if clock is not None:
         result["clock"] = clock
     if include_logs:

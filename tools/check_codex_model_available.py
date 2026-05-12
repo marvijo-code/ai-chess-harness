@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import shutil
 import socket
 import subprocess
 import sys
@@ -9,8 +10,20 @@ from pathlib import Path
 
 import websockets
 
+from harness_config import config_value
+
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def resolve_codex_command() -> str:
+    windows_cmd = Path.home() / "AppData" / "Roaming" / "npm" / "codex.cmd"
+    if windows_cmd.exists():
+        return str(windows_cmd)
+    found = shutil.which("codex.cmd") or shutil.which("codex.exe") or shutil.which("codex")
+    if found:
+        return found
+    raise FileNotFoundError("Could not find Codex CLI. Expected codex.cmd or codex on PATH.")
 
 
 def free_port() -> int:
@@ -42,8 +55,9 @@ async def request(ws, method: str, params: dict):
 
 async def check_model(model: str, effort: str, timeout: float) -> None:
     url = f"ws://127.0.0.1:{free_port()}"
+    codex_cmd = resolve_codex_command()
     proc = subprocess.Popen(
-        ["codex", "app-server", "--listen", url],
+        [codex_cmd, "app-server", "--listen", url],
         cwd=ROOT,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -117,9 +131,9 @@ async def check_model(model: str, effort: str, timeout: float) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fail fast when a Codex app-server model cannot answer a chess move.")
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--effort", default="low")
-    parser.add_argument("--timeout", type=float, default=45.0)
+    parser.add_argument("--model", default=str(config_value("codex.model", "gpt-5.3-codex")))
+    parser.add_argument("--effort", default=str(config_value("codex.effort", "low")))
+    parser.add_argument("--timeout", type=float, default=float(config_value("codex.preflightTimeoutSeconds", 45)))
     args = parser.parse_args()
     try:
         asyncio.run(check_model(args.model, args.effort, args.timeout))

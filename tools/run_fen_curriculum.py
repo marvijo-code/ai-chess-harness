@@ -3,6 +3,7 @@ import asyncio
 import json
 import random
 import re
+import shutil
 import socket
 import subprocess
 import time
@@ -13,6 +14,8 @@ from pathlib import Path
 import chess
 import websockets
 from websockets.exceptions import ConnectionClosed
+
+from harness_config import config_value
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +35,16 @@ PIECE_NAMES = {
     chess.QUEEN: "Queen",
     chess.KING: "King",
 }
+
+
+def resolve_codex_command() -> str:
+    windows_cmd = Path.home() / "AppData" / "Roaming" / "npm" / "codex.cmd"
+    if windows_cmd.exists():
+        return str(windows_cmd)
+    found = shutil.which("codex.cmd") or shutil.which("codex.exe") or shutil.which("codex")
+    if found:
+        return found
+    raise FileNotFoundError("Could not find Codex CLI. Expected codex.cmd or codex on PATH.")
 
 
 @dataclass(frozen=True)
@@ -437,8 +450,9 @@ class CodexFenClient:
         self.thread_id = ""
 
     async def start(self) -> None:
+        codex_cmd = resolve_codex_command()
         self.proc = subprocess.Popen(
-            ["codex", "app-server", "--listen", self.url],
+            [codex_cmd, "app-server", "--listen", self.url],
             cwd=ROOT,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -842,10 +856,10 @@ async def run_curriculum(args: argparse.Namespace, questions: list[FenQuestion])
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a hidden-answer FEN interpretation curriculum against Codex app-server.")
-    parser.add_argument("--model", default="gpt-5.3-codex")
-    parser.add_argument("--effort", default="medium")
-    parser.add_argument("--timeout", type=float, default=60.0)
-    parser.add_argument("--max-cycles", type=int, default=4)
+    parser.add_argument("--model", default=str(config_value("fenCurriculum.model", "gpt-5.3-codex")))
+    parser.add_argument("--effort", default=str(config_value("fenCurriculum.effort", "medium")))
+    parser.add_argument("--timeout", type=float, default=float(config_value("codex.preflightTimeoutSeconds", 60)))
+    parser.add_argument("--max-cycles", type=int, default=int(config_value("fenCurriculum.maxCycles", 4)))
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--max-consecutive-errors", type=int, default=2)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)

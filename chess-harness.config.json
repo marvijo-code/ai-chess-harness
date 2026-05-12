@@ -1,0 +1,41 @@
+{
+  "codex": {
+    "model": "gpt-5.3-codex",
+    "effort": "low",
+    "preflightTimeoutSeconds": 45
+  },
+  "fastChess": {
+    "games": 10,
+    "concurrency": 1,
+    "timeControl": "300+0",
+    "maxMoves": 0,
+    "version": "latest",
+    "runName": "codex-vs-codex-learner",
+    "liveRunName": "codex-vs-codex-learner-live",
+    "timeMarginMs": 5000,
+    "ratingInterval": 1,
+    "autosaveInterval": 2,
+    "logLevel": "info",
+    "forceInstall": false,
+    "skipModelPreflight": false,
+    "noRepeat": false
+  },
+  "viewer": {
+    "host": "127.0.0.1",
+    "port": 8766,
+    "analysisEnabled": true,
+    "analysisMovetimeMs": 250,
+    "analysisMultipv": 3,
+    "openBrowser": true,
+    "stopWhenDone": false
+  },
+  "learner": {
+    "autoLearn": true,
+    "autoLearnIntervalSeconds": 10
+  },
+  "fenCurriculum": {
+    "model": "gpt-5.3-codex",
+    "effort": "medium",
+    "maxCycles": 4
+  }
+}

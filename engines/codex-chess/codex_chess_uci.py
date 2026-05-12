@@ -31,6 +31,19 @@ DEFAULT_LEARNING_MODE = os.environ.get("CODEX_CHESS_LEARNING_MODE", "false").low
 TEXT_CONTEXT_EXTENSIONS = {".md", ".txt", ".json", ".yaml", ".yml"}
 
 
+def config_value(path: str, default=None):
+    config_path = ROOT / "chess-harness.config.json"
+    try:
+        current = json.loads(config_path.read_text(encoding="utf-8"))
+    except OSError:
+        return default
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return default
+        current = current[part]
+    return default if current is None else current
+
+
 def log(message: str) -> None:
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     with LOG_PATH.open("a", encoding="utf-8") as handle:
@@ -124,14 +137,14 @@ def extract_text_fragment(value) -> str:
 class CodexAppServer:
     def __init__(
         self,
-        model: str = "gpt-5.5",
-        effort: str = "low",
+        model: str | None = None,
+        effort: str | None = None,
         use_memory: bool = DEFAULT_USE_MEMORY,
         use_skills: bool = DEFAULT_USE_SKILLS,
         learning_mode: bool = DEFAULT_LEARNING_MODE,
     ):
-        self.model = model
-        self.effort = effort
+        self.model = model or str(config_value("codex.model", "gpt-5.3-codex"))
+        self.effort = effort or str(config_value("codex.effort", "low"))
         self.use_memory = use_memory
         self.use_skills = use_skills
         self.learning_mode = learning_mode
@@ -490,8 +503,8 @@ class CodexChessUci:
         self.board = chess.Board()
         self.history: list[str] = []
         self.codex = CodexAppServer(
-            os.environ.get("CODEX_CHESS_MODEL", "gpt-5.5"),
-            os.environ.get("CODEX_CHESS_EFFORT", "low"),
+            os.environ.get("CODEX_CHESS_MODEL") or str(config_value("codex.model", "gpt-5.3-codex")),
+            os.environ.get("CODEX_CHESS_EFFORT") or str(config_value("codex.effort", "low")),
         )
 
     def set_position(self, tokens: list[str]) -> None:

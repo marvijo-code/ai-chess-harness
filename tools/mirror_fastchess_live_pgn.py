@@ -13,6 +13,7 @@ STARTED_RE = re.compile(r"Started game\s+(?P<game>\d+)\s+of\s+(?P<total>\d+)\s+\
 FINISHED_RE = re.compile(r"Finished game\s+(?P<game>\d+)\s+\((?P<white>.+?)\s+vs\s+(?P<black>.+?)\):\s+(?P<result>1-0|0-1|1/2-1/2|\*)\s+\{(?P<reason>[^}]*)\}")
 POSITION_RE = re.compile(r"position startpos(?: moves (?P<moves>[a-h][1-8][a-h][1-8][qrbn]?(?: [a-h][1-8][a-h][1-8][qrbn]?)*))?")
 GO_RE = re.compile(r"\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+>\s+go\b.*?\bwtime\s+(?P<wtime>\d+)\s+btime\s+(?P<btime>\d+)\b")
+CLK_COMMENT_RE = re.compile(r"\[%clk\s+[^\]]+\]")
 
 
 def parse_current_game(stdout_path: Path) -> dict | None:
@@ -53,6 +54,7 @@ def latest_engine_state(log_dir: Path) -> dict:
         reverse=True,
     )
     latest_state: dict | None = None
+    clocks_by_ply: dict[int, dict] = {}
     for path in paths[:8]:
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -77,9 +79,32 @@ def latest_engine_state(log_dir: Path) -> dict:
                 "running_side": "White" if len(moves) % 2 == 0 else "Black",
                 "source": str(path),
             }
+            ply = len(moves)
+            current_ply_state = clocks_by_ply.get(ply)
+            if current_ply_state is None or updated_at >= current_ply_state["updated_at"]:
+                clocks_by_ply[ply] = state
             if latest_state is None or updated_at >= latest_state["updated_at"]:
                 latest_state = state
-    return latest_state or {"moves": []}
+    if latest_state is None:
+        return {"moves": [], "clocks_by_ply": {}}
+    latest_state["clocks_by_ply"] = clocks_by_ply
+    return latest_state
+
+
+def format_clk(ms: int) -> str:
+    ms = max(0, int(ms))
+    whole_seconds, milliseconds = divmod(ms, 1000)
+    hours, remainder = divmod(whole_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if milliseconds:
+        return f"{hours}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+    return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+
+def merge_clk_comment(existing: str, ms: int) -> str:
+    clk = f"[%clk {format_clk(ms)}]"
+    stripped = CLK_COMMENT_RE.sub("", existing or "").strip()
+    return f"{stripped} {clk}".strip()
 
 
 def build_game(current: dict, state: dict) -> chess.pgn.Game:
@@ -101,7 +126,8 @@ def build_game(current: dict, state: dict) -> chess.pgn.Game:
     board = game.board()
     node = game
     move_tokens = state.get("moves", [])
-    for token in move_tokens:
+    clocks_by_ply = state.get("clocks_by_ply", {})
+    for ply, token in enumerate(move_tokens, start=1):
         try:
             move = chess.Move.from_uci(token)
         except ValueError:
@@ -110,6 +136,10 @@ def build_game(current: dict, state: dict) -> chess.pgn.Game:
             break
         node = node.add_variation(move)
         board.push(move)
+        clock_state = clocks_by_ply.get(ply)
+        if clock_state is not None:
+            remaining_ms = clock_state["wtime"] if ply % 2 else clock_state["btime"]
+            node.comment = merge_clk_comment(node.comment, remaining_ms)
     return game
 
 
