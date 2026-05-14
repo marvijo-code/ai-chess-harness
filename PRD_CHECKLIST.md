@@ -108,3 +108,5 @@
 - [x] Validate Zero UCI startup, zero-mode config, and targetable autolearn behavior.
 - [x] Prevent learner `MEMORY.md` autolearn watcher cycles from creating timestamp-only diffs.
 - [x] Validate unchanged autolearn memory content preserves the existing `Last updated` line.
+- [x] Add a lightweight push-update stream to reduce fixed viewer API polling without introducing a SignalR/.NET service.
+- [x] Validate the push stream server behavior and browser behavior, including fallback polling when the stream is unavailable.

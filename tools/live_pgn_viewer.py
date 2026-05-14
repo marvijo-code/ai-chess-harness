@@ -911,6 +911,12 @@ INDEX_HTML = """<!doctype html>
     let activeLivePgnPath = "";
     let activeMatchUrl = "";
     let suppressHashChange = false;
+    let pushEvents = null;
+    let pushConnected = false;
+    let fallbackRefreshTimer = null;
+    let fallbackStatsTimer = null;
+    let fallbackLearnerTimer = null;
+    let fallbackVersionTimer = null;
     const previousMatchesPageSize = 5;
 
     function escapeHtml(value) {
@@ -1969,6 +1975,50 @@ INDEX_HTML = """<!doctype html>
       renderStats(await resp.json());
     }
 
+    function clearFallbackPolling() {
+      for (const timer of [fallbackRefreshTimer, fallbackStatsTimer, fallbackLearnerTimer, fallbackVersionTimer]) {
+        if (timer !== null) window.clearInterval(timer);
+      }
+      fallbackRefreshTimer = null;
+      fallbackStatsTimer = null;
+      fallbackLearnerTimer = null;
+      fallbackVersionTimer = null;
+    }
+
+    function startFallbackPolling() {
+      if (fallbackRefreshTimer !== null) return;
+      fallbackRefreshTimer = window.setInterval(refresh, 1000);
+      fallbackStatsTimer = window.setInterval(loadStats, 3000);
+      fallbackLearnerTimer = window.setInterval(loadLearner, 2500);
+      fallbackVersionTimer = window.setInterval(checkViewerVersion, 1200);
+    }
+
+    function markPushConnected(connected) {
+      pushConnected = connected;
+      window.__viewerPushConnected = connected;
+      if (connected) clearFallbackPolling();
+    }
+
+    function startPushUpdates() {
+      if (!("EventSource" in window)) {
+        startFallbackPolling();
+        return;
+      }
+      if (pushEvents) pushEvents.close();
+      pushEvents = new EventSource("/api/events");
+      pushEvents.onopen = () => markPushConnected(true);
+      pushEvents.onerror = () => {
+        markPushConnected(false);
+        window.setTimeout(() => {
+          if (!pushConnected) startFallbackPolling();
+        }, 1500);
+      };
+      pushEvents.addEventListener("game", () => refresh());
+      pushEvents.addEventListener("stats", () => loadStats());
+      pushEvents.addEventListener("learner", () => loadLearner());
+      pushEvents.addEventListener("viewer-version", () => checkViewerVersion());
+    }
+
     async function loadConfig() {
       const resp = await fetch("/api/config", { cache: "no-store" });
       const data = await resp.json();
@@ -2159,12 +2209,9 @@ INDEX_HTML = """<!doctype html>
     loadStats();
     loadConfig();
     loadLearner();
-    setInterval(refresh, 1000);
     setInterval(updateClockDisplays, 250);
-    setInterval(loadStats, 3000);
-    setInterval(loadLearner, 2500);
     checkViewerVersion();
-    setInterval(checkViewerVersion, 1200);
+    startPushUpdates();
   </script>
 </body>
 </html>
@@ -2862,6 +2909,60 @@ def write_config(config_path: Path, text: str) -> dict:
     return {"ok": True, "path": str(config_path), "backup": backup_name, "engines": len(parsed)}
 
 
+def file_signature(path: Path) -> str:
+    try:
+        stat = path.stat()
+    except OSError:
+        return f"{path}:missing"
+    return f"{path}:{stat.st_mtime_ns}:{stat.st_size}"
+
+
+def tree_signature(root: Path, suffixes: set[str], excluded_dirs: set[str] | None = None) -> str:
+    if not root.exists():
+        return f"{root}:missing"
+    excluded_dirs = excluded_dirs or set()
+    parts: list[str] = []
+    try:
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in suffixes:
+                continue
+            rel_parts = {part.lower() for part in path.relative_to(root).parts[:-1]}
+            if excluded_dirs & rel_parts:
+                continue
+            parts.append(file_signature(path))
+    except OSError as exc:
+        parts.append(f"{root}:error:{exc}")
+    return "|".join(sorted(parts))
+
+
+def viewer_event_signatures(pgn_path: Path, stats_dir: Path) -> dict[str, str]:
+    live_dir = stats_dir / "live"
+    game_parts = [file_signature(pgn_path)]
+    for sidecar in (live_status_path_for(pgn_path), live_selection_path_for(pgn_path)):
+        game_parts.append(file_signature(sidecar))
+    if live_dir.exists():
+        for path in sorted(live_dir.glob("*")):
+            if path.suffix.lower() == ".pgn" or path.name.endswith(".status.json") or path.name.endswith(".selection.json"):
+                game_parts.append(file_signature(path))
+    learner_parts = [
+        file_signature(LEARNER_MEMORY_PATH),
+        tree_signature(LEARNER_KNOWLEDGEBASE_DIR, {".md", ".json", ".txt", ".yaml", ".yml"}),
+        tree_signature(LEARNER_SKILLS_DIR, {".md", ".json", ".txt", ".yaml", ".yml"}),
+        tree_signature(ENGINE_LOG_DIR, {".log"}),
+    ]
+    return {
+        "game": "|".join(game_parts),
+        "stats": tree_signature(stats_dir, {".pgn", ".json"}, {"backups"}),
+        "learner": "|".join(learner_parts),
+        "viewer-version": hot_reload_stamp(),
+    }
+
+
+def sse_payload(event: str, data: dict) -> bytes:
+    body = json.dumps(data, ensure_ascii=False)
+    return f"event: {event}\ndata: {body}\n\n".encode("utf-8")
+
+
 def size_label(size: int) -> str:
     if size < 1024:
         return f"{size} B"
@@ -3131,6 +3232,7 @@ def collect_learner_data() -> dict:
 
 
 class LivePgnHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     pgn_path = DEFAULT_PGN_PATH
     config_path = DEFAULT_ENGINE_CONFIG
     stats_dir = OUT_DIR
@@ -3153,6 +3255,26 @@ class LivePgnHandler(BaseHTTPRequestHandler):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_bytes(body, "application/json; charset=utf-8", status)
 
+    def send_events(self) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        previous: dict[str, str] = {}
+        try:
+            while True:
+                signatures = viewer_event_signatures(self.pgn_path, self.stats_dir)
+                now = time.time()
+                for event, signature in signatures.items():
+                    if previous.get(event) != signature:
+                        self.wfile.write(sse_payload(event, {"changed_at": now}))
+                        self.wfile.flush()
+                previous = signatures
+                time.sleep(1.0)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
+            return
+
     def read_json_body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length).decode("utf-8")
@@ -3162,6 +3284,10 @@ class LivePgnHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/":
             self.send_bytes(INDEX_HTML.encode("utf-8"), "text/html; charset=utf-8")
+            return
+
+        if parsed.path == "/api/events":
+            self.send_events()
             return
 
         if parsed.path == "/api/game":

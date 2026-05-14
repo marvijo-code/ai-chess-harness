@@ -1,38 +1,21 @@
 {
-  "generated_at": "2026-05-14 18:09:04",
+  "generated_at": "2026-05-14 18:30:18",
   "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn",
   "source_stdout": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634-launch.out.log",
-  "completed_games": 14,
+  "completed_games": 16,
   "observation_count": 9,
   "category_counts": {
-    "material_swing": 642,
-    "undefended_forcing_piece": 254,
+    "material_swing": 651,
+    "undefended_forcing_piece": 259,
     "hanging_checking_piece": 110,
     "time_loss": 73,
-    "failed_conversion": 63,
+    "failed_conversion": 64,
     "missed_king_capture": 42,
     "pawn_promotion_failure": 14,
-    "repetition_draw": 8,
+    "repetition_draw": 10,
     "mate_loss": 7
   },
   "evidence_keys": [
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|failed_conversion|38|36|||highest material edge was at least 1600 centipawns but result was 0-1",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|pawn_promotion_failure|38|36|||had a pawn one step from promotion but did not win",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|undefended_forcing_piece|39|20|c6e5|r1bq1rk1/ppp2ppp/1bn2n2/4P3/2B5/2N2N2/PP3PPP/R1BQ1RK1 b - - 0 10|forcing move leaves n capturable by f3e5",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|material_swing|39|20|c6e5|r1bq1rk1/ppp2ppp/1bn2n2/4P3/2B5/2N2N2/PP3PPP/R1BQ1RK1 b - - 0 10|opponent reply Nxe5 shifted material by 300 centipawns",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|undefended_forcing_piece|39|22|d8d1|r1bq1rk1/ppp2ppp/1b3n2/4N3/2B5/2N5/PP3PPP/R1BQ1RK1 b - - 0 11|forcing move leaves q capturable by c3d1, f1d1",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|material_swing|39|22|d8d1|r1bq1rk1/ppp2ppp/1b3n2/4N3/2B5/2N5/PP3PPP/R1BQ1RK1 b - - 0 11|opponent reply Rxd1 shifted material by 900 centipawns",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|material_swing|39|26|f6d7|r4rk1/pppN1ppp/1b2bn2/8/2B5/2N5/PP3PPP/R1BR2K1 b - - 2 13|opponent reply Bxe6 shifted material by 300 centipawns",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|material_swing|39|28|f7e6|r4rk1/pppn1ppp/1b2B3/8/8/2N5/PP3PPP/R1BR2K1 b - - 0 14|opponent reply Rxd7 shifted material by 300 centipawns",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|material_swing|39|30|f8d8|r4rk1/pppR2pp/1b2p3/8/8/2N5/PP3PPP/R1B3K1 b - - 0 15|opponent reply Rxd8+ shifted material by 500 centipawns",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|undefended_forcing_piece|40|23|f5e7|r1bq1rk1/4bppp/p4n2/1ppp1N2/B3P3/8/PP3PPP/RNBQR1K1 w - - 0 12|forcing move leaves N capturable by d8e7",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|material_swing|40|23|f5e7|r1bq1rk1/4bppp/p4n2/1ppp1N2/B3P3/8/PP3PPP/RNBQR1K1 w - - 0 12|opponent reply Qxe7 shifted material by 300 centipawns",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|undefended_forcing_piece|40|31|g5f6|r1b2rk1/4qppp/p4n2/2p3B1/Bp6/2N1P3/PP4PP/R2QR1K1 w - - 0 16|forcing move leaves B capturable by e7f6, g7f6",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|material_swing|40|31|g5f6|r1b2rk1/4qppp/p4n2/2p3B1/Bp6/2N1P3/PP4PP/R2QR1K1 w - - 0 16|opponent reply gxf6 shifted material by 300 centipawns",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|undefended_forcing_piece|40|35|d5f6|r1b2rk1/5p1p/p4p2/2pNq3/Bp6/4P3/PP4PP/R2QR1K1 w - - 2 18|forcing move leaves N capturable by e5f6",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|material_swing|40|35|d5f6|r1b2rk1/5p1p/p4p2/2pNq3/Bp6/4P3/PP4PP/R2QR1K1 w - - 2 18|opponent reply Qxf6 shifted material by 300 centipawns",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|time_loss|40|36|||lost on time after 36 plies",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|failed_conversion|40|36|||highest material edge was at least 500 centipawns but result was 0-1",
     "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|undefended_forcing_piece|41|20|g4f3|r2q1rk1/2p1bppp/p1np1n2/1p2p3/3PP1b1/1BP2N1P/PP3PP1/RNBQR1K1 b - - 0 10|forcing move leaves b capturable by d1f3, g2f3",
     "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|material_swing|41|20|g4f3|r2q1rk1/2p1bppp/p1np1n2/1p2p3/3PP1b1/1BP2N1P/PP3PP1/RNBQR1K1 b - - 0 10|opponent reply gxf3 shifted material by 300 centipawns",
     "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-181557.pgn|undefended_forcing_piece|41|24|c6d4|r2q1rk1/2p1bppp/p1np1n2/1p6/3PP3/1B3P1P/PP3P2/RNBQR1K1 b - - 0 12|forcing move leaves n capturable by d1d4",
@@ -1015,7 +998,24 @@
     "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|14|27|d2e4|r1bq1rk1/2pp1p1p/p1n2p2/8/1p1P1b2/1B3N2/PP1N1PPP/R1BQR1K1 w - - 2 14|opponent reply Bxc1 shifted material by 300 centipawns",
     "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|undefended_forcing_piece|14|33|c6c7|r2q1rk1/2pb1p1p/p1R2p2/3p4/1p1PN3/1B3N2/PP3PPP/3QR1K1 w - - 1 17|forcing move leaves R capturable by d8c7",
     "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|14|33|c6c7|r2q1rk1/2pb1p1p/p1R2p2/3p4/1p1PN3/1B3N2/PP3PPP/3QR1K1 w - - 1 17|opponent reply dxe4 shifted material by 300 centipawns",
-    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|14|93|e8e7|r3R3/2r3k1/8/7Q/pp6/1B3N2/PP2R1KP/8 w - - 6 47|opponent reply Rxe7 shifted material by 500 centipawns"
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|14|93|e8e7|r3R3/2r3k1/8/7Q/pp6/1B3N2/PP2R1KP/8 w - - 6 47|opponent reply Rxe7 shifted material by 500 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|15|14|e7e6|r1bq1rk1/pp1pppbp/2n2np1/1BpP4/4P3/2P2N2/PP3PPP/RNBQ1RK1 b - - 0 7|opponent reply dxc6 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|undefended_forcing_piece|15|28|d5c4|3q1rk1/pbr2pbp/2p2np1/2pp4/B1P5/5N2/PP1N1PPP/R1BQRK2 b - - 0 14|forcing move leaves p capturable by d2c4",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|15|50|h5f4|3q1r2/p1r2pkp/b4b2/2p3pn/B1p5/2P2NPP/PB1N1P2/R2QR1K1 b - - 3 25|opponent reply gxf4 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|15|68|f6e7|6r1/p1r2pk1/b2q1b1p/2p4P/B1p2p2/P1P2N1K/1B1N1P2/R2QR3 b - - 10 34|opponent reply Rxe7 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|15|70|g7h7|6r1/p1r1Rpk1/b2q3p/2p4P/B1p2p2/P1P2N1K/1B1N1P2/R2Q4 b - - 0 35|opponent reply Rxc7 shifted material by 500 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|repetition_draw|15|102|||drew by repetition instead of changing the position",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|16|27|f3e5|r1b2rk1/ppp1qp2/2n2n2/2b1p2p/2Bp2pP/2N2NB1/PPP2PP1/R2Q1RK1 w - - 0 14|opponent reply Nxe5 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|undefended_forcing_piece|16|29|g3e5|r1b2rk1/ppp1qp2/5n2/2b1n2p/2Bp2pP/2N3B1/PPP2PP1/R2Q1RK1 w - - 0 15|forcing move leaves B capturable by e7e5",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|undefended_forcing_piece|16|31|e5f6|r1b2rk1/pp2qp2/2p2n2/2b1B2p/2Bp2pP/2N5/PPP2PP1/R2Q1RK1 w - - 0 16|forcing move leaves B capturable by e7f6",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|undefended_forcing_piece|16|33|f6e7|r1b2r2/pp2qp1k/2p2B2/2b4p/2Bp2pP/2N5/PPP2PP1/R2Q1RK1 w - - 1 17|forcing move leaves B capturable by c5e7",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|16|33|f6e7|r1b2r2/pp2qp1k/2p2B2/2b4p/2Bp2pP/2N5/PPP2PP1/R2Q1RK1 w - - 1 17|opponent reply Bxe7 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|16|57|f2g4|r3r3/pp3p1k/8/2pB1b1p/3p1P1P/3Q2P1/PPP2N2/R4RK1 w - - 7 29|opponent reply hxg4 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|16|69|b7c7|r4r1k/pQ6/8/2pB4/5PpP/6P1/PPp3K1/R4R2 w - - 0 35|opponent reply c1=Q shifted material by 800 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|undefended_forcing_piece|16|73|d5a8|r4r1k/p1Q5/8/3B4/2p2PpP/6P1/PP4K1/R1R5 w - - 0 37|forcing move leaves B capturable by f8a8",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|material_swing|16|73|d5a8|r4r1k/p1Q5/8/3B4/2p2PpP/6P1/PP4K1/R1R5 w - - 0 37|opponent reply Rxa8 shifted material by 300 centipawns",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|repetition_draw|16|106|||drew by repetition instead of changing the position",
+    "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn|failed_conversion|16|106|||highest material edge was at least 1900 centipawns but result was 1/2-1/2"
   ],
   "new_evidence": [],
   "new_evidence_count": 0,
@@ -1023,7 +1023,7 @@
     {
       "category": "material_swing",
       "description": "the opponent reply caused a material balance drop",
-      "evidence_count": 642,
+      "evidence_count": 651,
       "evidence": [
         {
           "category": "material_swing",
@@ -1102,7 +1102,7 @@
     {
       "category": "undefended_forcing_piece",
       "description": "a forcing move left the moved piece immediately capturable",
-      "evidence_count": 254,
+      "evidence_count": 259,
       "evidence": [
         {
           "category": "undefended_forcing_piece",
@@ -1339,7 +1339,7 @@
     {
       "category": "failed_conversion",
       "description": "the learner had a material edge but did not win",
-      "evidence_count": 63,
+      "evidence_count": 64,
       "evidence": [
         {
           "category": "failed_conversion",
@@ -1576,7 +1576,7 @@
     {
       "category": "repetition_draw",
       "description": "the learner drew by repetition",
-      "evidence_count": 8,
+      "evidence_count": 10,
       "evidence": [
         {
           "category": "repetition_draw",
@@ -1734,41 +1734,56 @@
   ],
   "concepts": [
     {
-      "name": "high_value_forcing_capture_needs_exit_or_cover",
-      "trigger": "a forcing capture by a rook/queen enters enemy territory and the capturing piece can be immediately challenged by a comparable or cheaper defender with no safe retreat or reinforcement",
-      "value_adjustment": "strongly penalize such forcing captures unless the moved piece is protected, has a safe follow-up square, or the recapture sequence still wins net material",
-      "why": "self-play shows forcing captures that looked active but left the attacking piece exposed, followed by immediate material loss",
+      "name": "do_not_chain_forcing_captures_with_same_piece_without_exit_square",
+      "trigger": "the same attacking piece makes consecutive forcing captures/checks while each landing square can be immediately recaptured by an enemy pawn or piece",
+      "value_adjustment": "strongly penalize repeated forcing continuations unless the final square is defended or wins clear net material within the next reply cycle",
+      "why": "self-play showed a forcing sequence that looked active but repeatedly left the attacker loose and gave material back one tempo later",
+      "confidence": 0.95,
+      "evidence_refs": [
+        "undefended_forcing_piece 16/29/g3e5",
+        "undefended_forcing_piece 16/31/e5f6",
+        "undefended_forcing_piece 16/33/f6e7",
+        "material_swing 16/33/f6e7"
+      ]
+    },
+    {
+      "name": "post_move_looseness_check_on_moved_piece",
+      "trigger": "a move improves activity but the moved piece loses prior protection or enters a square with equal-or-cheaper recapture available to the opponent",
+      "value_adjustment": "penalize activity moves that create a loose moved piece; reward alternatives that keep at least one stable defender on the moved unit",
+      "why": "multiple material losses came from active-looking moves where the moved piece became immediately takeable",
+      "confidence": 0.91,
+      "evidence_refs": [
+        "material_swing 16/27/f3e5",
+        "material_swing 16/57/f2g4",
+        "undefended_forcing_piece 16/73/d5a8",
+        "material_swing 16/73/d5a8"
+      ]
+    },
+    {
+      "name": "promotion_threat_priority_over_non_forcing_improvements",
+      "trigger": "an enemy pawn is one step from promotion or has an unobstructed promotion path, and candidate moves do not directly stop promotion",
+      "value_adjustment": "apply a very large penalty to non-stopping moves; heavily reward moves that prevent promotion immediately (block, capture, or force king/rook control)",
+      "why": "a non-stopping improvement allowed immediate promotion and a major value collapse",
+      "confidence": 0.97,
+      "evidence_refs": [
+        "material_swing 16/69/b7c7"
+      ]
+    },
+    {
+      "name": "convert_large_advantage_by_avoiding_repeat_cycles",
+      "trigger": "side has a large material edge but candidate move repeats prior position without increasing king safety, promotion control, or simplification quality",
+      "value_adjustment": "increase penalty for repetition when materially ahead; reward safe conversion features such as trade-down, passed-pawn control, and king activation",
+      "why": "a winning edge was not converted and ended in repetition draw",
       "confidence": 0.93,
       "evidence_refs": [
-        "undefended_forcing_piece 14/33/c6c7",
-        "material_swing 14/93/e8e7"
-      ]
-    },
-    {
-      "name": "tactical_move_must_recheck_back_rank_and_hanging_piece",
-      "trigger": "a tactical piece move (especially knight/rook activation) is considered while a back-rank or long-diagonal defender remains loose after the move",
-      "value_adjustment": "penalize tactical activations that leave a previously defended piece or back-rank asset newly capturable; reward moves that first secure or over-defend that asset",
-      "why": "after active piece moves, opponent immediately captured newly loose material for a clear value swing",
-      "confidence": 0.86,
-      "evidence_refs": [
-        "material_swing 14/27/d2e4",
-        "material_swing 14/33/c6c7"
-      ]
-    },
-    {
-      "name": "pawn_thrust_capture_should_require_recapture_resilience",
-      "trigger": "a pawn capture/thrust is forcing in the center or kingside but the pawn becomes instantly recapturable by multiple enemy units",
-      "value_adjustment": "moderately penalize these pawn actions unless they open lines with immediate tactical payoff or are backed by a favorable recapture tree",
-      "why": "forcing pawn action gained initiative briefly but became a disposable pawn target with no durable gain",
-      "confidence": 0.79,
-      "evidence_refs": [
-        "undefended_forcing_piece 14/19/e5f6"
+        "failed_conversion 16/106/",
+        "repetition_draw 16/106/"
       ]
     }
   ],
   "concept_synthesis": {
     "status": "ok",
-    "message": "synthesized 3 generalized concepts from 5 new observations",
+    "message": "synthesized 4 generalized concepts from 11 new observations",
     "model": "gpt-5.3-codex",
     "effort": "medium"
   }

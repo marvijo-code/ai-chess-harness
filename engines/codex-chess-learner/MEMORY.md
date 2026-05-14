@@ -2,9 +2,9 @@
 
 <!-- learner-autolearn:start -->
 ## Autolearn Summary
-- Last updated: 2026-05-14 18:09:04
-- Current match score: 6.0 / 14 (42.86%).
-- Result reasons: illegal move=1, mate=10, threefold repetition=3.
+- Last updated: 2026-05-14 18:30:18
+- Current match score: 7.0 / 16 (43.75%).
+- Result reasons: illegal move=1, mate=10, threefold repetition=5.
 - Apply `knowledgebase/live-match-lessons.md` before choosing moves.
 - Apply model-discovered concepts from `knowledgebase/strategy-lessons.md` as generic value adjustments, not as memorized move answers.
 - Avoid threefold repetition loops unless drawing is the only practical outcome.

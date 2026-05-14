@@ -69,6 +69,7 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 60. `Codex-chess-zero` must exist as a separate UCI engine based on the shared Codex chess implementation but with its own `engines\codex-chess-zero` memory, knowledgebase, and wrapper command. Zero should learn from post-game feedback in its own files, reason from the current FEN/legal moves/material safety rather than inherited learner strategy, and use a fast prompt profile with lean context and short move timeouts.
 61. Learner and Zero post-game feedback should share the same autolearn code path through a target engine/name/context option, so the watcher can update either engine after games without mixing their memories.
 62. Learner `MEMORY.md` autolearn updates should only rewrite the block when score, reasons, or rule content changes; watcher cycles must not dirty the file with only a newer `Last updated` value.
+63. The live viewer should reduce fixed browser polling for game, stats, learner, and hot-reload updates by using the existing Python viewer process as a push source. SignalR is not the preferred implementation unless a future .NET host or bidirectional hub contract is introduced; the current account-free one-way file-change workflow should use a lightweight server-sent events stream with polling fallback.
 
 ## Validation Requirements
 
@@ -126,3 +127,4 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 11. Focused engine tests verify non-urgent move requests require a non-empty comment while urgent retries can still use an empty comment.
 12. Focused autolearn tests verify unchanged lesson summaries preserve their previous generated timestamp.
 13. Focused autolearn tests verify unchanged `MEMORY.md` autolearn content does not rewrite only the `Last updated` value.
+14. Focused viewer tests verify the push update stream advertises game, stats, learner, and viewer-version changes, and browser E2E proves the viewer uses the stream without continuing fixed game/stats/learner polling when the stream is connected.

@@ -34,6 +34,19 @@ def wait_for_http(url: str, timeout: float = 10.0) -> None:
     raise AssertionError(f"viewer did not start at {url}: {last_error}")
 
 
+def read_sse_event_names(url: str, expected_count: int = 4, timeout: float = 5.0) -> list[str]:
+    deadline = time.time() + timeout
+    events: list[str] = []
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        while time.time() < deadline and len(events) < expected_count:
+            line = response.readline().decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            if line.startswith("event: "):
+                events.append(line.removeprefix("event: ").strip())
+    return events
+
+
 def write_pgn(
     path: Path,
     slug: str,
@@ -95,6 +108,75 @@ def completed_game_text(slug: str, round_name: str, white: str, black: str, resu
 
 
 class LiveViewerHashE2ETests(unittest.TestCase):
+    def test_push_stream_replaces_fixed_game_stats_and_learner_polling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            slug = "codex-vs-codex-learner-live-20260514-push"
+            live_pgn = out_dir / "live" / f"{slug}-live.pgn"
+            write_pgn(live_pgn, slug, "PushWhite", "PushBlack", "*", "1. e4 e5 *", live=True, round_name="1", total_games=1)
+
+            port = free_port()
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(ROOT / "tools" / "live_pgn_viewer.py"),
+                    "--pgn",
+                    str(live_pgn),
+                    "--stats-dir",
+                    str(out_dir),
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(port),
+                    "--no-analysis",
+                ],
+                cwd=str(ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                base_url = f"http://127.0.0.1:{port}"
+                wait_for_http(f"{base_url}/")
+                events = set(read_sse_event_names(f"{base_url}/api/events"))
+                self.assertTrue({"game", "stats", "learner", "viewer-version"}.issubset(events))
+
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1280, "height": 900})
+                    page.add_init_script(
+                        """
+                        window.__fetchLog = [];
+                        const originalFetch = window.fetch.bind(window);
+                        window.fetch = (input, init) => {
+                          const url = typeof input === "string" ? input : (input && input.url) || "";
+                          if (url.startsWith("/api/")) window.__fetchLog.push({ url, ts: Date.now() });
+                          return originalFetch(input, init);
+                        };
+                        """
+                    )
+                    page.goto(f"{base_url}/", wait_until="domcontentloaded")
+                    page.wait_for_function("() => window.__viewerPushConnected === true", timeout=10000)
+                    page.wait_for_timeout(1500)
+                    marker = page.evaluate("() => Date.now()")
+                    page.wait_for_timeout(3600)
+                    recurring = page.evaluate(
+                        """marker => window.__fetchLog
+                          .filter(item => item.ts > marker)
+                          .map(item => item.url)
+                          .filter(url => url.startsWith("/api/game") || url.startsWith("/api/stats") || url.startsWith("/api/learner") || url.startsWith("/api/viewer-version"))""",
+                        marker,
+                    )
+                    self.assertEqual(recurring, [])
+                    browser.close()
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+
     def test_selecting_older_archive_game_after_replay_moves_board_to_that_game(self):
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp)
