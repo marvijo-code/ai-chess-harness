@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 import re
@@ -30,6 +31,18 @@ DEFAULT_USE_MEMORY = os.environ.get("CODEX_CHESS_USE_MEMORY", "false").lower() i
 DEFAULT_USE_SKILLS = os.environ.get("CODEX_CHESS_USE_SKILLS", "false").lower() in {"1", "true", "yes", "on"}
 DEFAULT_LEARNING_MODE = os.environ.get("CODEX_CHESS_LEARNING_MODE", "false").lower() in {"1", "true", "yes", "on"}
 TEXT_CONTEXT_EXTENSIONS = {".md", ".txt", ".json", ".yaml", ".yml"}
+UCI_TEXT_TRANSLATION = str.maketrans(
+    {
+        "\u00a0": " ",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2026": "...",
+    }
+)
 
 
 def config_value(path: str, default=None):
@@ -45,10 +58,35 @@ def config_value(path: str, default=None):
     return default if current is None else current
 
 
+def int_config_value(path: str, default: int) -> int:
+    try:
+        return int(config_value(path, default))
+    except (TypeError, ValueError):
+        return default
+
+
 def log(message: str) -> None:
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     with LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(f"[{timestamp}] {message}\n")
+
+
+def sanitize_uci_line(line: str) -> str:
+    text = str(line).replace("\r", " ").replace("\n", " ").translate(UCI_TEXT_TRANSLATION)
+    return text.encode("ascii", errors="replace").decode("ascii")
+
+
+def emit_uci_line(line: str, *, optional: bool = False) -> bool:
+    safe_line = sanitize_uci_line(line)
+    try:
+        sys.stdout.write(safe_line + "\n")
+        sys.stdout.flush()
+        return True
+    except (BrokenPipeError, OSError, UnicodeError) as exc:
+        log(f"failed to write UCI line {safe_line[:120]!r}: {type(exc).__name__}: {exc}")
+        if optional:
+            return False
+        raise
 
 
 def free_port() -> int:
@@ -73,8 +111,8 @@ def parse_json_object(text: str) -> dict:
         return json.loads(match.group(0))
 
 
-def print_neutral_score_info() -> None:
-    print("info depth 0 score cp 0 nodes 0 time 0", flush=True)
+def print_neutral_score_info(*, optional: bool = False) -> None:
+    emit_uci_line("info depth 0 score cp 0 nodes 0 time 0", optional=optional)
 
 
 class CodexTurnError(RuntimeError):
@@ -308,28 +346,80 @@ class CodexAppServer:
         await self.ws.send(json.dumps({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}))
         return await fut
 
-    def learner_context(self) -> dict:
+    def learner_context(self, profile: str = "full") -> dict:
         if not (self.use_memory or self.use_skills or self.learning_mode):
             return {}
-        fen_knowledge = read_limited_text(FEN_KNOWLEDGE_PATH, 3500)
-        strategy_lessons = read_limited_text(STRATEGY_LESSONS_PATH, 4500)
+        lean = profile == "lean"
+        memory_chars = 1400 if lean else 3000
+        fen_chars = 900 if lean else 1800
+        strategy_chars = 1400 if lean else 2800
+        kb_files = 2 if lean else 4
+        kb_chars = 700 if lean else 1400
+        skill_files = 1 if lean else 2
+        skill_chars = 600 if lean else 1000
+        fen_knowledge = read_limited_text(FEN_KNOWLEDGE_PATH, fen_chars)
+        strategy_lessons = read_limited_text(STRATEGY_LESSONS_PATH, strategy_chars)
+        policy = (
+            "Apply the learner memory, fen_knowledge, strategy_lessons, and knowledgebase directly. "
+            "Use model-discovered strategy_lessons as generic value adjustments before finalizing a move, not as memorized move answers. "
+            "Never invent UCI: copy uci exactly from legal_moves, and never return 0000 while legal moves exist."
+        )
+        if lean:
+            policy += " Lean clock mode is active: use only the strongest remembered idea and answer quickly."
         return {
+            "profile": profile,
             "memory_path": str(MEMORY_PATH),
-            "memory": read_limited_text(MEMORY_PATH, 6000),
+            "memory": read_limited_text(MEMORY_PATH, memory_chars),
             "knowledgebase_path": str(KNOWLEDGEBASE_DIR),
             "fen_knowledge_path": str(FEN_KNOWLEDGE_PATH),
             "fen_knowledge": fen_knowledge,
             "strategy_lessons_path": str(STRATEGY_LESSONS_PATH),
             "strategy_lessons": strategy_lessons,
-            "knowledgebase": collect_text_context(KNOWLEDGEBASE_DIR, max_files=8, max_chars_per_file=2500),
+            "knowledgebase": collect_text_context(KNOWLEDGEBASE_DIR, max_files=kb_files, max_chars_per_file=kb_chars),
             "skills_path": str(SKILLS_DIR),
-            "skills": collect_text_context(SKILLS_DIR, max_files=4, max_chars_per_file=1800),
-            "policy": (
-                "Apply the learner memory, fen_knowledge, strategy_lessons, and knowledgebase directly. "
-                "Use model-discovered strategy_lessons as generic value adjustments before finalizing a move, not as memorized move answers. "
-                "Never invent UCI: copy uci exactly from legal_moves, and never return 0000 while legal moves exist."
-            ),
+            "skills": collect_text_context(SKILLS_DIR, max_files=skill_files, max_chars_per_file=skill_chars),
+            "policy": policy,
         }
+
+    def move_timeout_seconds(self, remaining: int | None) -> int:
+        max_timeout = max(1, int_config_value("codex.moveTimeoutSeconds", 12))
+        critical_timeout = max(1, int_config_value("codex.criticalMoveTimeoutSeconds", 3))
+        if remaining is None:
+            return max_timeout
+        if remaining <= 1000:
+            return 1
+        remaining_seconds = max(1, int(remaining / 1000))
+        if remaining < 25000:
+            return max(1, min(critical_timeout, remaining_seconds - 1))
+        clock_divisor = max(1, int_config_value("codex.moveTimeoutClockDivisor", 12))
+        clock_budget = max(1, int(remaining_seconds / clock_divisor))
+        return max(1, min(max_timeout, clock_budget, remaining_seconds - 1))
+
+    def retry_timeout_seconds(self, remaining: int | None, elapsed_seconds: float) -> int:
+        retry_timeout = max(1, int_config_value("codex.retryMoveTimeoutSeconds", 8))
+        if remaining is None:
+            return retry_timeout
+        remaining_after_elapsed = max(0, int(remaining / 1000) - int(elapsed_seconds))
+        if remaining_after_elapsed <= 1:
+            return 1
+        return max(1, min(retry_timeout, remaining_after_elapsed - 1))
+
+    def urgent_retry_prompt(self, prompt: dict, timeout: int, reason: str) -> dict:
+        retry_prompt = copy.deepcopy(prompt)
+        retry_prompt.pop("learner_context", None)
+        retry_prompt["_turn_effort"] = str(config_value("codex.retryEffort", "low"))
+        retry_prompt["learner_context_summary"] = (
+            "Urgent retry mode. Do not use memory, skills, tools, files, or long analysis. "
+            "Read side_to_move, fen, and legal_moves directly, then copy one legal uci exactly from legal_moves."
+        )
+        retry_prompt["turn_timeout_seconds"] = timeout
+        retry_prompt["retry_reason"] = reason
+        retry_prompt["time_management"] = (
+            "Return strict JSON immediately. Pick a practical legal move from legal_moves, "
+            "set comment to an empty string, and finish before turn_timeout_seconds."
+        )
+        retry_prompt["comment_policy"] = "Set comment to an empty string during urgent retries."
+        return retry_prompt
 
     def client_repetition_risk(self, board: chess.Board, legal_moves: list[str]) -> dict:
         repeated: list[str] = []
@@ -357,14 +447,15 @@ class CodexAppServer:
         if remaining is not None and remaining <= 0:
             side = "White" if board.turn == chess.WHITE else "Black"
             log(f"{side} clock already expired ({remaining} ms); forfeiting without starting a Codex turn")
-            print(f"info string {side} clock expired; forfeiting game without starting model turn", flush=True)
+            emit_uci_line(f"info string {side} clock expired; forfeiting game without starting model turn")
             print_neutral_score_info()
             return "0000"
 
         await self.start()
         repetition = self.client_repetition_risk(board, legal_moves)
 
-        critical_clock = remaining is not None and remaining < 25000
+        critical_clock = remaining is not None and remaining < int_config_value("codex.criticalContextBelowMs", 60000)
+        lean_clock = remaining is not None and remaining < int_config_value("codex.leanContextBelowMs", 240000)
         prompt = {
             "engine": ENGINE_NAME,
             "game_time_control": "Use only the GUI clock fields below; infer the practical time control from them.",
@@ -380,9 +471,11 @@ class CodexAppServer:
                 "own_remaining": remaining,
                 "own_increment": increment or 0,
             },
+            "turn_timeout_seconds": self.move_timeout_seconds(remaining),
             "time_management": (
                 "Choose a practical legal move quickly under the supplied remaining clocks. "
-                "If own_remaining is below 25000ms, do not analyze deeply: copy any clearly legal useful move from legal_moves, "
+                "The host will stop waiting after turn_timeout_seconds, so return before that budget. "
+                "If own_remaining is below 60000ms, do not analyze deeply: copy any clearly legal useful move from legal_moves, "
                 "set comment to an empty string, and return strict JSON immediately. The harness will not choose a move for you."
             ),
             "comment_policy": "Optionally include one short comment explaining the move; it will be shown as a UCI info string in the chess GUI logs.",
@@ -392,10 +485,17 @@ class CodexAppServer:
                 "Three consecutive invalid responses for this engine forfeit the game."
             ),
         }
-        context = {} if critical_clock else self.learner_context()
+        context_profile = "none"
+        context = {}
+        if not critical_clock:
+            context_profile = "lean" if lean_clock else "full"
+            context = self.learner_context(context_profile)
+            if not context:
+                context_profile = "none"
         if context:
             prompt["learner_context"] = context
         elif critical_clock and self.learning_mode:
+            context_profile = "critical-summary"
             prompt["learner_context_summary"] = (
                 "Critical clock mode. Apply only the most important learner rule: do not flag or forfeit; "
                 "read the FEN side-to-move and legal_moves directly, copy one legal uci from legal_moves immediately, "
@@ -405,25 +505,28 @@ class CodexAppServer:
             "decision prompt: "
             f"side={prompt['side_to_move']} fen={board.fen()} "
             f"legal_moves={len(legal_moves)} own_remaining={remaining} own_increment={increment or 0} "
-            f"learner_context={'yes' if context else 'no'} repeat_moves={repetition['repeat_moves']} "
-            f"threefold_moves={repetition['threefold_moves']}"
+            f"learner_context={context_profile} timeout={prompt['turn_timeout_seconds']}s "
+            f"repeat_moves={repetition['repeat_moves']} threefold_moves={repetition['threefold_moves']}"
         )
 
-        timeout = 90
-        if remaining is not None:
-            timeout = max(1, min(90, int(remaining / 1000) - 1))
+        timeout = prompt["turn_timeout_seconds"]
+        move_started = time.monotonic()
 
         while self.invalid_model_moves < 3:
+            if not self.started:
+                await self.start()
             attempt = self.invalid_model_moves + 1
             prompt["attempt"] = attempt
             if self.invalid_model_moves:
                 prompt["previous_invalid_responses"] = self.invalid_model_moves
+            turn_effort = str(prompt.get("_turn_effort", self.effort))
+            wire_prompt = {key: value for key, value in prompt.items() if not str(key).startswith("_")}
             response = await self.request(
                 "turn/start",
                 {
                     "threadId": self.thread_id,
-                    "effort": self.effort,
-                    "input": [{"type": "text", "text": json.dumps(prompt, separators=(",", ":"))}],
+                    "effort": turn_effort,
+                    "input": [{"type": "text", "text": json.dumps(wire_prompt, separators=(",", ":"))}],
                     "outputSchema": {
                         "type": "object",
                         "additionalProperties": False,
@@ -445,10 +548,24 @@ class CodexAppServer:
                 data = parse_json_object(text)
                 move = str(data.get("uci", "")).strip()
                 comment = data.get("comment", "")
+            except asyncio.TimeoutError:
+                self.invalid_model_moves += 1
+                log(f"Codex app-server turn timed out after {timeout}s; invalid_count={self.invalid_model_moves}/3")
+                emit_uci_line(f"info string Codex app-server turn timed out after {timeout}s", optional=True)
+                await self.close()
+                if self.invalid_model_moves >= 3:
+                    log("Codex app-server timeout streak reached 3; forfeiting with bestmove 0000")
+                    emit_uci_line("info string model timeout limit reached; forfeiting game")
+                    print_neutral_score_info()
+                    return "0000"
+                timeout = self.retry_timeout_seconds(remaining, time.monotonic() - move_started)
+                prompt = self.urgent_retry_prompt(prompt, timeout, "previous Codex app-server turn timed out")
+                log(f"retrying with urgent context-free prompt timeout={timeout}s effort={prompt.get('_turn_effort', self.effort)} after timeout")
+                continue
             except CodexTurnError as exc:
                 code = f" code={exc.code}" if exc.code else ""
                 log(f"Codex app-server turn failed{code}; forfeiting without retry: {exc}")
-                print(f"info string Codex app-server turn failed{code}; forfeiting game", flush=True)
+                emit_uci_line(f"info string Codex app-server turn failed{code}; forfeiting game")
                 print_neutral_score_info()
                 return "0000"
             except Exception as exc:
@@ -459,7 +576,7 @@ class CodexAppServer:
                 )
                 if self.invalid_model_moves >= 3:
                     log("invalid Codex response streak reached 3; forfeiting with bestmove 0000")
-                    print("info string invalid model response limit reached; forfeiting game", flush=True)
+                    emit_uci_line("info string invalid model response limit reached; forfeiting game")
                     print_neutral_score_info()
                     return "0000"
                 continue
@@ -472,22 +589,25 @@ class CodexAppServer:
                 log(f"illegal Codex move {move!r}; invalid_count={self.invalid_model_moves}/3")
                 if self.invalid_model_moves >= 3:
                     log("illegal Codex move streak reached 3; forfeiting with bestmove 0000")
-                    print("info string invalid model move limit reached; forfeiting game", flush=True)
+                    emit_uci_line("info string invalid model move limit reached; forfeiting game")
                     print_neutral_score_info()
                     return "0000"
+                timeout = self.retry_timeout_seconds(remaining, time.monotonic() - move_started)
+                prompt = self.urgent_retry_prompt(prompt, timeout, f"previous move {move!r} was not in legal_moves")
+                log(f"retrying with urgent context-free prompt timeout={timeout}s effort={prompt.get('_turn_effort', self.effort)} after illegal move")
                 continue
 
             self.invalid_model_moves = 0
             if comment:
                 safe_comment = " ".join(str(comment).split())
                 log(f"decision comment: move={move} comment={safe_comment[:500]}")
-                print(f"info string {safe_comment[:240]}", flush=True)
+                emit_uci_line(f"info string {safe_comment[:240]}", optional=True)
             else:
                 log(f"decision comment: move={move} comment=")
             return move
 
         log("invalid response streak reached 3; forfeiting with bestmove 0000")
-        print("info string invalid model response limit reached; forfeiting game", flush=True)
+        emit_uci_line("info string invalid model response limit reached; forfeiting game")
         print_neutral_score_info()
         return "0000"
 
@@ -505,6 +625,13 @@ class CodexAppServer:
                 await asyncio.wait_for(self.proc.wait(), timeout=5)
             except asyncio.TimeoutError:
                 self.proc.kill()
+        self.proc = None
+        self.ws = None
+        self.thread_id = None
+        self.started = False
+        self.pending.clear()
+        self.turn_text.clear()
+        self.turn_done.clear()
 
     def new_game(self) -> None:
         self.invalid_model_moves = 0
@@ -612,15 +739,15 @@ async def main() -> None:
 
         try:
             if command == "uci":
-                print(f"id name {ENGINE_NAME}", flush=True)
-                print(f"id author {ENGINE_AUTHOR}", flush=True)
-                print("option name UCI_Chess960 type check default false", flush=True)
-                print(f"option name UseMemory type check default {'true' if DEFAULT_USE_MEMORY else 'false'}", flush=True)
-                print(f"option name UseSkills type check default {'true' if DEFAULT_USE_SKILLS else 'false'}", flush=True)
-                print(f"option name LearningMode type check default {'true' if DEFAULT_LEARNING_MODE else 'false'}", flush=True)
-                print("uciok", flush=True)
+                emit_uci_line(f"id name {ENGINE_NAME}")
+                emit_uci_line(f"id author {ENGINE_AUTHOR}")
+                emit_uci_line("option name UCI_Chess960 type check default false")
+                emit_uci_line(f"option name UseMemory type check default {'true' if DEFAULT_USE_MEMORY else 'false'}")
+                emit_uci_line(f"option name UseSkills type check default {'true' if DEFAULT_USE_SKILLS else 'false'}")
+                emit_uci_line(f"option name LearningMode type check default {'true' if DEFAULT_LEARNING_MODE else 'false'}")
+                emit_uci_line("uciok")
             elif command == "isready":
-                print("readyok", flush=True)
+                emit_uci_line("readyok")
             elif command == "ucinewgame":
                 engine.board = chess.Board()
                 engine.history = []
@@ -632,17 +759,17 @@ async def main() -> None:
             elif command == "go":
                 bestmove = await engine.go(tokens)
                 print_neutral_score_info()
-                print(f"bestmove {bestmove}", flush=True)
+                emit_uci_line(f"bestmove {bestmove}")
             elif command == "stop":
-                print_neutral_score_info()
-                print("bestmove 0000", flush=True)
+                print_neutral_score_info(optional=True)
+                emit_uci_line("bestmove 0000", optional=True)
             elif command == "quit":
                 break
         except Exception as exc:
             log(f"error for command {line!r}: {type(exc).__name__}: {exc}; forfeiting with bestmove 0000")
             if command == "go":
                 print_neutral_score_info()
-                print("bestmove 0000", flush=True)
+                emit_uci_line("bestmove 0000")
 
     await engine.codex.close()
     log("Codex-chess UCI stopped")

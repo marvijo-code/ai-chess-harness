@@ -15,6 +15,8 @@ FINISHED_RE = re.compile(r"Finished game\s+(?P<game>\d+)\s+\((?P<white>.+?)\s+vs
 POSITION_RE = re.compile(r"position startpos(?: moves (?P<moves>[a-h][1-8][a-h][1-8][qrbn]?(?: [a-h][1-8][a-h][1-8][qrbn]?)*))?")
 GO_RE = re.compile(r"\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+>\s+go\b.*?\bwtime\s+(?P<wtime>\d+)\s+btime\s+(?P<btime>\d+)\b")
 CLK_COMMENT_RE = re.compile(r"\[%clk\s+[^\]]+\]")
+ACTIVE_TRACK_MAX_AGE_MS = 15 * 60 * 1000
+RUN_ARTIFACT_MAX_IDLE_MS = 30 * 60 * 1000
 
 
 def parse_games(stdout_path: Path) -> list[dict]:
@@ -49,8 +51,128 @@ def parse_games(stdout_path: Path) -> list[dict]:
     return games
 
 
+def infer_pgnout_path(stdout_path: Path) -> Path:
+    name = stdout_path.name
+    suffix = "-launch.out.log"
+    if name.endswith(suffix):
+        return stdout_path.with_name(name[: -len(suffix)] + ".pgn")
+    return stdout_path.with_suffix(".pgn")
+
+
+def latest_mtime_ms(paths: list[Path]) -> int | None:
+    mtimes: list[int] = []
+    for path in paths:
+        try:
+            mtimes.append(int(path.stat().st_mtime * 1000))
+        except OSError:
+            continue
+    return max(mtimes) if mtimes else None
+
+
+def run_artifacts_recent(stdout_path: Path, pgnout_path: Path, now_ms: int | None = None) -> bool:
+    latest_mtime = latest_mtime_ms([stdout_path, pgnout_path])
+    if latest_mtime is None:
+        return True
+    current_now = current_epoch_ms() if now_ms is None else now_ms
+    return current_now - latest_mtime <= RUN_ARTIFACT_MAX_IDLE_MS
+
+
+def parse_pgnout_games(pgnout_path: Path, total: int | None = None) -> list[dict]:
+    if not pgnout_path.exists():
+        return []
+    games: list[dict] = []
+    try:
+        with pgnout_path.open("r", encoding="utf-8", errors="replace") as handle:
+            while True:
+                game = chess.pgn.read_game(handle)
+                if game is None:
+                    break
+                result = game.headers.get("Result", "*")
+                if result == "*":
+                    continue
+                game_no = len(games) + 1
+                games.append(
+                    {
+                        "game": game_no,
+                        "total": total or 0,
+                        "white": game.headers.get("White", "White"),
+                        "black": game.headers.get("Black", "Black"),
+                        "result": result,
+                        "reason": game.headers.get("Termination", ""),
+                        "finished": True,
+                        "order": game_no,
+                    }
+                )
+    except OSError:
+        return []
+    return games
+
+
+def merge_pgnout_games(stdout_games: list[dict], pgnout_games: list[dict]) -> list[dict]:
+    if not pgnout_games:
+        return stdout_games
+    total = int(stdout_games[0].get("total") or pgnout_games[-1].get("total") or len(pgnout_games)) if (stdout_games or pgnout_games) else 0
+    by_game = {int(game["game"]): dict(game) for game in stdout_games}
+    for game in pgnout_games:
+        merged = dict(by_game.get(int(game["game"]), {}))
+        merged.update(game)
+        merged["total"] = total
+        by_game[int(game["game"])] = merged
+    return [by_game[index] for index in sorted(by_game)]
+
+
+def players_for_game(game_no: int, games: list[dict]) -> tuple[str, str]:
+    first = next((game for game in games if int(game.get("game") or 0) == 1), None)
+    second = next((game for game in games if int(game.get("game") or 0) == 2), None)
+    if game_no % 2 == 0 and second is not None:
+        return second.get("white") or "White", second.get("black") or "Black"
+    if first is not None:
+        return first.get("white") or "White", first.get("black") or "Black"
+    if games:
+        return games[-1].get("white") or "White", games[-1].get("black") or "Black"
+    return "White", "Black"
+
+
+def synthesize_active_game_from_tracks(games: list[dict], tracks: list[dict], now_ms: int | None = None) -> list[dict]:
+    if not games or any(not game.get("finished") for game in games):
+        return games
+    if len(tracks) <= len(games):
+        return games
+    latest_track = max(tracks, key=lambda item: int(item.get("updated_at") or 0))
+    current_now = current_epoch_ms() if now_ms is None else now_ms
+    try:
+        if current_now - int(latest_track.get("updated_at") or 0) > ACTIVE_TRACK_MAX_AGE_MS:
+            return games
+    except (TypeError, ValueError):
+        return games
+    game_no = max(int(game["game"]) for game in games) + 1
+    total = int(games[0].get("total") or game_no)
+    if total and game_no > total:
+        return games
+    white, black = players_for_game(game_no, games)
+    return [
+        *games,
+        {
+            "game": game_no,
+            "total": total,
+            "white": white,
+            "black": black,
+            "result": "*",
+            "reason": "",
+            "finished": False,
+            "order": game_no,
+        },
+    ]
+
+
 def select_board_game(games: list[dict], locked_game: int | None) -> tuple[dict | None, int | None]:
     if locked_game is not None:
+        for game in games:
+            if int(game["game"]) == locked_game and not game["finished"]:
+                return game, locked_game
+        for game in games:
+            if not game["finished"]:
+                return game, int(game["game"])
         for game in games:
             if int(game["game"]) == locked_game:
                 return game, locked_game
@@ -89,7 +211,15 @@ def moves_are_compatible(left: list[str], right: list[str]) -> bool:
     return left[: len(right)] == right
 
 
-def collect_engine_states(log_dir: Path) -> list[dict]:
+def run_start_ms(stdout_path: Path) -> int | None:
+    try:
+        stat = stdout_path.stat()
+    except OSError:
+        return None
+    return int((min(stat.st_ctime, stat.st_mtime) - 5) * 1000)
+
+
+def collect_engine_states(log_dir: Path, since_ms: int | None = None) -> list[dict]:
     paths = sorted(
         log_dir.glob("codex-chess-*.log"),
         key=lambda path: path.stat().st_mtime,
@@ -97,6 +227,8 @@ def collect_engine_states(log_dir: Path) -> list[dict]:
     )
     states: list[dict] = []
     for path in paths[:8]:
+        if since_ms is not None and int(path.stat().st_mtime * 1000) < since_ms:
+            continue
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
@@ -113,6 +245,8 @@ def collect_engine_states(log_dir: Path) -> list[dict]:
             if not go_match:
                 continue
             updated_at = log_timestamp_ms(go_match.group("ts"))
+            if since_ms is not None and updated_at < since_ms:
+                continue
             state = {
                 "moves": list(moves),
                 "wtime": int(go_match.group("wtime")),
@@ -130,14 +264,13 @@ def collect_engine_states(log_dir: Path) -> list[dict]:
     return states
 
 
-def collect_engine_tracks(log_dir: Path) -> list[dict]:
+def collect_engine_tracks(log_dir: Path, since_ms: int | None = None) -> list[dict]:
     tracks: list[dict] = []
-    for state in sorted(collect_engine_states(log_dir), key=lambda item: item["updated_at"]):
+    for state in sorted(collect_engine_states(log_dir, since_ms), key=lambda item: item["updated_at"]):
         target = None
-        for track in tracks:
-            if moves_are_compatible(track["moves"], state["moves"]):
-                target = track
-                break
+        compatible_tracks = [track for track in tracks if moves_are_compatible(track["moves"], state["moves"])]
+        if state["moves"] and compatible_tracks:
+            target = max(compatible_tracks, key=lambda item: (item["updated_at"], item["first_seen"]))
         if target is None:
             target = {
                 "first_seen": state["updated_at"],
@@ -167,10 +300,30 @@ def collect_engine_tracks(log_dir: Path) -> list[dict]:
     return result
 
 
-def select_engine_state(log_dir: Path, games: list[dict], current: dict, locked_moves: list[str] | None) -> tuple[dict, list[str] | None]:
-    tracks = collect_engine_tracks(log_dir)
+def select_engine_state(
+    log_dir: Path,
+    games: list[dict],
+    current: dict,
+    locked_moves: list[str] | None,
+    since_ms: int | None = None,
+    tracks: list[dict] | None = None,
+) -> tuple[dict, list[str] | None]:
+    if tracks is None:
+        tracks = collect_engine_tracks(log_dir, since_ms)
     if not tracks:
         return {"moves": [], "clocks_by_ply": {}}, locked_moves
+
+    game_index = 0
+    for index, game in enumerate(games):
+        if int(game["game"]) == int(current["game"]):
+            game_index = index
+            break
+    if not current.get("finished"):
+        if game_index < len(tracks):
+            selected = tracks[game_index]
+        else:
+            selected = max(tracks, key=lambda item: item["updated_at"])
+        return selected, list(selected.get("moves", []))
 
     if locked_moves:
         compatible = [track for track in tracks if moves_are_compatible(locked_moves, track["moves"])]
@@ -180,15 +333,12 @@ def select_engine_state(log_dir: Path, games: list[dict], current: dict, locked_
                 return selected, list(selected["moves"])
             return selected, locked_moves
 
-    game_index = 0
-    for index, game in enumerate(games):
-        if int(game["game"]) == int(current["game"]):
-            game_index = index
-            break
     if game_index < len(tracks):
         selected = tracks[game_index]
+    elif not current.get("finished"):
+        selected = max(tracks, key=lambda item: item["updated_at"])
     else:
-        selected = tracks[0]
+        selected = tracks[-1]
     return selected, list(selected.get("moves", []))
 
 
@@ -208,17 +358,23 @@ def merge_clk_comment(existing: str, ms: int) -> str:
     return f"{stripped} {clk}".strip()
 
 
-def time_loss_for(current: dict, state: dict) -> dict | None:
+def current_epoch_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def time_loss_for(current: dict, state: dict, now_ms: int | None = None) -> dict | None:
     if current.get("finished"):
         return None
     running_side = state.get("running_side")
     if running_side == "White":
+        clock_key = "wtime"
         remaining = state.get("wtime")
         result = "0-1"
         winner_side = "Black"
         loser_name = current.get("white") or "White"
         winner_name = current.get("black") or "Black"
     elif running_side == "Black":
+        clock_key = "btime"
         remaining = state.get("btime")
         result = "1-0"
         winner_side = "White"
@@ -227,19 +383,24 @@ def time_loss_for(current: dict, state: dict) -> dict | None:
     else:
         return None
     try:
-        if int(remaining) > 0:
+        effective_remaining = int(remaining)
+        updated_at = int(state.get("updated_at"))
+        timestamp_now = current_epoch_ms() if now_ms is None else int(now_ms)
+        effective_remaining -= max(0, timestamp_now - updated_at)
+        if effective_remaining > 0:
             return None
     except (TypeError, ValueError):
         return None
     return {
         "result": result,
         "winner_side": winner_side,
+        "clock_key": clock_key,
         "reason": f"{loser_name} ({running_side}) lost on time; {winner_name} ({winner_side}) won",
     }
 
 
-def game_with_timeout(current: dict, state: dict) -> dict:
-    time_loss = time_loss_for(current, state)
+def game_with_timeout(current: dict, state: dict, now_ms: int | None = None) -> dict:
+    time_loss = time_loss_for(current, state, now_ms)
     if time_loss is None:
         return current
     updated = dict(current)
@@ -247,11 +408,16 @@ def game_with_timeout(current: dict, state: dict) -> dict:
     updated["reason"] = time_loss["reason"]
     updated["finished"] = True
     updated["timeout_inferred"] = True
+    updated["timeout_clock_key"] = time_loss["clock_key"]
     return updated
 
 
-def build_game(current: dict, state: dict) -> chess.pgn.Game:
-    current = game_with_timeout(current, state)
+def build_game(current: dict, state: dict, now_ms: int | None = None) -> chess.pgn.Game:
+    current = game_with_timeout(current, state, now_ms)
+    header_state = dict(state)
+    timeout_clock_key = current.get("timeout_clock_key")
+    if timeout_clock_key:
+        header_state[timeout_clock_key] = 0
     game = chess.pgn.Game()
     game.headers["Event"] = "FastChess live mirror"
     game.headers["Site"] = "C:/dev/chess-harness-codex"
@@ -261,11 +427,11 @@ def build_game(current: dict, state: dict) -> chess.pgn.Game:
     game.headers["Result"] = current["result"]
     if current["reason"]:
         game.headers["Termination"] = current["reason"]
-    if {"wtime", "btime", "updated_at", "running_side"}.issubset(state):
-        game.headers["WhiteClockMs"] = str(state["wtime"])
-        game.headers["BlackClockMs"] = str(state["btime"])
-        game.headers["ClockUpdatedAtEpochMs"] = str(state["updated_at"])
-        game.headers["ClockRunningSide"] = "" if current["finished"] else state["running_side"]
+    if {"wtime", "btime", "updated_at", "running_side"}.issubset(header_state):
+        game.headers["WhiteClockMs"] = str(header_state["wtime"])
+        game.headers["BlackClockMs"] = str(header_state["btime"])
+        game.headers["ClockUpdatedAtEpochMs"] = str(header_state["updated_at"])
+        game.headers["ClockRunningSide"] = "" if current["finished"] else header_state["running_side"]
 
     board = game.board()
     node = game
@@ -321,23 +487,36 @@ def status_text(games: list[dict], output_path: Path, locked_game: int | None) -
 def mirror(stdout_path: Path, log_dir: Path, output_path: Path, interval: float, once: bool) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     status_path = output_path.with_suffix(".status.json")
+    pgnout_path = infer_pgnout_path(stdout_path)
+    since_ms = run_start_ms(stdout_path)
     previous = None
     previous_status = None
     locked_game: int | None = None
     locked_moves: list[str] | None = None
     last_requested_game: int | None = None
     while True:
+        if not once and not run_artifacts_recent(stdout_path, pgnout_path):
+            time.sleep(interval)
+            continue
         games = parse_games(stdout_path)
+        total = int(games[0].get("total") or 0) if games else None
+        games = merge_pgnout_games(games, parse_pgnout_games(pgnout_path, total))
+        tracks = collect_engine_tracks(log_dir, since_ms)
+        games = synthesize_active_game_from_tracks(games, tracks)
         requested_game = read_selected_game(output_path)
         if requested_game is not None and requested_game != last_requested_game:
             locked_game = requested_game
             locked_moves = None
             last_requested_game = requested_game
+        previous_locked_game = locked_game
         current, locked_game = select_board_game(games, locked_game)
+        if locked_game != previous_locked_game:
+            locked_moves = None
         if current is not None:
-            state, locked_moves = select_engine_state(log_dir, games, current, locked_moves)
-            current = game_with_timeout(current, state)
-            text = pgn_text(build_game(current, state))
+            state, locked_moves = select_engine_state(log_dir, games, current, locked_moves, since_ms, tracks)
+            now_ms = current_epoch_ms()
+            current = game_with_timeout(current, state, now_ms)
+            text = pgn_text(build_game(current, state, now_ms))
             if text != previous:
                 output_path.write_text(text, encoding="utf-8")
                 previous = text

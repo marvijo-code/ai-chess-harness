@@ -46,6 +46,17 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 37. The default Codex game-playing model is `gpt-5.3-codex` with reasoning effort `high`; lower efforts are explicit one-off overrides, not the runner default.
 38. If a GUI or FastChess clock says the side to move has no time remaining, LLM-backed engines must not start a new model/app-server/API turn; they should immediately forfeit with `bestmove 0000` so the runner can end the game.
 39. The live board should display the timed-out side, winner, and reason on the board header, stop the visible clock at zero, and write the timeout result into the live PGN when FastChess has not emitted its final line yet.
+40. Optional UCI comment output must be ASCII-safe and non-fatal so model comments with smart punctuation or other Unicode text cannot prevent the engine from writing the actual `bestmove` line.
+41. Codex UCI engines must enforce a bounded per-move app-server timeout derived from the remaining GUI clock, and learner prompts must reduce embedded memory/knowledgebase context as time drops so 5+0 FastChess games do not spend tens of seconds on routine moves.
+42. A live selection file pins the board only while that selected game is still in progress; once the selected game is completed and another FastChess game is running, the live mirror should advance to the next in-progress game instead of leaving the board on a stale completed or timeout state.
+43. A bare live URL hash such as `#codex-vs-codex-learner-live-...` must keep Follow Live enabled for that live PGN; archived or replayed games require an explicit `--game-N` hash suffix.
+44. The live mirror must keep repeated opening lines from separate FastChess games as separate engine tracks, so a later game that starts with the same moves does not inherit stale clocks or positions from an earlier game.
+45. A stale or non-matching archived hash such as `#old-live-slug--game-1` must not leave the viewer in replay mode against the current live PGN; Follow Live should remain on until the matching archived row is found.
+46. The FastChess live mirror must ignore engine logs older than the current run's launch stdout file, so earlier runs cannot make a new live board show stale positions or clock timeouts while the current game is still underway.
+47. If a live mirrored clock expires by wall-clock elapsed time after the last engine-log clock update, the mirror must write the timeout result into both the live PGN and live status JSON even when FastChess stdout has not printed `Finished game`.
+48. A completed or stale bare live URL hash must resolve to the newest fresh in-progress live match even when that active match slug sorts before the stale hash, while explicit `#slug--game-N` links stay archived replay links.
+49. The live mirror must reconcile stale FastChess launch stdout with the real FastChess `*.pgn` output and current engine tracks, must not pin an unfinished current game to stale locked moves from an older repeated-opening track, and stale daemon mirrors must stop refreshing live status when their own run artifacts are no longer fresh.
+50. FastChess learner runs stay at 5+0 by default, but Codex move budgeting must avoid self-inflicted timeouts: normal mid-clock moves get enough app-server wait budget, and retry prompts after a timeout or invalid move must drop learner context, drop comments, and use a lower-effort urgent turn instead of restarting multiple full-context high-effort turns that burn the clock.
 
 ## Validation Requirements
 
@@ -78,4 +89,18 @@ Keep the local FastChess viewer useful during live play and replay without leaki
    - The viewer launched by the FastChess wrapper advertises hot reload through `/api/viewer-version`, restarts after a viewer source/config/doc change, and the browser reloads to the updated UI.
    - Live mirrored PGNs contain `[%clk ...]` comments on completed moves when FastChess clock state is available.
    - When a live mirrored clock reaches zero, the board shows the winner and `lost on time`, the active clock stops at zero, and no additional LLM turn is requested by the timed-out engine.
+   - A stale completed live selection advances to the next in-progress FastChess game while an unfinished selected game remains fixed.
+   - Loading the exact live `#slug` URL keeps the viewer in Follow Live instead of selecting a completed archived game with the same tournament slug.
+   - Repeated opening lines across separate games remain separate live mirror tracks and the selected board game uses the latest matching game track.
+   - Loading a stale `#old-live-slug--game-N` URL without a matching archive row keeps the current live game in Follow Live.
+   - Engine log collection for a live mirror is scoped to the current run start so older runs cannot provide the displayed board clock.
+   - Live mirror timeout inference uses wall-clock elapsed time from `ClockUpdatedAtEpochMs` and marks the game complete in PGN and live status JSON when the displayed clock reaches zero.
+   - Loading a completed or stale bare live `#slug` URL switches the viewer hash and board to the newest fresh in-progress live match.
+   - A stale FastChess launch stdout is reconciled with the real `*.pgn` output and active engine logs so the live board advances to the current in-progress game.
+   - Stale live mirror daemon outputs expire from the live match list instead of advertising old slugs as active.
+   - An unfinished current game is allowed to move from stale locked repeated-opening moves to the current active track when older tracks have fallen out of the log window.
+   - Loading an explicit archived `#slug--game-N` URL still opens that archived game when a matching completed row exists.
+   - UCI output sanitization proves non-ASCII model comments do not raise and do not block `bestmove`.
+   - Codex move-time budgeting is covered by focused tests for the initial, mid-clock, and critical-clock budgets.
+   - Timeout/invalid retry handling is covered by focused tests proving retries use an urgent context-free prompt and bounded retry budget while preserving the 5+0 FastChess time control.
    - No horizontal overflow at desktop width.

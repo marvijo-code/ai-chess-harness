@@ -61,3 +61,29 @@
 - [x] Make LLM-backed engines forfeit immediately without starting a model turn when their own clock is already at or below zero.
 - [x] Show timeout winner/reason on the live board and stop the displayed clock at zero.
 - [x] Validate engine timeout guards plus live mirror/viewer timeout result rendering.
+- [x] Make optional UCI comment output ASCII-safe and non-fatal so `bestmove` is still emitted after Unicode model comments.
+- [x] Enforce a bounded per-move Codex app-server timeout and lean learner context as the clock falls.
+- [x] Validate UCI output sanitization and focused engine compile checks.
+- [x] Advance a stale completed live selection to the next in-progress FastChess game.
+- [x] Validate stale-selection live mirror behavior with a focused regression test.
+- [x] Keep bare live `#slug` URLs in Follow Live instead of archived `--game-N` mode.
+- [x] Validate the exact live URL in a browser check.
+- [x] Keep repeated-opening FastChess games as separate live mirror tracks.
+- [x] Validate repeated-opening mirror track selection with a focused regression test.
+- [x] Keep stale or non-matching archived hashes from disabling Follow Live.
+- [x] Validate non-matching stale archived hash startup with a browser check.
+- [x] Scope live mirror engine-log collection to the current FastChess run start.
+- [x] Validate run-start log scoping with a focused regression test.
+- [x] Mark wall-clock-expired live clocks as completed timeout games in PGN and status JSON.
+- [x] Validate wall-clock timeout inference with a focused regression test.
+- [x] Resolve completed or stale bare live hashes to the newest fresh active live match.
+- [x] Validate latest-live routing while preserving explicit `--game-N` archive replay.
+- [x] Validate a stale newer bare hash against an older active live slug with a real browser E2E test.
+- [x] Browser-check the stale live URL against the active viewer on port `8766`.
+- [x] Reconcile stale FastChess launch stdout with the real `*.pgn` output and active engine tracks.
+- [x] Prevent stale locked repeated-opening moves from pinning an unfinished current live game.
+- [x] Expire stale live mirror daemon status so old slugs stop appearing as active.
+- [x] Browser-check `http://127.0.0.1:8766/#codex-vs-codex-learner-live-20260512-181557` against the restarted live viewer.
+- [x] Keep the default FastChess run at 5+0 while fixing Codex app-server timeout budgeting.
+- [x] Make timeout/invalid retries use urgent context-free prompts instead of repeated full-context app-server turns.
+- [x] Validate the revised timeout budget and retry prompt behavior with focused tests.

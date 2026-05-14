@@ -27,7 +27,7 @@ LEARNER_SKILLS_DIR = LEARNER_DIR / "skills"
 LEARNER_KNOWLEDGEBASE_DIR = LEARNER_DIR / "knowledgebase"
 ENGINE_LOG_DIR = OUT_DIR / "codex-chess-logs"
 CLK_COMMENT_RE = re.compile(r"\[%clk\s+(?P<value>\d+(?::\d{1,2}){1,2}(?:\.\d+)?)\]")
-LIVE_STATUS_MAX_AGE_SECONDS = 24 * 60 * 60
+LIVE_STATUS_MAX_AGE_SECONDS = 3 * 60
 HOT_RELOAD_ENV = "CHESS_VIEWER_HOT_RELOAD_CHILD"
 HOT_RELOAD_FILES = (
     Path(__file__).resolve(),
@@ -898,6 +898,7 @@ INDEX_HTML = """<!doctype html>
     let previousMatches = [];
     let previousMatchesPage = 0;
     let activePgnPath = "";
+    let activeLivePgnPath = "";
     let activeMatchUrl = "";
     let suppressHashChange = false;
     const previousMatchesPageSize = 5;
@@ -935,8 +936,7 @@ INDEX_HTML = """<!doctype html>
       applyTheme(localStorage.getItem("livePgnTheme") || "light");
       analysisEnabled = localStorage.getItem("livePgnAnalysis") !== "off";
       updateAnalysisControls();
-      const parsedHash = parseMatchHash();
-      followLive = !(parsedHash.slug && parsedHash.gameIndex);
+      followLive = true;
       document.getElementById("follow-toggle").checked = followLive;
       syncEngineConfigExpanded();
       updateLogSideButtons();
@@ -1101,6 +1101,41 @@ INDEX_HTML = """<!doctype html>
       const gameIndex = activeGameHashIndex(data);
       setActiveMatchUrl(matchUrlFor(data.tournament_slug, gameIndex));
       setMatchHash(data.tournament_slug, gameIndex);
+    }
+
+    function latestLiveMatch() {
+      return previousMatches.find(match => match.kind === "live") || null;
+    }
+
+    function followLiveMatch(match) {
+      if (!match) return false;
+      selectedMatch = null;
+      followLive = true;
+      viewedPly = null;
+      replayThinkingKey = "";
+      requestedLiveGame = match.game_index || 1;
+      activeLivePgnPath = match.path || activeLivePgnPath;
+      localStorage.setItem("livePgnFollow", "on");
+      document.getElementById("follow-toggle").checked = true;
+      setMatchHash(match.tournament_slug || "");
+      setActiveMatchUrl(matchUrlFor(match.tournament_slug || ""));
+      renderPreviousMatches();
+      selectLiveMatch(match);
+      return true;
+    }
+
+    function maybeFollowLatestLiveForBareHash() {
+      const parsed = parseMatchHash();
+      if (!parsed.slug || parsed.gameIndex) return false;
+      const match = latestLiveMatch();
+      if (!match) return false;
+      const matchSlug = match.tournament_slug || "";
+      const currentLivePath = activeLivePgnPath || (followLive && !selectedMatch ? activePgnPath : "");
+      const slugChanged = matchSlug !== parsed.slug;
+      const pathChanged = !!(match.path && currentLivePath && match.path !== currentLivePath);
+      const currentCompleted = !!(latestGame && latestGame.completed);
+      if (!slugChanged && !pathChanged && !currentCompleted) return false;
+      return followLiveMatch(match);
     }
 
     function fallbackCopy(text) {
@@ -1517,7 +1552,9 @@ INDEX_HTML = """<!doctype html>
       const container = document.getElementById("stats");
       document.getElementById("stats-meta").textContent = `${data.games} games`;
       previousMatches = data.matches || [];
-      selectPreviousMatchFromHash();
+      if (!maybeFollowLatestLiveForBareHash()) {
+        selectPreviousMatchFromHash();
+      }
       renderPreviousMatches();
       if (data.error) {
         container.innerHTML = `<div class="empty err">${escapeHtml(data.error)}</div>`;
@@ -1558,7 +1595,7 @@ INDEX_HTML = """<!doctype html>
       }
       container.innerHTML = `<div class="match-list">${pageRows.map(match => {
         const index = previousMatches.indexOf(match);
-        const isRequestedLive = match.kind === "live" && requestedLiveGame !== null && Number(match.game_index || 1) === Number(requestedLiveGame);
+        const isRequestedLive = match.kind === "live" && requestedLiveGame !== null && Number(match.game_index || 1) === Number(requestedLiveGame) && (!activeLivePgnPath || !match.path || match.path === activeLivePgnPath);
         const isActive = matchKey(match) === activeKey || isRequestedLive || (match.kind === "live" && requestedLiveGame === null && !selectedMatch && followLive && match.is_board_game);
         const isLive = match.kind === "live";
         const clickable = true;
@@ -1591,17 +1628,7 @@ INDEX_HTML = """<!doctype html>
       const match = previousMatches[Number(index)];
       if (!match) return;
       if (match.kind === "live") {
-        selectedMatch = null;
-        followLive = true;
-        viewedPly = null;
-        replayThinkingKey = "";
-        requestedLiveGame = match.game_index || 1;
-        localStorage.setItem("livePgnFollow", "on");
-        document.getElementById("follow-toggle").checked = true;
-        setMatchHash(match.tournament_slug || "");
-        setActiveMatchUrl(matchUrlFor(match.tournament_slug || ""));
-        renderPreviousMatches();
-        selectLiveMatch(match);
+        followLiveMatch(match);
         return;
       }
       selectedMatch = match;
@@ -1617,11 +1644,12 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function selectLiveMatch(match) {
+      activeLivePgnPath = match.path || activeLivePgnPath || activePgnPath;
       try {
         const resp = await fetch("/api/live-selection", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: match.path || activePgnPath, game: match.game_index || 1 }),
+          body: JSON.stringify({ path: activeLivePgnPath || activePgnPath, game: match.game_index || 1 }),
         });
         if (!resp.ok) throw new Error("selection failed");
         setStatus(true, `Following game ${match.game_index || 1}`);
@@ -1636,7 +1664,7 @@ INDEX_HTML = """<!doctype html>
     function selectPreviousMatchFromHash() {
       const parsed = parseMatchHash();
       if (!parsed.slug || !previousMatches.length) return false;
-      if (!parsed.gameIndex && latestGame && latestGame.tournament_slug === parsed.slug && followLive) return false;
+      if (!parsed.gameIndex) return false;
       const match = previousMatches.find(item => {
         if (item.kind === "live") return false;
         if ((item.tournament_slug || "") !== parsed.slug) return false;
@@ -1752,11 +1780,14 @@ INDEX_HTML = """<!doctype html>
           params.set("path", selectedMatch.path || selectedMatch.file || "");
           params.set("game", String(selectedMatch.game_index || 1));
           params.set("logs", "1");
+        } else if (followLive && activeLivePgnPath) {
+          params.set("path", activeLivePgnPath);
         }
         if (!followLive && viewedPly !== null) params.set("ply", String(viewedPly));
         const resp = await fetch(`/api/game?${params}`, { cache: "no-store" });
         const data = await resp.json();
         setActivePgnPath(data.path || "");
+        if (followLive && data.path) activeLivePgnPath = data.path;
         if (data.error) {
           setStatus(false, "Error");
           document.getElementById("moves").innerHTML = `<div class="card-body"><div class="empty err">${escapeHtml(data.error)}</div></div>`;
@@ -1793,7 +1824,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function loadStats() {
-      const params = new URLSearchParams({ live: activePgnPath || "" });
+      const params = new URLSearchParams({ live: activeLivePgnPath || activePgnPath || "" });
       const resp = await fetch(`/api/stats?${params}`, { cache: "no-store" });
       renderStats(await resp.json());
     }
@@ -2267,6 +2298,16 @@ def tournament_slug(path: Path) -> str:
     return slug or path.name
 
 
+def live_slug_epoch(slug: str) -> float | None:
+    match = re.search(r"live-(\d{8})-(\d{6})", slug or "")
+    if not match:
+        return None
+    try:
+        return datetime.strptime("".join(match.groups()), "%Y%m%d%H%M%S").timestamp()
+    except ValueError:
+        return None
+
+
 def read_game(
     path: Path,
     analyzer: StockfishAnalyzer | None = None,
@@ -2418,6 +2459,12 @@ def live_status_path_for(pgn_path: Path) -> Path:
     return pgn_path.with_suffix(".status.json")
 
 
+def live_pgn_path_for_status(status_path: Path) -> Path:
+    if status_path.name.endswith(".status.json"):
+        return status_path.with_name(status_path.name[: -len(".status.json")] + ".pgn")
+    return status_path.with_suffix(".pgn")
+
+
 def live_selection_path_for(pgn_path: Path) -> Path:
     return pgn_path.with_suffix(".selection.json")
 
@@ -2435,12 +2482,29 @@ def write_live_selection(pgn_path: Path, game_index: int) -> dict:
     return {"ok": True, "path": str(path), "locked_game": game_index}
 
 
-def collect_live_matches(out_dir: Path, live_pgn_path: Path | None) -> list[dict]:
-    if live_pgn_path is None:
-        return []
-    status_path = live_status_path_for(live_pgn_path)
-    if not status_path.exists():
-        return []
+def live_pgn_has_in_progress_clock(pgn_path: Path) -> bool:
+    try:
+        with pgn_path.open("r", encoding="utf-8", errors="replace") as handle:
+            game = chess.pgn.read_game(handle)
+    except Exception:
+        return False
+    if game is None:
+        return False
+    if game.headers.get("Result", "*") != "*":
+        return False
+    running_side = game.headers.get("ClockRunningSide", "")
+    if running_side not in {"White", "Black"}:
+        return True
+    clock_key = "WhiteClockMs" if running_side == "White" else "BlackClockMs"
+    try:
+        remaining_ms = int(game.headers.get(clock_key, "0"))
+        updated_at_ms = int(game.headers.get("ClockUpdatedAtEpochMs", "0"))
+    except ValueError:
+        return True
+    return updated_at_ms <= 0 or updated_at_ms + remaining_ms > int(time.time() * 1000)
+
+
+def live_status_matches(out_dir: Path, status_path: Path, fallback_pgn_path: Path | None = None) -> list[dict]:
     try:
         mtime = status_path.stat().st_mtime
         if time.time() - mtime > LIVE_STATUS_MAX_AGE_SECONDS:
@@ -2449,10 +2513,19 @@ def collect_live_matches(out_dir: Path, live_pgn_path: Path | None) -> list[dict
     except Exception:
         return []
 
-    output_pgn = Path(payload.get("output_pgn") or live_pgn_path)
+    output_value = payload.get("output_pgn")
+    output_pgn = Path(output_value) if output_value else fallback_pgn_path
+    if output_pgn is None:
+        return []
     if not output_pgn.is_absolute():
-        output_pgn = live_pgn_path
+        output_pgn = fallback_pgn_path if fallback_pgn_path is not None else live_pgn_path_for_status(status_path)
+    if not output_pgn.exists():
+        return []
+    if not live_pgn_has_in_progress_clock(output_pgn):
+        return []
+
     slug = tournament_slug(output_pgn)
+    started_epoch = live_slug_epoch(slug)
     updated_at = payload.get("generated_at") or time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
     updated_epoch = float(payload.get("generated_at_epoch") or mtime)
     locked_game = payload.get("locked_game")
@@ -2468,6 +2541,7 @@ def collect_live_matches(out_dir: Path, live_pgn_path: Path | None) -> list[dict
                 "date": "In progress",
                 "updated_at": updated_at,
                 "updated_at_epoch": updated_epoch,
+                "live_started_epoch": started_epoch or updated_epoch,
                 "white": game.get("white") or "White",
                 "black": game.get("black") or "Black",
                 "result": "*",
@@ -2482,6 +2556,32 @@ def collect_live_matches(out_dir: Path, live_pgn_path: Path | None) -> list[dict
                 "is_board_game": is_board_game,
             }
         )
+    return matches
+
+
+def collect_live_matches(out_dir: Path, live_pgn_path: Path | None) -> list[dict]:
+    status_paths: list[Path] = []
+    if live_pgn_path is not None:
+        status_paths.append(live_status_path_for(live_pgn_path))
+    live_dir = out_dir / "live"
+    if live_dir.exists():
+        status_paths.extend(sorted(live_dir.glob("*.status.json"), key=lambda path: path.stat().st_mtime, reverse=True))
+
+    matches: list[dict] = []
+    seen_statuses: set[Path] = set()
+    seen_games: set[tuple[str, int]] = set()
+    for status_path in status_paths:
+        resolved_status = status_path.resolve()
+        if resolved_status in seen_statuses:
+            continue
+        seen_statuses.add(resolved_status)
+        fallback = live_pgn_path if live_pgn_path is not None and live_status_path_for(live_pgn_path).resolve() == resolved_status else live_pgn_path_for_status(status_path)
+        for match in live_status_matches(out_dir, status_path, fallback):
+            key = (match.get("path") or "", int(match.get("game_index") or 1))
+            if key in seen_games:
+                continue
+            seen_games.add(key)
+            matches.append(match)
     return matches
 
 
@@ -2558,9 +2658,19 @@ def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None, l
             continue
 
     engines = sorted(stats.values(), key=lambda item: (-item["points"], -item["wins"], item["engine"].lower()))
-    matches.sort(key=lambda item: (item["updated_at_epoch"], item["date"], item["file"], item["round"]), reverse=True)
+    matches.sort(
+        key=lambda item: (
+            item.get("live_started_epoch", item["updated_at_epoch"]),
+            item["updated_at_epoch"],
+            item["date"],
+            item["file"],
+            item["round"],
+        ),
+        reverse=True,
+    )
     for match in matches:
         match.pop("updated_at_epoch", None)
+        match.pop("live_started_epoch", None)
     for entry in engines:
         entry["points"] = int(entry["points"]) if entry["points"].is_integer() else entry["points"]
     return {

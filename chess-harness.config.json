@@ -2,7 +2,14 @@
   "codex": {
     "model": "gpt-5.3-codex",
     "effort": "high",
-    "preflightTimeoutSeconds": 45
+    "preflightTimeoutSeconds": 45,
+    "moveTimeoutSeconds": 45,
+    "moveTimeoutClockDivisor": 4,
+    "retryMoveTimeoutSeconds": 8,
+    "retryEffort": "low",
+    "criticalMoveTimeoutSeconds": 3,
+    "leanContextBelowMs": 301000,
+    "criticalContextBelowMs": 60000
   },
   "fastChess": {
     "games": 10,

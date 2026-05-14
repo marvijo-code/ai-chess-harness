@@ -1,44 +1,36 @@
 {
-  "generated_at": "2026-05-12 15:08:12",
-  "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144907.pgn",
-  "source_stdout": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-144907-launch.out.log",
+  "generated_at": "2026-05-13 12:27:31",
+  "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-163508.pgn",
+  "source_stdout": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260512-163508-launch.out.log",
   "completed_games": 2,
-  "scheduled_games": 100,
+  "scheduled_games": 10,
   "learner_points": 0.0,
   "learner_score_percent": 0.0,
   "reason_counts": {
-    "time": 2
+    "illegal move": 1,
+    "white's connection stalls": 1
   },
-  "illegal_losses": [],
-  "illegal_wins": [],
-  "zero_ply_engine_failures": [],
-  "mate_losses": [],
-  "mate_wins": [],
-  "time_losses": [
+  "illegal_losses": [
     {
       "game": 1,
       "white": "Codex-chess",
       "black": "Codex-chess-learner",
       "result": "1-0",
-      "plies": 21,
-      "reason": "Black loses on time",
+      "plies": 17,
+      "reason": "Black makes an illegal move",
       "opening": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O"
-    },
-    {
-      "game": 2,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 18,
-      "reason": "White loses on time",
-      "opening": "1. e4 c5 2. Nf3 Nc6 3. Bb5 e6 4. O-O Nge7 5. d4 cxd4"
     }
   ],
+  "illegal_wins": [],
+  "zero_ply_engine_failures": [],
+  "mate_losses": [],
+  "mate_wins": [],
+  "time_losses": [],
   "time_wins": [],
   "repetition_draws": 0,
   "repeated_opening_lines": [
     {
-      "line": "1. e4 c5 2. Nf3 Nc6 3. Bb5 e6 4. O-O Nge7 5. d4 cxd4",
+      "line": "1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 Nc6",
       "games": 1,
       "learner_score": 0.0,
       "wins": 0,

@@ -1,11 +1,12 @@
 # Live Match Lessons
 
-Generated: 2026-05-12 15:08:12
-Completed games: 2 / 100
+Generated: 2026-05-13 12:27:31
+Completed games: 2 / 10
 Learner score: 0.0 (0.0%)
 
 ## Result Shape
-- time: 2
+- illegal move: 1
+- white's connection stalls: 1
 
 ## Durable Move Rules
 - Copy `uci` exactly from `legal_moves`; never output `0000` while legal moves exist.
@@ -15,11 +16,9 @@ Learner score: 0.0 (0.0%)
 - In winning endings, convert material with forcing moves and pawn promotion plans; do not shuffle the king until the clock collapses.
 
 ## Repeated Lines To Avoid
-- 1 games, score 0.0: 1. e4 c5 2. Nf3 Nc6 3. Bb5 e6 4. O-O Nge7 5. d4 cxd4
+- 1 games, score 0.0: 1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 Nc6
 - 1 games, score 0.0: 1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O
 
-## Learner Time Losses
-- Time losses are move-selection failures. Improve time management, but still choose a move intentionally from the position.
-- Prefer a forcing capture, check, passed-pawn push, king move toward passed pawns, or simple recapture when that is the best evaluated plan.
-- Game 1 as Black: Black loses on time after 21 plies; 1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O
-- Game 2 as White: White loses on time after 18 plies; 1. e4 c5 2. Nf3 Nc6 3. Bb5 e6 4. O-O Nge7 5. d4 cxd4
+## Learner Illegal-Move Losses
+- A `0000` illegal move after real plies usually means the model timed out or returned invalid JSON three consecutive times. Treat it as a clock/format failure, not a chess tactic.
+- Game 1 as Black: Black makes an illegal move after 17 plies; 1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O
