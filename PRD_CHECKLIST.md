@@ -96,3 +96,7 @@
 - [x] Write FastChess live board PGNs as per-game files with game-start timestamps while preserving run-level live selection/status control.
 - [x] Show a bold current-game header at the top of the viewer page.
 - [x] Validate per-game live filenames, live URL slug accuracy, and current-game header behavior.
+- [x] Keep arrow-key replay on the same current live-game PGN and `--live-game-N` hash after Follow Live is disabled.
+- [x] Validate left/right navigation no longer falls back to the viewer startup PGN, an unrelated archived game, or archived `--game-N` URL mode.
+- [x] Prevent learner `MEMORY.md` autolearn watcher cycles from creating timestamp-only diffs.
+- [x] Validate unchanged autolearn memory content preserves the existing `Last updated` line.

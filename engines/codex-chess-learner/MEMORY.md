@@ -2,9 +2,9 @@
 
 <!-- learner-autolearn:start -->
 ## Autolearn Summary
-- Last updated: 2026-05-14 15:50:09
-- Current match score: 7.0 / 16 (43.75%).
-- Result reasons: mate=9, threefold repetition=4, time=3.
+- Last updated: 2026-05-14 17:06:40
+- Current match score: 3.0 / 8 (37.5%).
+- Result reasons: mate=8.
 - Apply `knowledgebase/live-match-lessons.md` before choosing moves.
 - Apply model-discovered concepts from `knowledgebase/strategy-lessons.md` as generic value adjustments, not as memorized move answers.
 - Avoid threefold repetition loops unless drawing is the only practical outcome.

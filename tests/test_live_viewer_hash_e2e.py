@@ -34,16 +34,28 @@ def wait_for_http(url: str, timeout: float = 10.0) -> None:
     raise AssertionError(f"viewer did not start at {url}: {last_error}")
 
 
-def write_pgn(path: Path, slug: str, white: str, black: str, result: str, body: str, live: bool) -> None:
+def write_pgn(
+    path: Path,
+    slug: str,
+    white: str,
+    black: str,
+    result: str,
+    body: str,
+    live: bool,
+    round_name: str = "1",
+    total_games: int | None = None,
+) -> None:
     headers = [
         f'[Event "{slug}"]',
         '[Site "C:/dev/chess-harness-codex"]',
         '[Date "2026.05.12"]',
-        '[Round "1"]',
+        f'[Round "{round_name}"]',
         f'[White "{white}"]',
         f'[Black "{black}"]',
         f'[Result "{result}"]',
     ]
+    if total_games is not None:
+        headers.append(f'[TotalGames "{total_games}"]')
     if live:
         headers.extend(
             [
@@ -77,34 +89,38 @@ class LiveViewerHashE2ETests(unittest.TestCase):
             stale_pgn = live_dir / f"{stale_slug}-live.pgn"
             active_pgn = live_dir / f"{active_slug}-live.pgn"
             write_pgn(stale_pgn, stale_slug, "StaleWhite", "StaleBlack", "0-1", "1. e4 e5 0-1", live=False)
-            write_pgn(active_pgn, active_slug, "ActiveWhite", "ActiveBlack", "*", "1. d4 d5 *", live=True)
+            write_pgn(active_pgn, active_slug, "ActiveWhite", "ActiveBlack", "*", "1. d4 d5 *", live=True, round_name="7", total_games=7)
+            live_games = [
+                {
+                    "game": game_no,
+                    "total": 7,
+                    "white": f"OtherWhite{game_no}",
+                    "black": f"OtherBlack{game_no}",
+                    "result": "*",
+                    "reason": "",
+                    "finished": False,
+                }
+                for game_no in range(1, 7)
+            ]
+            live_games.append(
+                {
+                    "game": 7,
+                    "total": 7,
+                    "white": "ActiveWhite",
+                    "black": "ActiveBlack",
+                    "result": "*",
+                    "reason": "",
+                    "finished": False,
+                }
+            )
             active_pgn.with_suffix(".status.json").write_text(
                 json.dumps(
                     {
                         "generated_at": "2026-05-12 18:30:00",
                         "generated_at_epoch": time.time(),
                         "output_pgn": str(active_pgn),
-                        "locked_game": 1,
-                        "games": [
-                            {
-                                "game": 1,
-                                "total": 2,
-                                "white": "ActiveWhite",
-                                "black": "ActiveBlack",
-                                "result": "*",
-                                "reason": "",
-                                "finished": False,
-                            },
-                            {
-                                "game": 2,
-                                "total": 2,
-                                "white": "SecondWhite",
-                                "black": "SecondBlack",
-                                "result": "*",
-                                "reason": "",
-                                "finished": False,
-                            }
-                        ],
+                        "locked_game": 7,
+                        "games": live_games,
                     }
                 ),
                 encoding="utf-8",
@@ -135,9 +151,9 @@ class LiveViewerHashE2ETests(unittest.TestCase):
                 with sync_playwright() as playwright:
                     browser = playwright.chromium.launch(headless=True)
                     page = browser.new_page(viewport={"width": 1280, "height": 900})
-                    page.goto(f"http://127.0.0.1:{port}/#{stale_slug}", wait_until="domcontentloaded")
+                    page.goto(f"http://127.0.0.1:{port}/#{active_slug}--live-game-7", wait_until="domcontentloaded")
                     page.wait_for_function(
-                        "slug => window.location.hash === '#' + slug + '--live-game-1'",
+                        "slug => window.location.hash === '#' + slug + '--live-game-7'",
                         arg=active_slug,
                         timeout=10000,
                     )
@@ -147,13 +163,28 @@ class LiveViewerHashE2ETests(unittest.TestCase):
                         timeout=10000,
                     )
                     self.assertIn(active_slug, page.locator("#tournament-chip").inner_text())
-                    self.assertEqual(page.locator("#current-game-title").inner_text(), "Game 1: ActiveWhite vs ActiveBlack")
+                    self.assertEqual(page.locator("#current-game-title").inner_text(), "Game 7 / 7: ActiveWhite vs ActiveBlack")
                     self.assertIn("White: ActiveWhite", page.locator("#white-player").inner_text())
                     self.assertIn("Black: ActiveBlack", page.locator("#black-player").inner_text())
                     self.assertEqual(page.locator(".sq").count(), 64)
-                    page.locator(".match-row.in-progress", has_text="SecondWhite").locator(".match-select").click()
+                    page.keyboard.press("ArrowLeft")
                     page.wait_for_function(
-                        "slug => window.location.hash === '#' + slug + '--live-game-2'",
+                        "slug => window.location.hash === '#' + slug + '--live-game-7'",
+                        arg=active_slug,
+                        timeout=10000,
+                    )
+                    self.assertFalse(page.locator("#follow-toggle").is_checked())
+                    self.assertNotIn("--game-7", page.evaluate("window.location.hash"))
+                    self.assertIn(active_slug, page.locator("#tournament-chip").inner_text())
+                    self.assertIn(active_slug, page.locator("#pgn-path").inner_text())
+                    self.assertEqual(page.locator("#current-game-title").inner_text(), "Game 7 / 7: ActiveWhite vs ActiveBlack")
+                    self.assertIn("White: ActiveWhite", page.locator("#white-player").inner_text())
+                    page.wait_for_timeout(4000)
+                    self.assertFalse(page.locator("#follow-toggle").is_checked())
+                    self.assertEqual(page.evaluate("window.location.hash"), f"#{active_slug}--live-game-7")
+                    page.locator(".match-row.in-progress", has_text="OtherWhite6").locator(".match-select").click()
+                    page.wait_for_function(
+                        "slug => window.location.hash === '#' + slug + '--live-game-6'",
                         arg=active_slug,
                         timeout=10000,
                     )

@@ -6,11 +6,14 @@ import chess
 import chess.pgn
 
 from tools.update_learner_knowledgebase import (
+    MEMORY_END,
+    MEMORY_START,
     build_strategy_lesson_summary,
     preserve_generated_at_if_unchanged,
     preserve_strategy_generated_at_if_no_new_evidence,
     read_games,
     synthesize_strategy_concepts,
+    update_memory,
 )
 
 
@@ -127,6 +130,45 @@ class StrategyLessonTests(unittest.TestCase):
         self.assertEqual(stable["source_pgn"], "old.pgn")
         self.assertEqual(stable["source_stdout"], "old.log")
         self.assertEqual(stable["concept_synthesis"], previous["concept_synthesis"])
+
+    def test_memory_update_preserves_last_updated_when_autolearn_content_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "MEMORY.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "# Codex-chess-learner Memory",
+                        "",
+                        MEMORY_START,
+                        "## Autolearn Summary",
+                        "- Last updated: old",
+                        "- Current match score: 1.0 / 2 (50.0%).",
+                        "- Result reasons: mate=2.",
+                        "- Apply `knowledgebase/live-match-lessons.md` before choosing moves.",
+                        "- Apply model-discovered concepts from `knowledgebase/strategy-lessons.md` as generic value adjustments, not as memorized move answers.",
+                        "- Avoid threefold repetition loops unless drawing is the only practical outcome.",
+                        "- Manage the clock while still choosing a move intentionally; there is no fallback or client-picked move.",
+                        "- Never return a move outside `legal_moves`; never return `0000` while legal moves exist.",
+                        MEMORY_END,
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            before = path.read_text(encoding="utf-8")
+
+            update_memory(
+                path,
+                {
+                    "generated_at": "new",
+                    "learner_points": 1.0,
+                    "completed_games": 2,
+                    "learner_score_percent": 50.0,
+                    "reason_counts": {"mate": 2},
+                },
+            )
+
+            self.assertEqual(path.read_text(encoding="utf-8"), before)
 
 
 if __name__ == "__main__":

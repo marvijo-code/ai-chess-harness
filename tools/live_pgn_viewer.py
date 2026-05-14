@@ -1102,9 +1102,7 @@ INDEX_HTML = """<!doctype html>
       return null;
     }
 
-    function liveGameHashIndex(data) {
-      if (!followLive) return null;
-      if (requestedLiveGame !== null) return requestedLiveGame;
+    function liveMatchHashIndexForData(data) {
       const slug = data && data.tournament_slug ? data.tournament_slug : "";
       const path = data && data.path ? data.path : activeLivePgnPath;
       const boardMatch = previousMatches.find(match => {
@@ -1114,6 +1112,22 @@ INDEX_HTML = """<!doctype html>
       });
       if (boardMatch) return boardMatch.game_index || 1;
       return null;
+    }
+
+    function liveGameHashIndex(data) {
+      if (!followLive) return null;
+      if (requestedLiveGame !== null) return requestedLiveGame;
+      return liveMatchHashIndexForData(data);
+    }
+
+    function replayLiveGameHashIndex(data) {
+      if (followLive || selectedMatch || !data || !data.has_game) return null;
+      const parsedHash = parseMatchHash();
+      if (parsedHash.liveGameIndex && (!parsedHash.slug || parsedHash.slug === data.tournament_slug)) {
+        return parsedHash.liveGameIndex;
+      }
+      if (requestedLiveGame !== null) return requestedLiveGame;
+      return liveMatchHashIndexForData(data);
     }
 
     function syncMatchHash(data) {
@@ -1130,6 +1144,12 @@ INDEX_HTML = """<!doctype html>
         const liveIndex = liveGameHashIndex(data);
         setActiveMatchUrl(matchUrlFor(data.tournament_slug, liveIndex, liveIndex ? "live" : "archive"));
         setMatchHash(data.tournament_slug, liveIndex, liveIndex ? "live" : "archive");
+        return;
+      }
+      const replayLiveIndex = replayLiveGameHashIndex(data);
+      if (replayLiveIndex) {
+        setActiveMatchUrl(matchUrlFor(data.tournament_slug, replayLiveIndex, "live"));
+        setMatchHash(data.tournament_slug, replayLiveIndex, "live");
         return;
       }
       const gameIndex = archiveGameHashIndex(data);
@@ -1556,6 +1576,12 @@ INDEX_HTML = """<!doctype html>
       refresh(true);
     }
 
+    function replayLivePgnPath() {
+      if (selectedMatch || followLive) return "";
+      if (latestGame && latestGame.path) return latestGame.path;
+      return activeLivePgnPath || activePgnPath || "";
+    }
+
     function renderAnalysis(analysis) {
       const container = document.getElementById("analysis");
       const meta = document.getElementById("analysis-meta");
@@ -1731,6 +1757,19 @@ INDEX_HTML = """<!doctype html>
           return Number(item.game_index || 1) === parsed.liveGameIndex;
         });
         if (!liveMatch) return false;
+        if (!followLive && !selectedMatch) {
+          const currentPath = (latestGame && latestGame.path) || activeLivePgnPath || "";
+          const sameLiveGame = requestedLiveGame !== null
+            && Number(requestedLiveGame) === Number(liveMatch.game_index || 1)
+            && (!currentPath || !liveMatch.path || currentPath === liveMatch.path);
+          if (sameLiveGame) {
+            requestedLiveGame = liveMatch.game_index || requestedLiveGame;
+            activeLivePgnPath = liveMatch.path || activeLivePgnPath;
+            setMatchHash(liveMatch.tournament_slug || "", requestedLiveGame, "live");
+            setActiveMatchUrl(matchUrlFor(liveMatch.tournament_slug || "", requestedLiveGame, "live"));
+            return true;
+          }
+        }
         const alreadyFollowing = followLive
           && !selectedMatch
           && requestedLiveGame !== null
@@ -1855,6 +1894,9 @@ INDEX_HTML = """<!doctype html>
           params.set("path", selectedMatch.path || selectedMatch.file || "");
           params.set("game", String(selectedMatch.game_index || 1));
           params.set("logs", "1");
+        } else if (!followLive) {
+          const replayPath = replayLivePgnPath();
+          if (replayPath) params.set("path", replayPath);
         } else if (followLive && activeLivePgnPath) {
           params.set("path", activeLivePgnPath);
         }

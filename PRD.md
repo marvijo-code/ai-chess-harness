@@ -63,6 +63,8 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 54. The active in-progress board game must have a game-specific live URL hash, using `#slug--live-game-N`, so concurrent FastChess games are distinguishable in the address bar while archived replay links keep the existing `#slug--game-N` form.
 55. FastChess live mirror board artifacts must be written as one live PGN file per board game, with the slug timestamp derived from that game's own start time instead of the run start time, while a stable run-level status/control file keeps live selection working.
 56. The board page must show a bold current-game header near the top of the page, naming the active game number and the engines playing it.
+57. Arrow-key and toolbar move navigation from an active `#slug--live-game-N` game must keep replaying that same current-game PGN after `Follow live` is disabled, and the URL/copy target must remain a `--live-game-N` hash instead of switching to archived `--game-N`; it must not fall back to the viewer startup PGN or any archived/random game.
+58. Learner `MEMORY.md` autolearn updates should only rewrite the block when score, reasons, or rule content changes; watcher cycles must not dirty the file with only a newer `Last updated` value.
 
 ## Validation Requirements
 
@@ -109,9 +111,11 @@ Keep the local FastChess viewer useful during live play and replay without leaki
    - Clicking or following an in-progress match updates the browser hash and active copy URL to the game-specific live hash `#slug--live-game-N`.
    - Live mirrored board PGNs are per-game files whose URL slug timestamp matches the selected game's start timestamp rather than the overall run timestamp.
    - A bold current-game header at the top of the page shows the game number and engines currently playing.
+   - Pressing left or right from an active live game disables Follow Live but keeps the current-game PGN, `--live-game-N` hash, tournament slug, and engine labels.
    - UCI output sanitization proves non-ASCII model comments do not raise and do not block `bestmove`.
    - Codex move-time budgeting is covered by focused tests for the initial, mid-clock, and critical-clock budgets.
    - Timeout/invalid retry handling is covered by focused tests proving retries use an urgent context-free prompt and bounded retry budget while preserving the 5+0 FastChess time control.
    - No horizontal overflow at desktop width.
 11. Focused engine tests verify non-urgent move requests require a non-empty comment while urgent retries can still use an empty comment.
 12. Focused autolearn tests verify unchanged lesson summaries preserve their previous generated timestamp.
+13. Focused autolearn tests verify unchanged `MEMORY.md` autolearn content does not rewrite only the `Last updated` value.

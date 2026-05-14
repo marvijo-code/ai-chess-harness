@@ -1068,6 +1068,10 @@ def default_thinking_md(pgn: Path) -> Path:
     return pgn.with_name(f"{pgn.stem}-thinking.md")
 
 
+def normalize_memory_autolearn_block(block: str) -> str:
+    return re.sub(r"^- Last updated: .*$", "- Last updated: <ignored>", block, flags=re.M)
+
+
 def update_memory(memory_path: Path, summary: dict) -> None:
     memory_path.parent.mkdir(parents=True, exist_ok=True)
     current = memory_path.read_text(encoding="utf-8", errors="replace") if memory_path.exists() else "# Codex-chess-learner Memory\n"
@@ -1087,6 +1091,13 @@ def update_memory(memory_path: Path, summary: dict) -> None:
         ]
     )
     if MEMORY_START in current and MEMORY_END in current:
+        existing_match = re.search(
+            re.escape(MEMORY_START) + r".*?" + re.escape(MEMORY_END),
+            current,
+            flags=re.S,
+        )
+        if existing_match and normalize_memory_autolearn_block(existing_match.group(0)) == normalize_memory_autolearn_block(block):
+            return
         updated = re.sub(
             re.escape(MEMORY_START) + r".*?" + re.escape(MEMORY_END),
             block,
