@@ -1,11 +1,12 @@
 # Live Match Lessons
 
-Generated: 2026-05-14 17:19:35
-Completed games: 9 / 100
-Learner score: 3.5 (38.89%)
+Generated: 2026-05-14 17:41:09
+Completed games: 11 / 100
+Learner score: 4.5 (40.91%)
 
 ## Result Shape
 - mate: 9
+- threefold repetition: 2
 
 ## Durable Move Rules
 - Copy `uci` exactly from `legal_moves`; never output `0000` while legal moves exist.
@@ -18,8 +19,9 @@ Learner score: 3.5 (38.89%)
 - 2 games, score 1.0: 1. e4 c5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 b5 5. O-O Bb7
 - 2 games, score 0.5: 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7
 - 2 games, score 0.5: 1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O
+- 2 games, score 1.0: 1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. d3 O-O
 - 1 games, score 1.0: 1. e4 c5 2. Nf3 Nc6 3. Bb5 Nf6 4. O-O e5 5. Nc3 Be7
-- 1 games, score 0.5: 1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. d3 O-O
+- 1 games, score 0.5: 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O b5
 - 1 games, score 0.0: 1. e4 e5 2. Nf3 Nc6 3. d4 exd4 4. Nxd4 Nf6 5. Nc3 Bb4
 
 ## Learner Mate Losses

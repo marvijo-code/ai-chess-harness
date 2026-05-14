@@ -1,7 +1,7 @@
 {
   "codex": {
     "model": "gpt-5.3-codex",
-    "effort": "medium",
+    "effort": "high",
     "preflightTimeoutSeconds": 45,
     "moveTimeoutSeconds": 45,
     "moveTimeoutClockDivisor": 4,

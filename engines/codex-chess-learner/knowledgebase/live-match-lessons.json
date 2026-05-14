@@ -1,13 +1,14 @@
 {
-  "generated_at": "2026-05-14 17:19:35",
+  "generated_at": "2026-05-14 17:41:09",
   "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn",
   "source_stdout": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634-launch.out.log",
-  "completed_games": 9,
+  "completed_games": 11,
   "scheduled_games": 100,
-  "learner_points": 3.5,
-  "learner_score_percent": 38.89,
+  "learner_points": 4.5,
+  "learner_score_percent": 40.91,
   "reason_counts": {
-    "mate": 9
+    "mate": 9,
+    "threefold repetition": 2
   },
   "illegal_losses": [],
   "illegal_wins": [],
@@ -54,7 +55,7 @@
   ],
   "time_losses": [],
   "time_wins": [],
-  "repetition_draws": 0,
+  "repetition_draws": 2,
   "repeated_opening_lines": [
     {
       "line": "1. e4 c5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 b5 5. O-O Bb7",
@@ -81,6 +82,14 @@
       "losses": 1
     },
     {
+      "line": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. d3 O-O",
+      "games": 2,
+      "learner_score": 1.0,
+      "wins": 0,
+      "draws": 2,
+      "losses": 0
+    },
+    {
       "line": "1. e4 c5 2. Nf3 Nc6 3. Bb5 Nf6 4. O-O e5 5. Nc3 Be7",
       "games": 1,
       "learner_score": 1.0,
@@ -89,7 +98,7 @@
       "losses": 0
     },
     {
-      "line": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. d3 O-O",
+      "line": "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O b5",
       "games": 1,
       "learner_score": 0.5,
       "wins": 0,

@@ -98,5 +98,13 @@
 - [x] Validate per-game live filenames, live URL slug accuracy, and current-game header behavior.
 - [x] Keep arrow-key replay on the same current live-game PGN and `--live-game-N` hash after Follow Live is disabled.
 - [x] Validate left/right navigation no longer falls back to the viewer startup PGN, an unrelated archived game, or archived `--game-N` URL mode.
+- [x] Fix archived same-PGN game switching while Follow Live is off so the board navigates the newly selected game, not the previously displayed game.
+- [x] Validate archived same-PGN switching with focused browser E2E coverage.
+- [x] Add deterministic learner material-safety audit context for legal moves that hang high-value pieces or allow large immediate material swings.
+- [x] Validate the material-safety audit flags the 17.Qxd4 queen-for-bishop sequence from the live game.
+- [ ] Add a separate `Codex-chess-zero` UCI engine folder, command wrapper, memory, and knowledgebase.
+- [ ] Add zero-mode prompt/time-budget behavior so Zero plays from first principles with lean context and short move timeouts.
+- [ ] Make FastChess and autolearn wrappers target Zero without mixing learner memory.
+- [ ] Validate Zero UCI startup, zero-mode config, and targetable autolearn behavior.
 - [x] Prevent learner `MEMORY.md` autolearn watcher cycles from creating timestamp-only diffs.
 - [x] Validate unchanged autolearn memory content preserves the existing `Last updated` line.

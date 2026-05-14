@@ -64,7 +64,11 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 55. FastChess live mirror board artifacts must be written as one live PGN file per board game, with the slug timestamp derived from that game's own start time instead of the run start time, while a stable run-level status/control file keeps live selection working.
 56. The board page must show a bold current-game header near the top of the page, naming the active game number and the engines playing it.
 57. Arrow-key and toolbar move navigation from an active `#slug--live-game-N` game must keep replaying that same current-game PGN after `Follow live` is disabled, and the URL/copy target must remain a `--live-game-N` hash instead of switching to archived `--game-N`; it must not fall back to the viewer startup PGN or any archived/random game.
-58. Learner `MEMORY.md` autolearn updates should only rewrite the block when score, reasons, or rule content changes; watcher cycles must not dirty the file with only a newer `Last updated` value.
+58. When Follow Live is off, selecting another archived game must update the board, move navigation, logs, and analysis to that selected game, even when the previous and selected games are different game indexes inside the same PGN file.
+59. Learner prompts must include a deterministic material-safety audit from the current FEN and legal moves, warning about legal moves that put a queen, rook, or other moved piece on an immediately capturable square or allow a large one-ply material swing. This audit is advisory context only; the model still chooses from `legal_moves`, and Stockfish analysis remains viewer-only.
+60. `Codex-chess-zero` must exist as a separate UCI engine based on the shared Codex chess implementation but with its own `engines\codex-chess-zero` memory, knowledgebase, and wrapper command. Zero should learn from post-game feedback in its own files, reason from the current FEN/legal moves/material safety rather than inherited learner strategy, and use a fast prompt profile with lean context and short move timeouts.
+61. Learner and Zero post-game feedback should share the same autolearn code path through a target engine/name/context option, so the watcher can update either engine after games without mixing their memories.
+62. Learner `MEMORY.md` autolearn updates should only rewrite the block when score, reasons, or rule content changes; watcher cycles must not dirty the file with only a newer `Last updated` value.
 
 ## Validation Requirements
 
@@ -112,6 +116,9 @@ Keep the local FastChess viewer useful during live play and replay without leaki
    - Live mirrored board PGNs are per-game files whose URL slug timestamp matches the selected game's start timestamp rather than the overall run timestamp.
    - A bold current-game header at the top of the page shows the game number and engines currently playing.
    - Pressing left or right from an active live game disables Follow Live but keeps the current-game PGN, `--live-game-N` hash, tournament slug, and engine labels.
+   - Selecting an older archived game while Follow Live is off moves the board and subsequent arrow navigation to that game instead of continuing to navigate the previously displayed game.
+   - The learner material-safety audit flags queen-for-minor and rook/queen hanging moves such as `Qxd4` when an immediate legal reply can capture the moved queen or cause a large material swing.
+   - `Codex-chess-zero` starts as a separate UCI engine name with its own context path and fast zero-mode prompt settings, and the FastChess/autolearn wrappers can target Zero without writing to learner memory.
    - UCI output sanitization proves non-ASCII model comments do not raise and do not block `bestmove`.
    - Codex move-time budgeting is covered by focused tests for the initial, mid-clock, and critical-clock budgets.
    - Timeout/invalid retry handling is covered by focused tests proving retries use an urgent context-free prompt and bounded retry budget while preserving the 5+0 FastChess time control.

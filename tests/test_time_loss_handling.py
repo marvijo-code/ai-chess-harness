@@ -125,6 +125,23 @@ class TimeLossHandlingTests(unittest.TestCase):
         self.assertLessEqual(len(lean_context["knowledgebase"]), len(full_context["knowledgebase"]))
         self.assertLessEqual(len(lean_context["skills"]), len(full_context["skills"]))
 
+    def test_codex_engine_material_safety_flags_live_qxd4_blunder(self):
+        module = load_module("codex_chess_uci_material_safety_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
+        board = chess.Board("r4rk1/3p1ppp/p1p2q2/8/2pb4/8/PPP2PPP/R2Q1RK1 w - - 0 17")
+        legal_moves = [move.uci() for move in board.legal_moves]
+
+        summary = module.material_safety_summary(board, legal_moves)
+        qxd4 = next(item for item in summary["risky_moves"] if item["uci"] == "d1d4")
+
+        self.assertEqual(qxd4["san"], "Qxd4")
+        self.assertEqual(qxd4["moved_piece"], "queen")
+        self.assertEqual(qxd4["captured_piece"], "bishop")
+        self.assertEqual(qxd4["reply_uci"], "f6d4")
+        self.assertEqual(qxd4["reply_san"], "Qxd4")
+        self.assertTrue(qxd4["captures_moved_piece"])
+        self.assertGreaterEqual(qxd4["material_swing_cp"], 900)
+        self.assertIn("capturing the moved queen", qxd4["warning"])
+
     def test_codex_engine_does_not_start_model_turn_when_clock_is_expired(self):
         module = load_module("codex_chess_uci_timeout_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
         client = module.CodexAppServer("gpt-test", "low")

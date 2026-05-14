@@ -79,7 +79,97 @@ def write_pgn(
     path.write_text("\n".join(headers + ["", body, ""]), encoding="utf-8")
 
 
+def completed_game_text(slug: str, round_name: str, white: str, black: str, result: str, body: str) -> str:
+    headers = [
+        f'[Event "{slug}"]',
+        '[Site "C:/dev/chess-harness-codex"]',
+        '[Date "2026.05.12"]',
+        f'[Round "{round_name}"]',
+        f'[White "{white}"]',
+        f'[Black "{black}"]',
+        f'[Result "{result}"]',
+        '[TotalGames "2"]',
+        '[Termination "normal"]',
+    ]
+    return "\n".join(headers + ["", body, ""])
+
+
 class LiveViewerHashE2ETests(unittest.TestCase):
+    def test_selecting_older_archive_game_after_replay_moves_board_to_that_game(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            slug = "codex-vs-codex-learner-standard5-20260514-archive"
+            archive_pgn = out_dir / "fastchess" / f"{slug}.pgn"
+            archive_pgn.parent.mkdir(parents=True, exist_ok=True)
+            archive_pgn.write_text(
+                "\n".join(
+                    [
+                        completed_game_text(slug, "1", "OldWhite", "OldBlack", "1-0", "1. e4 e5 1-0"),
+                        completed_game_text(slug, "2", "NewWhite", "NewBlack", "0-1", "1. d4 d5 0-1"),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            port = free_port()
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(ROOT / "tools" / "live_pgn_viewer.py"),
+                    "--pgn",
+                    str(archive_pgn),
+                    "--stats-dir",
+                    str(out_dir),
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(port),
+                    "--no-analysis",
+                ],
+                cwd=str(ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                wait_for_http(f"http://127.0.0.1:{port}/")
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1280, "height": 900})
+                    page.goto(f"http://127.0.0.1:{port}/", wait_until="domcontentloaded")
+                    page.wait_for_function(
+                        "() => document.querySelector('#current-game-title')?.textContent === 'Game 2 / 2: NewWhite vs NewBlack'",
+                        timeout=10000,
+                    )
+                    self.assertEqual(page.locator("#current-game-title").inner_text(), "Game 2 / 2: NewWhite vs NewBlack")
+                    page.keyboard.press("ArrowLeft")
+                    page.wait_for_function("() => !document.querySelector('#follow-toggle')?.checked", timeout=10000)
+                    self.assertEqual(page.evaluate("window.location.hash"), f"#{slug}--game-2")
+                    page.locator(".match-row", has_text="OldWhite").locator(".match-select").click()
+                    page.wait_for_function(
+                        "slug => window.location.hash === '#' + slug + '--game-1'",
+                        arg=slug,
+                        timeout=10000,
+                    )
+                    page.wait_for_function(
+                        "() => document.querySelector('#current-game-title')?.textContent === 'Game 1 / 2: OldWhite vs OldBlack'",
+                        timeout=10000,
+                    )
+                    self.assertIn("White: OldWhite", page.locator("#white-player").inner_text())
+                    page.keyboard.press("ArrowLeft")
+                    page.wait_for_timeout(1500)
+                    self.assertEqual(page.evaluate("window.location.hash"), f"#{slug}--game-1")
+                    self.assertEqual(page.locator("#current-game-title").inner_text(), "Game 1 / 2: OldWhite vs OldBlack")
+                    self.assertIn("White: OldWhite", page.locator("#white-player").inner_text())
+                    browser.close()
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+
     def test_stale_newer_bare_hash_follows_older_active_live_game(self):
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp)

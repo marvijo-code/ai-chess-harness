@@ -1709,6 +1709,20 @@ INDEX_HTML = """<!doctype html>
       return `${match.kind || "completed"}|${match.path || match.file || ""}|${match.game_index || 1}`;
     }
 
+    function loadedGameKey(data) {
+      if (!data || !data.path) return "";
+      return `${data.path}|${data.game_index || 1}`;
+    }
+
+    function selectedGameKey(match) {
+      if (!match) return "";
+      return `${match.path || match.file || ""}|${match.game_index || 1}`;
+    }
+
+    function selectedMatchIsLoaded(match, data) {
+      return !!match && !!data && loadedGameKey(data) === selectedGameKey(match);
+    }
+
     function loadPreviousMatch(index) {
       const match = previousMatches[Number(index)];
       if (!match) return;
@@ -1887,15 +1901,18 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function refresh(force = false) {
-      if (!force && selectedMatch && !followLive && latestGame && latestGame.path === selectedMatch.path) return;
+      if (!force && selectedMatch && !followLive && selectedMatchIsLoaded(selectedMatch, latestGame)) return;
       try {
         const params = new URLSearchParams({ analysis: analysisEnabled ? "1" : "0" });
+        const expectedSelection = selectedMatch && !followLive ? selectedGameKey(selectedMatch) : "";
+        const expectedMode = followLive ? "live" : (selectedMatch ? "selected" : "replay");
+        const expectedReplayPath = expectedMode === "replay" ? replayLivePgnPath() : "";
         if (selectedMatch && !followLive) {
           params.set("path", selectedMatch.path || selectedMatch.file || "");
           params.set("game", String(selectedMatch.game_index || 1));
           params.set("logs", "1");
         } else if (!followLive) {
-          const replayPath = replayLivePgnPath();
+          const replayPath = expectedReplayPath;
           if (replayPath) params.set("path", replayPath);
         } else if (followLive && activeLivePgnPath) {
           params.set("path", activeLivePgnPath);
@@ -1903,6 +1920,10 @@ INDEX_HTML = """<!doctype html>
         if (!followLive && viewedPly !== null) params.set("ply", String(viewedPly));
         const resp = await fetch(`/api/game?${params}`, { cache: "no-store" });
         const data = await resp.json();
+        if (expectedMode === "live" && !followLive) return;
+        if (expectedMode === "replay" && (followLive || selectedMatch || replayLivePgnPath() !== expectedReplayPath)) return;
+        if (expectedSelection && (followLive || expectedSelection !== selectedGameKey(selectedMatch))) return;
+        if (expectedSelection && loadedGameKey(data) !== expectedSelection) return;
         if (followLive && activeLivePgnPath && data.path && data.path !== activeLivePgnPath) return;
         setActivePgnPath(data.path || "");
         if (followLive && data.path) activeLivePgnPath = data.path;

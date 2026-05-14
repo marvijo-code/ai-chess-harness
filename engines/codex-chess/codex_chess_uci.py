@@ -43,6 +43,22 @@ UCI_TEXT_TRANSLATION = str.maketrans(
         "\u2026": "...",
     }
 )
+PIECE_VALUES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 300,
+    chess.BISHOP: 300,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 0,
+}
+PIECE_NAMES = {
+    chess.PAWN: "pawn",
+    chess.KNIGHT: "knight",
+    chess.BISHOP: "bishop",
+    chess.ROOK: "rook",
+    chess.QUEEN: "queen",
+    chess.KING: "king",
+}
 
 
 def config_value(path: str, default=None):
@@ -63,6 +79,106 @@ def int_config_value(path: str, default: int) -> int:
         return int(config_value(path, default))
     except (TypeError, ValueError):
         return default
+
+
+def material_balance(board: chess.Board, color: bool) -> int:
+    own = 0
+    enemy = 0
+    for piece in board.piece_map().values():
+        value = PIECE_VALUES.get(piece.piece_type, 0)
+        if piece.color == color:
+            own += value
+        else:
+            enemy += value
+    return own - enemy
+
+
+def piece_name(piece: chess.Piece | None) -> str:
+    if piece is None:
+        return ""
+    return PIECE_NAMES.get(piece.piece_type, piece.symbol().lower())
+
+
+def captured_piece_before_move(board: chess.Board, move: chess.Move) -> chess.Piece | None:
+    if board.is_en_passant(move):
+        offset = -8 if board.turn == chess.WHITE else 8
+        return board.piece_at(move.to_square + offset)
+    return board.piece_at(move.to_square)
+
+
+def material_safety_summary(board: chess.Board, legal_moves: list[str], max_items: int = 16) -> dict:
+    color = board.turn
+    current_balance = material_balance(board, color)
+    risks = []
+    for move_text in legal_moves:
+        try:
+            move = chess.Move.from_uci(move_text)
+        except ValueError:
+            continue
+        if move not in board.legal_moves:
+            continue
+        mover = board.piece_at(move.from_square)
+        if mover is None:
+            continue
+        captured = captured_piece_before_move(board, move)
+        san = board.san(move)
+        after = board.copy(stack=False)
+        after.push(move)
+        after_balance = material_balance(after, color)
+        moved_after = after.piece_at(move.to_square)
+        worst = None
+        for reply in after.legal_moves:
+            reply_san = after.san(reply)
+            reply_board = after.copy(stack=False)
+            reply_board.push(reply)
+            after_reply_balance = material_balance(reply_board, color)
+            swing = after_balance - after_reply_balance
+            captures_moved_piece = bool(moved_after and after.is_capture(reply) and reply.to_square == move.to_square)
+            if swing >= 300 or (captures_moved_piece and PIECE_VALUES.get(moved_after.piece_type, 0) >= 300):
+                candidate = {
+                    "reply_uci": reply.uci(),
+                    "reply_san": reply_san,
+                    "material_swing_cp": swing,
+                    "balance_after_reply_cp": after_reply_balance,
+                    "captures_moved_piece": captures_moved_piece,
+                }
+                if worst is None or swing > worst["material_swing_cp"]:
+                    worst = candidate
+        if not worst:
+            continue
+        moved_name = piece_name(moved_after or mover)
+        captured_name = piece_name(captured)
+        warning_parts = [
+            f"{move_text} ({san}) moves {moved_name}",
+            f"worst legal reply {worst['reply_uci']} ({worst['reply_san']}) shifts material {worst['material_swing_cp']}cp",
+        ]
+        if captured_name:
+            warning_parts.append(f"after winning {captured_name}")
+        if worst["captures_moved_piece"]:
+            warning_parts.append(f"by capturing the moved {moved_name}")
+        risks.append(
+            {
+                "uci": move_text,
+                "san": san,
+                "moved_piece": moved_name,
+                "moved_piece_value_cp": PIECE_VALUES.get((moved_after or mover).piece_type, 0),
+                "captured_piece": captured_name,
+                "captured_piece_value_cp": PIECE_VALUES.get(captured.piece_type, 0) if captured else 0,
+                "balance_after_move_cp": after_balance,
+                **worst,
+                "warning": "; ".join(warning_parts),
+            }
+        )
+    risks.sort(key=lambda item: (-int(item["material_swing_cp"]), -int(item["moved_piece_value_cp"]), item["uci"]))
+    return {
+        "current_material_balance_cp": current_balance,
+        "risky_moves": risks[:max_items],
+        "omitted_risky_move_count": max(0, len(risks) - max_items),
+        "policy": (
+            "Before choosing captures, queen moves, rook moves, checks, or trades, inspect risky_moves. "
+            "Avoid moves where an immediate legal reply wins a queen/rook or causes a large material swing unless there is concrete forcing compensation."
+        ),
+    }
 
 
 def log(message: str) -> None:
@@ -469,6 +585,7 @@ class CodexAppServer:
 
         await self.start()
         repetition = self.client_repetition_risk(board, legal_moves)
+        material_safety = material_safety_summary(board, legal_moves)
 
         critical_clock = remaining is not None and remaining < int_config_value("codex.criticalContextBelowMs", 60000)
         lean_clock = remaining is not None and remaining < int_config_value("codex.leanContextBelowMs", 240000)
@@ -479,6 +596,7 @@ class CodexAppServer:
             "side_to_move": "white" if board.turn == chess.WHITE else "black",
             "fen": board.fen(),
             "legal_moves": legal_moves,
+            "material_safety": material_safety,
             "uci_history": history[-20:] if critical_clock else history,
             "clock_ms": {
                 "white": go_args.get("wtime"),
@@ -506,6 +624,10 @@ class CodexAppServer:
                 "Return only JSON matching the schema, with uci copied exactly from legal_moves. "
                 "Empty text, non-JSON, and any uci not in legal_moves count as invalid model responses. "
                 "Three consecutive invalid responses for this engine forfeit the game."
+            ),
+            "tactical_safety_policy": (
+                "Use material_safety as current-position tactical context. Do not describe a move as simplifying "
+                "if material_safety says an immediate legal reply wins your queen, rook, or large material with no forced compensation."
             ),
         }
         context_profile = "none"
