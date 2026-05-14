@@ -1,14 +1,22 @@
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
 
 import chess
 import chess.pgn
 
 from tools.update_learner_knowledgebase import (
+    DEFAULT_JSON,
+    DEFAULT_KB,
+    DEFAULT_MEMORY,
+    DEFAULT_STRATEGY_JSON,
+    DEFAULT_STRATEGY_KB,
     MEMORY_END,
     MEMORY_START,
+    apply_context_defaults,
     build_strategy_lesson_summary,
+    context_dir_for_engine,
     preserve_generated_at_if_unchanged,
     preserve_strategy_generated_at_if_no_new_evidence,
     read_games,
@@ -169,6 +177,27 @@ class StrategyLessonTests(unittest.TestCase):
             )
 
             self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+    def test_autolearn_defaults_can_target_zero_context(self):
+        args = Namespace(
+            engine_name="Codex-chess-zero",
+            context_dir=None,
+            memory=DEFAULT_MEMORY,
+            output=DEFAULT_KB,
+            json=DEFAULT_JSON,
+            strategy_output=DEFAULT_STRATEGY_KB,
+            strategy_json=DEFAULT_STRATEGY_JSON,
+        )
+
+        apply_context_defaults(args)
+
+        zero_context = context_dir_for_engine("Codex-chess-zero")
+        self.assertEqual(args.context_dir, zero_context)
+        self.assertEqual(args.memory, zero_context / "MEMORY.md")
+        self.assertEqual(args.output, zero_context / "knowledgebase" / "live-match-lessons.md")
+        self.assertEqual(args.json, zero_context / "knowledgebase" / "live-match-lessons.json")
+        self.assertEqual(args.strategy_output, zero_context / "knowledgebase" / "strategy-lessons.md")
+        self.assertEqual(args.strategy_json, zero_context / "knowledgebase" / "strategy-lessons.json")
 
 
 if __name__ == "__main__":

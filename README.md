@@ -6,6 +6,7 @@ UCI chess engines and harness scripts for testing LLM-backed chess play.
 
 - `engines/codex-chess`: a UCI engine that asks the local Codex app-server for legal moves.
 - `engines/codex-chess-learner`: a separate UCI launcher for the learner engine. It initially runs the same implementation as Codex-chess, but has its own `MEMORY.md` and `skills/` folder for learner-specific durable context.
+- `engines/codex-chess-zero`: a separate fast first-principles learner. It uses the same UCI implementation in Zero mode, keeps its own `MEMORY.md` and `knowledgebase/`, uses no skills by default, and learns only from compact post-game feedback plus current-position prompts.
 - `engines/llm-chess-engine`: a UCI engine that calls OpenRouter Chat Completions. It defaults to `moonshotai/kimi-k2.6` and can be changed with `OPENROUTER_MODEL` or the UCI `Model` option.
 
 Codex-chess does not choose fallback legal moves for the model. Empty responses, non-JSON responses, and moves outside `legal_moves` count as consecutive invalid model responses; after three consecutive invalid responses in a game, the engine returns `bestmove 0000` so the tournament runner adjudicates that engine as losing instead of silently continuing. If the GUI clock says the side to move has no time left, Codex-chess forfeits immediately without starting a new Codex app-server turn; OpenRouter-backed models do the same without sending an API request. Codex app-server turn failures, such as usage limits, are logged separately and forfeit immediately because retrying the same unavailable model does not test chess strength.
@@ -46,13 +47,20 @@ Codex-chess-learner:
 .\engines\codex-chess-learner\codex-chess-learner.cmd
 ```
 
+Codex-chess-zero:
+
+```powershell
+.\engines\codex-chess-zero\codex-chess-zero.cmd
+```
+
 Codex-chess exposes configurable UCI options:
 
 - `UseMemory`: tell the engine to use its engine-local `MEMORY.md`.
 - `UseSkills`: tell the engine to use Agent Skills from its engine-local `skills/` folder.
 - `LearningMode`: tell the engine to update `MEMORY.md` or create/update skills when reusable chess-learning improvements are found.
+- `ZeroMode`: use the fast Zero prompt profile, which keeps context lean, avoids memorized openings, and selects from current FEN, legal moves, clocks, and material-safety feedback.
 
-The learner launcher defaults all three to `true`; the baseline launcher defaults them to `false`.
+The learner launcher defaults `UseMemory`, `UseSkills`, and `LearningMode` to `true`; the Zero launcher defaults `UseMemory` and `LearningMode` to `true`, `UseSkills` to `false`, and `ZeroMode` to `true`; the baseline launcher defaults learning options to `false`.
 
 OpenRouter LLM engine:
 
@@ -128,7 +136,7 @@ The script moves active artifacts from `out\fastchess`, `out\live`, `out\codex-c
 
 ## FastChess Codex-vs-Codex run
 
-Install FastChess into a repo-local ignored cache and run ten unattended games between two identical Codex-chess instances. The second instance is named `Codex-chess-learner` in the tournament output. The default run has no `-maxmoves` adjudication cap and uses a five-minute time control (`300+0`), which FastChess writes to config JSON as `time: 300000`.
+Install FastChess into a repo-local ignored cache and run ten unattended games between two Codex-chess instances. The second instance is named `Codex-chess-learner` by default, or `Codex-chess-zero` when `-LearningEngine zero` is selected. The default run has no `-maxmoves` adjudication cap and uses a five-minute time control (`300+0`), which FastChess writes to config JSON as `time: 300000`.
 
 Runner defaults live in `chess-harness.config.json`. Use that file for normal defaults such as Codex model, effort, Codex move-time budgets, learner context thresholds, FastChess game count, FastChess `concurrency`, time control, viewer port, analysis settings, learner autolearn, and preflight behavior. CLI arguments still work as one-off overrides for a run.
 
@@ -136,9 +144,15 @@ Runner defaults live in `chess-harness.config.json`. Use that file for normal de
 .\install-and-run-fastchess-codex.ps1
 ```
 
+Run the same harness against Zero instead of the learner:
+
+```powershell
+.\play-games.ps1 -LearningEngine zero -n 20
+```
+
 With the checked-in config, the script sets both engine processes to `CODEX_CHESS_MODEL=gpt-5.3-codex` and `CODEX_CHESS_EFFORT=high`. This is an environment override for the tournament run only; it does not modify the installed Codex app or CLI configuration. The script preflights the selected Codex model before starting FastChess, so a usage-limit or unavailable-model error fails before a long match can produce zero-ply forfeits. Results are written to `out\fastchess`.
 
-The script prints the exact PGN path before the match starts. FastChess writes it under `out\fastchess\codex-vs-codex-learner-<timestamp>.pgn`; the file is created during the run and populated as games finish. Matching FastChess config and log files are written beside it.
+The script prints the exact PGN path before the match starts. FastChess writes it under `out\fastchess\codex-vs-codex-learner-<timestamp>.pgn` by default, or the configured Zero run name when `-LearningEngine zero` is selected; the file is created during the run and populated as games finish. Matching FastChess config and log files are written beside it.
 
 To start the local viewer before FastChess and open it against the exact PGN path for that run:
 
@@ -185,10 +199,21 @@ The mirror also writes standard PGN clock comments such as `{ [%clk 0:04:58.125]
 
 The viewer has a `Learner` screen on the top toolbar and also mirrors the latest bot log rows into the board view's left pane. It reads the learner's real `MEMORY.md`, `skills/`, `knowledgebase/`, and recent `out\codex-chess-logs` entries. Bot log rows are colored by source: learner and baseline entries are separated by their active engine context, and engine processes log observable prompt snapshots, repetition-risk counts, invalid-move repairs, bestmove lines, and returned short move comments without claiming hidden chain-of-thought access. The same persisted side and message-type filters apply to the board Bot Thinking pane and the Learner Bot Logs pane.
 
-Learner improvement is handled by `tools\update_learner_knowledgebase.py`. It reads the FastChess PGN plus the redirected launch stdout, writes `engines\codex-chess-learner\knowledgebase\live-match-lessons.md`, writes compact `strategy-lessons.md/json`, and refreshes the learner `MEMORY.md` autolearn block. The updater collects neutral frozen-self-play observations without Stockfish PVs or hardcoded move answers, then asks Codex app-server to synthesize model-discovered concepts and value adjustments from that evidence. Move prompts also include deterministic `material_safety` context from the current FEN and legal moves so immediate queen/rook hangs and large one-ply material swings are explicit without the client selecting a move. Run it once or as a watcher:
+Learner improvement is handled by `tools\update_learner_knowledgebase.py`. It reads the FastChess PGN plus the redirected launch stdout, writes the selected engine's `knowledgebase\live-match-lessons.md`, writes compact `strategy-lessons.md/json`, and refreshes that engine's `MEMORY.md` autolearn block. The updater collects neutral frozen-self-play observations without Stockfish PVs or hardcoded move answers, then asks Codex app-server to synthesize model-discovered concepts and value adjustments from that evidence. Move prompts also include deterministic `material_safety` context from the current FEN and legal moves so immediate queen/rook hangs and large one-ply material swings are explicit without the client selecting a move. Run it once or as a watcher:
 
 ```powershell
 python .\tools\update_learner_knowledgebase.py `
+  --pgn .\out\fastchess\<run>.pgn `
+  --stdout .\out\fastchess\<run>-launch.out.log `
+  --watch
+```
+
+For Zero autolearn, target its separate context explicitly; the live wrapper does this automatically when started with `-LearningEngine zero`:
+
+```powershell
+python .\tools\update_learner_knowledgebase.py `
+  --engine-name Codex-chess-zero `
+  --context-dir .\engines\codex-chess-zero `
   --pgn .\out\fastchess\<run>.pgn `
   --stdout .\out\fastchess\<run>-launch.out.log `
   --watch

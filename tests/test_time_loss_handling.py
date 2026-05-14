@@ -125,6 +125,30 @@ class TimeLossHandlingTests(unittest.TestCase):
         self.assertLessEqual(len(lean_context["knowledgebase"]), len(full_context["knowledgebase"]))
         self.assertLessEqual(len(lean_context["skills"]), len(full_context["skills"]))
 
+    def test_codex_zero_mode_uses_fast_lean_first_principles_context(self):
+        module = load_module("codex_chess_uci_zero_context_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
+        client = module.CodexAppServer(
+            "gpt-test",
+            "high",
+            use_memory=True,
+            use_skills=False,
+            learning_mode=True,
+            zero_mode=True,
+            force_lean_context=True,
+        )
+
+        context = client.learner_context("lean")
+
+        self.assertTrue(client.zero_mode)
+        self.assertTrue(client.force_lean_context)
+        self.assertEqual(client.move_timeout_seconds(None), 6)
+        self.assertEqual(client.move_timeout_seconds(600000), 6)
+        self.assertEqual(client.retry_timeout_seconds(600000, 0), 3)
+        self.assertEqual(context["profile"], "lean")
+        self.assertEqual(context["skills"], [])
+        self.assertIn("Zero mode", context["policy"])
+        self.assertIn("first principles", context["policy"])
+
     def test_codex_engine_material_safety_flags_live_qxd4_blunder(self):
         module = load_module("codex_chess_uci_material_safety_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
         board = chess.Board("r4rk1/3p1ppp/p1p2q2/8/2pb4/8/PPP2PPP/R2Q1RK1 w - - 0 17")

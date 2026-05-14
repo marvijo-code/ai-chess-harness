@@ -1,0 +1,15 @@
+{
+  "generated_at": "never",
+  "completed_games": 0,
+  "observation_count": 0,
+  "category_counts": {},
+  "evidence_keys": [],
+  "new_evidence": [],
+  "new_evidence_count": 0,
+  "observations": [],
+  "concepts": [],
+  "concept_synthesis": {
+    "status": "not_run",
+    "message": "No completed Zero games have been learned yet."
+  }
+}

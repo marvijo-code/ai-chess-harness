@@ -15,11 +15,13 @@ import chess.pgn
 
 ROOT = Path(__file__).resolve().parents[1]
 LEARNER = "Codex-chess-learner"
-DEFAULT_MEMORY = ROOT / "engines" / "codex-chess-learner" / "MEMORY.md"
-DEFAULT_KB = ROOT / "engines" / "codex-chess-learner" / "knowledgebase" / "live-match-lessons.md"
-DEFAULT_JSON = ROOT / "engines" / "codex-chess-learner" / "knowledgebase" / "live-match-lessons.json"
-DEFAULT_STRATEGY_KB = ROOT / "engines" / "codex-chess-learner" / "knowledgebase" / "strategy-lessons.md"
-DEFAULT_STRATEGY_JSON = ROOT / "engines" / "codex-chess-learner" / "knowledgebase" / "strategy-lessons.json"
+DEFAULT_CONTEXT_DIR = ROOT / "engines" / "codex-chess-learner"
+TARGET_CONTEXT_DIR = DEFAULT_CONTEXT_DIR
+DEFAULT_MEMORY = DEFAULT_CONTEXT_DIR / "MEMORY.md"
+DEFAULT_KB = DEFAULT_CONTEXT_DIR / "knowledgebase" / "live-match-lessons.md"
+DEFAULT_JSON = DEFAULT_CONTEXT_DIR / "knowledgebase" / "live-match-lessons.json"
+DEFAULT_STRATEGY_KB = DEFAULT_CONTEXT_DIR / "knowledgebase" / "strategy-lessons.md"
+DEFAULT_STRATEGY_JSON = DEFAULT_CONTEXT_DIR / "knowledgebase" / "strategy-lessons.json"
 ENGINE_LOG_DIR = ROOT / "out" / "codex-chess-logs"
 
 STARTED_RE = re.compile(r"Started game\s+(?P<game>\d+)\s+of\s+(?P<total>\d+)")
@@ -77,6 +79,28 @@ EVIDENCE_TYPES = {
         "description": "the learner drew by repetition",
     },
 }
+
+
+def context_dir_for_engine(engine_name: str) -> Path:
+    safe = re.sub(r"[^a-z0-9_-]+", "-", engine_name.lower()).strip("-")
+    if not safe:
+        safe = "codex-chess-learner"
+    return ROOT / "engines" / safe
+
+
+def apply_context_defaults(args: argparse.Namespace) -> None:
+    context_dir = args.context_dir or context_dir_for_engine(args.engine_name)
+    args.context_dir = context_dir
+    if args.memory == DEFAULT_MEMORY:
+        args.memory = context_dir / "MEMORY.md"
+    if args.output == DEFAULT_KB:
+        args.output = context_dir / "knowledgebase" / "live-match-lessons.md"
+    if args.json == DEFAULT_JSON:
+        args.json = context_dir / "knowledgebase" / "live-match-lessons.json"
+    if args.strategy_output == DEFAULT_STRATEGY_KB:
+        args.strategy_output = context_dir / "knowledgebase" / "strategy-lessons.md"
+    if args.strategy_json == DEFAULT_STRATEGY_JSON:
+        args.strategy_json = context_dir / "knowledgebase" / "strategy-lessons.json"
 
 
 def read_stdout_reasons(path: Path | None) -> tuple[dict[int, dict], int | None]:
@@ -898,7 +922,7 @@ def parse_log_timestamp(line: str) -> tuple[str, str]:
 
 def bot_from_thread_line(line: str) -> tuple[str, str]:
     lower = line.lower()
-    if str((ROOT / "engines" / "codex-chess-learner")).lower() in lower:
+    if str(TARGET_CONTEXT_DIR).lower() in lower:
         return "learner", LEARNER
     if "context=" in lower:
         return "baseline", "Codex-chess"
@@ -1186,9 +1210,13 @@ def run_once(args: argparse.Namespace) -> dict:
 
 
 def main() -> None:
+    global LEARNER, TARGET_CONTEXT_DIR
+
     parser = argparse.ArgumentParser(description="Update learner knowledgebase from FastChess PGN and result stdout.")
     parser.add_argument("--pgn", type=Path, required=True)
     parser.add_argument("--stdout", type=Path)
+    parser.add_argument("--engine-name", default=LEARNER)
+    parser.add_argument("--context-dir", type=Path)
     parser.add_argument("--output", type=Path, default=DEFAULT_KB)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     parser.add_argument("--strategy-output", type=Path, default=DEFAULT_STRATEGY_KB)
@@ -1205,6 +1233,9 @@ def main() -> None:
     parser.add_argument("--interval", type=float, default=10.0)
     parser.add_argument("--no-memory-update", action="store_true")
     args = parser.parse_args()
+    apply_context_defaults(args)
+    LEARNER = args.engine_name
+    TARGET_CONTEXT_DIR = args.context_dir
 
     while True:
         summary = run_once(args)

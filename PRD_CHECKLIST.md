@@ -102,9 +102,9 @@
 - [x] Validate archived same-PGN switching with focused browser E2E coverage.
 - [x] Add deterministic learner material-safety audit context for legal moves that hang high-value pieces or allow large immediate material swings.
 - [x] Validate the material-safety audit flags the 17.Qxd4 queen-for-bishop sequence from the live game.
-- [ ] Add a separate `Codex-chess-zero` UCI engine folder, command wrapper, memory, and knowledgebase.
-- [ ] Add zero-mode prompt/time-budget behavior so Zero plays from first principles with lean context and short move timeouts.
-- [ ] Make FastChess and autolearn wrappers target Zero without mixing learner memory.
-- [ ] Validate Zero UCI startup, zero-mode config, and targetable autolearn behavior.
+- [x] Add a separate `Codex-chess-zero` UCI engine folder, command wrapper, memory, and knowledgebase.
+- [x] Add zero-mode prompt/time-budget behavior so Zero plays from first principles with lean context and short move timeouts.
+- [x] Make FastChess and autolearn wrappers target Zero without mixing learner memory.
+- [x] Validate Zero UCI startup, zero-mode config, and targetable autolearn behavior.
 - [x] Prevent learner `MEMORY.md` autolearn watcher cycles from creating timestamp-only diffs.
 - [x] Validate unchanged autolearn memory content preserves the existing `Last updated` line.

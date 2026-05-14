@@ -30,6 +30,8 @@ STRATEGY_LESSONS_PATH = KNOWLEDGEBASE_DIR / "strategy-lessons.md"
 DEFAULT_USE_MEMORY = os.environ.get("CODEX_CHESS_USE_MEMORY", "false").lower() in {"1", "true", "yes", "on"}
 DEFAULT_USE_SKILLS = os.environ.get("CODEX_CHESS_USE_SKILLS", "false").lower() in {"1", "true", "yes", "on"}
 DEFAULT_LEARNING_MODE = os.environ.get("CODEX_CHESS_LEARNING_MODE", "false").lower() in {"1", "true", "yes", "on"}
+DEFAULT_ZERO_MODE = os.environ.get("CODEX_CHESS_ZERO_MODE", "false").lower() in {"1", "true", "yes", "on"}
+DEFAULT_FORCE_LEAN_CONTEXT = os.environ.get("CODEX_CHESS_FORCE_LEAN_CONTEXT", "false").lower() in {"1", "true", "yes", "on"}
 TEXT_CONTEXT_EXTENSIONS = {".md", ".txt", ".json", ".yaml", ".yml"}
 UCI_TEXT_TRANSLATION = str.maketrans(
     {
@@ -78,6 +80,16 @@ def int_config_value(path: str, default: int) -> int:
     try:
         return int(config_value(path, default))
     except (TypeError, ValueError):
+        return default
+
+
+def int_env_value(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
         return default
 
 
@@ -297,12 +309,16 @@ class CodexAppServer:
         use_memory: bool = DEFAULT_USE_MEMORY,
         use_skills: bool = DEFAULT_USE_SKILLS,
         learning_mode: bool = DEFAULT_LEARNING_MODE,
+        zero_mode: bool = DEFAULT_ZERO_MODE,
+        force_lean_context: bool = DEFAULT_FORCE_LEAN_CONTEXT,
     ):
         self.model = model or str(config_value("codex.model", "gpt-5.3-codex"))
         self.effort = effort or str(config_value("codex.effort", "low"))
         self.use_memory = use_memory
         self.use_skills = use_skills
         self.learning_mode = learning_mode
+        self.zero_mode = zero_mode
+        self.force_lean_context = force_lean_context or zero_mode
         self.port = free_port()
         self.url = f"ws://127.0.0.1:{self.port}"
         self.proc: asyncio.subprocess.Process | None = None
@@ -359,6 +375,14 @@ class CodexAppServer:
             "When own_remaining is below 25000ms, answer immediately with one legal uci and an empty comment. "
             "Otherwise include one short public move comment; do not reveal hidden chain-of-thought."
         )
+        if self.zero_mode:
+            developer_instructions += (
+                " Zero mode is active: play very quickly from first principles. "
+                "Use only the current FEN, legal_moves, clocks, material_safety, and compact engine-local feedback. "
+                "Do not use an opening book, memorized move answers, or broad inherited learner strategy. "
+                "Apply a short checklist internally: legal move, own king safety, immediate material swing, opponent's best capture, then simple development or conversion. "
+                "Prefer a safe practical legal move over slow calculation, and keep comments empty or extremely short."
+            )
         if not self.learning_mode:
             developer_instructions += " Do not call tools."
         if self.use_memory:
@@ -376,6 +400,18 @@ class CodexAppServer:
                 "Do not use network access. Return only the required move JSON."
             )
 
+        base_instructions = (
+            "You are Codex-chess, a UCI chess engine playing under the time control supplied by the chess GUI. "
+            "Pick exactly one legal move from the supplied legal_moves list. "
+            "Respect the remaining clocks and avoid spending time on prose."
+        )
+        if self.zero_mode:
+            base_instructions = (
+                "You are Codex-chess-zero, a fast self-learning UCI chess engine. "
+                "You start from first principles each move, use only the supplied position data and compact post-game feedback, "
+                "and return exactly one legal UCI move quickly."
+            )
+
         started = await self.request(
             "thread/start",
             {
@@ -384,11 +420,7 @@ class CodexAppServer:
                 "approvalPolicy": "never",
                 "sandbox": sandbox,
                 "ephemeral": True,
-                "baseInstructions": (
-                    "You are Codex-chess, a UCI chess engine playing under the time control supplied by the chess GUI. "
-                    "Pick exactly one legal move from the supplied legal_moves list. "
-                    "Respect the remaining clocks and avoid spending time on prose."
-                ),
+                "baseInstructions": base_instructions,
                 "developerInstructions": developer_instructions,
             },
         )
@@ -467,13 +499,22 @@ class CodexAppServer:
         if not (self.use_memory or self.use_skills or self.learning_mode):
             return {}
         lean = profile == "lean"
-        memory_chars = 1400 if lean else 3000
-        fen_chars = 900 if lean else 1800
-        strategy_chars = 1400 if lean else 2800
-        kb_files = 2 if lean else 4
-        kb_chars = 700 if lean else 1400
-        skill_files = 1 if lean else 2
-        skill_chars = 600 if lean else 1000
+        if self.zero_mode:
+            memory_chars = 700 if lean else 1000
+            fen_chars = 300 if lean else 500
+            strategy_chars = 500 if lean else 800
+            kb_files = 2
+            kb_chars = 500 if lean else 700
+            skill_files = 0 if lean else 1
+            skill_chars = 400
+        else:
+            memory_chars = 1400 if lean else 3000
+            fen_chars = 900 if lean else 1800
+            strategy_chars = 1400 if lean else 2800
+            kb_files = 2 if lean else 4
+            kb_chars = 700 if lean else 1400
+            skill_files = 1 if lean else 2
+            skill_chars = 600 if lean else 1000
         fen_knowledge = read_limited_text(FEN_KNOWLEDGE_PATH, fen_chars)
         strategy_lessons = read_limited_text(STRATEGY_LESSONS_PATH, strategy_chars)
         policy = (
@@ -481,6 +522,13 @@ class CodexAppServer:
             "Use model-discovered strategy_lessons as generic value adjustments before finalizing a move, not as memorized move answers. "
             "Never invent UCI: copy uci exactly from legal_moves, and never return 0000 while legal moves exist."
         )
+        if self.zero_mode:
+            policy = (
+                "Zero mode: use memory and knowledgebase only as compact post-game feedback. "
+                "Current FEN, legal_moves, clocks, and material_safety are the source of truth. "
+                "Do not copy memorized openings; choose quickly from first principles and let post-game feedback improve future choices. "
+                "Never invent UCI or return 0000 while legal moves exist."
+            )
         if lean:
             policy += " Lean clock mode is active: use only the strongest remembered idea and answer quickly."
         return {
@@ -499,8 +547,12 @@ class CodexAppServer:
         }
 
     def move_timeout_seconds(self, remaining: int | None) -> int:
-        max_timeout = max(1, int_config_value("codex.moveTimeoutSeconds", 12))
-        critical_timeout = max(1, int_config_value("codex.criticalMoveTimeoutSeconds", 3))
+        if self.zero_mode:
+            max_timeout = max(1, int_env_value("CODEX_CHESS_MOVE_TIMEOUT_SECONDS", int_config_value("codex.zeroMoveTimeoutSeconds", 6)))
+            critical_timeout = max(1, int_env_value("CODEX_CHESS_CRITICAL_MOVE_TIMEOUT_SECONDS", int_config_value("codex.zeroCriticalMoveTimeoutSeconds", 2)))
+        else:
+            max_timeout = max(1, int_env_value("CODEX_CHESS_MOVE_TIMEOUT_SECONDS", int_config_value("codex.moveTimeoutSeconds", 12)))
+            critical_timeout = max(1, int_env_value("CODEX_CHESS_CRITICAL_MOVE_TIMEOUT_SECONDS", int_config_value("codex.criticalMoveTimeoutSeconds", 3)))
         if remaining is None:
             return max_timeout
         if remaining <= 1000:
@@ -508,12 +560,18 @@ class CodexAppServer:
         remaining_seconds = max(1, int(remaining / 1000))
         if remaining < 25000:
             return max(1, min(critical_timeout, remaining_seconds - 1))
-        clock_divisor = max(1, int_config_value("codex.moveTimeoutClockDivisor", 12))
+        if self.zero_mode:
+            clock_divisor = max(1, int_env_value("CODEX_CHESS_MOVE_TIMEOUT_CLOCK_DIVISOR", int_config_value("codex.zeroMoveTimeoutClockDivisor", 60)))
+        else:
+            clock_divisor = max(1, int_env_value("CODEX_CHESS_MOVE_TIMEOUT_CLOCK_DIVISOR", int_config_value("codex.moveTimeoutClockDivisor", 12)))
         clock_budget = max(1, int(remaining_seconds / clock_divisor))
         return max(1, min(max_timeout, clock_budget, remaining_seconds - 1))
 
     def retry_timeout_seconds(self, remaining: int | None, elapsed_seconds: float) -> int:
-        retry_timeout = max(1, int_config_value("codex.retryMoveTimeoutSeconds", 8))
+        if self.zero_mode:
+            retry_timeout = max(1, int_env_value("CODEX_CHESS_RETRY_MOVE_TIMEOUT_SECONDS", int_config_value("codex.zeroRetryMoveTimeoutSeconds", 3)))
+        else:
+            retry_timeout = max(1, int_env_value("CODEX_CHESS_RETRY_MOVE_TIMEOUT_SECONDS", int_config_value("codex.retryMoveTimeoutSeconds", 8)))
         if remaining is None:
             return retry_timeout
         remaining_after_elapsed = max(0, int(remaining / 1000) - int(elapsed_seconds))
@@ -587,11 +645,14 @@ class CodexAppServer:
         repetition = self.client_repetition_risk(board, legal_moves)
         material_safety = material_safety_summary(board, legal_moves)
 
-        critical_clock = remaining is not None and remaining < int_config_value("codex.criticalContextBelowMs", 60000)
-        lean_clock = remaining is not None and remaining < int_config_value("codex.leanContextBelowMs", 240000)
-        comment_required = not critical_clock
+        critical_context_below = int_env_value("CODEX_CHESS_CRITICAL_CONTEXT_BELOW_MS", int_config_value("codex.criticalContextBelowMs", 60000))
+        lean_context_below = int_env_value("CODEX_CHESS_LEAN_CONTEXT_BELOW_MS", int_config_value("codex.leanContextBelowMs", 240000))
+        critical_clock = remaining is not None and remaining < critical_context_below
+        lean_clock = self.force_lean_context or (remaining is not None and remaining < lean_context_below)
+        comment_required = not critical_clock and not self.zero_mode
         prompt = {
             "engine": ENGINE_NAME,
+            "engine_profile": "zero" if self.zero_mode else "standard",
             "game_time_control": "Use only the GUI clock fields below; infer the practical time control from them.",
             "side_to_move": "white" if board.turn == chess.WHITE else "black",
             "fen": board.fen(),
@@ -630,6 +691,14 @@ class CodexAppServer:
                 "if material_safety says an immediate legal reply wins your queen, rook, or large material with no forced compensation."
             ),
         }
+        if self.zero_mode:
+            prompt["time_management"] += (
+                " Zero mode target: answer in a few seconds, use lean context only, and prefer a safe first-principles move over slow calculation."
+            )
+            prompt["zero_learning_policy"] = (
+                "You may learn only from compact post-game feedback already present in this engine's memory/knowledgebase. "
+                "During a move, do not edit files or call tools; infer from FEN, legal_moves, material_safety, and the current clock."
+            )
         context_profile = "none"
         context = {}
         if not critical_clock:
@@ -852,6 +921,9 @@ class CodexChessUci:
             self.codex.use_skills = bool_value
         elif name == "learningmode":
             self.codex.learning_mode = bool_value
+        elif name == "zeromode":
+            self.codex.zero_mode = bool_value
+            self.codex.force_lean_context = bool_value or DEFAULT_FORCE_LEAN_CONTEXT
 
 
 def parse_go_args(tokens: list[str]) -> dict:
@@ -894,6 +966,7 @@ async def main() -> None:
                 emit_uci_line(f"option name UseMemory type check default {'true' if DEFAULT_USE_MEMORY else 'false'}")
                 emit_uci_line(f"option name UseSkills type check default {'true' if DEFAULT_USE_SKILLS else 'false'}")
                 emit_uci_line(f"option name LearningMode type check default {'true' if DEFAULT_LEARNING_MODE else 'false'}")
+                emit_uci_line(f"option name ZeroMode type check default {'true' if DEFAULT_ZERO_MODE else 'false'}")
                 emit_uci_line("uciok")
             elif command == "isready":
                 emit_uci_line("readyok")

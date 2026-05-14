@@ -6,6 +6,8 @@ param(
     [string]$TimeControl = $null,
     [Nullable[int]]$MaxMoves = $null,
     [string]$FastChessVersion = $null,
+    [ValidateSet("learner", "zero")]
+    [string]$LearningEngine = $null,
     [string]$RunName = $null,
     [string]$Stamp = "",
     [switch]$ForceInstall,
@@ -30,6 +32,35 @@ function Resolve-RepoRoot {
     throw "Could not resolve repo root from script path: $PSScriptRoot"
 }
 
+function Get-LearningEngineSpec {
+    param(
+        [string]$Name,
+        [string]$RepoRoot
+    )
+
+    switch ($Name.ToLowerInvariant()) {
+        "learner" {
+            return [PSCustomObject]@{
+                Key        = "learner"
+                EngineName = "Codex-chess-learner"
+                Command    = Join-Path $RepoRoot "engines\codex-chess-learner\codex-chess-learner.cmd"
+                ContextDir = Join-Path $RepoRoot "engines\codex-chess-learner"
+            }
+        }
+        "zero" {
+            return [PSCustomObject]@{
+                Key        = "zero"
+                EngineName = "Codex-chess-zero"
+                Command    = Join-Path $RepoRoot "engines\codex-chess-zero\codex-chess-zero.cmd"
+                ContextDir = Join-Path $RepoRoot "engines\codex-chess-zero"
+            }
+        }
+        default {
+            throw "Unsupported learning engine: $Name"
+        }
+    }
+}
+
 $repoRoot = Resolve-RepoRoot
 . (Join-Path $repoRoot "tools\harness_config.ps1")
 $config = Get-ChessHarnessConfig -RepoRoot $repoRoot
@@ -41,7 +72,11 @@ $Effort = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -N
 $TimeControl = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "TimeControl" -CurrentValue $TimeControl -Config $config -Path "fastChess.timeControl" -Default "300+0")
 $MaxMoves = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "MaxMoves" -CurrentValue $MaxMoves -Config $config -Path "fastChess.maxMoves" -Default 0)
 $FastChessVersion = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "FastChessVersion" -CurrentValue $FastChessVersion -Config $config -Path "fastChess.version" -Default "latest")
-$RunName = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "RunName" -CurrentValue $RunName -Config $config -Path "fastChess.runName" -Default "codex-vs-codex-learner")
+$LearningEngine = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "LearningEngine" -CurrentValue $LearningEngine -Config $config -Path "fastChess.learningEngine" -Default "learner")
+$learningEngineSpec = Get-LearningEngineSpec -Name $LearningEngine -RepoRoot $repoRoot
+$runNameConfigPath = if ($learningEngineSpec.Key -eq "zero") { "fastChess.zeroRunName" } else { "fastChess.runName" }
+$runNameDefault = if ($learningEngineSpec.Key -eq "zero") { "codex-vs-codex-zero" } else { "codex-vs-codex-learner" }
+$RunName = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "RunName" -CurrentValue $RunName -Config $config -Path $runNameConfigPath -Default $runNameDefault)
 $ForceInstall = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "ForceInstall" -CurrentValue $ForceInstall -Config $config -Path "fastChess.forceInstall" -Default $false
 $SkipModelPreflight = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "SkipModelPreflight" -CurrentValue $SkipModelPreflight -Config $config -Path "fastChess.skipModelPreflight" -Default $false
 $NoRepeat = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "NoRepeat" -CurrentValue $NoRepeat -Config $config -Path "fastChess.noRepeat" -Default $false
@@ -53,13 +88,13 @@ $logLevel = [string](Get-HarnessConfigValue -Config $config -Path "fastChess.log
 $installRoot = Join-Path $repoRoot "tools\.fastchess"
 $resultsRoot = Join-Path $repoRoot "out\fastchess"
 $codexEngine = Join-Path $repoRoot "engines\codex-chess\codex-chess.cmd"
-$learnerEngine = Join-Path $repoRoot "engines\codex-chess-learner\codex-chess-learner.cmd"
+$learningEngineCommand = $learningEngineSpec.Command
 
 if (-not (Test-Path $codexEngine)) {
     throw "Codex-chess engine command was not found: $codexEngine"
 }
-if (-not (Test-Path $learnerEngine)) {
-    throw "Codex-chess-learner engine command was not found: $learnerEngine"
+if (-not (Test-Path $learningEngineCommand)) {
+    throw "$($learningEngineSpec.EngineName) engine command was not found: $learningEngineCommand"
 }
 
 New-Item -ItemType Directory -Force -Path $installRoot, $resultsRoot | Out-Null
@@ -157,6 +192,7 @@ $env:CODEX_CHESS_EFFORT = $Effort
 Write-Host "FastChess: $fastChess"
 Write-Host "Engine model override: $Model"
 Write-Host "Effort: $Effort"
+Write-Host "Learning engine: $($learningEngineSpec.EngineName)"
 Write-Host "TimeControl: $TimeControl"
 Write-Host "Games requested: $Games"
 if ($NoRepeat) {
@@ -174,7 +210,7 @@ Write-Host "Log: $logPath"
 
 $fastChessArgs = @(
     "-engine", "cmd=$codexEngine", "name=Codex-chess", "proto=uci", "restart=on",
-    "-engine", "cmd=$learnerEngine", "name=Codex-chess-learner", "proto=uci", "restart=on",
+    "-engine", "cmd=$learningEngineCommand", "name=$($learningEngineSpec.EngineName)", "proto=uci", "restart=on",
     "-each", "tc=$TimeControl", "timemargin=$timeMarginMs",
     "-rounds", "$rounds",
     "-concurrency", "$Concurrency",
