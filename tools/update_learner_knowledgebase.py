@@ -380,6 +380,32 @@ def load_previous_strategy_summary(path: Path | None) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def comparable_summary(summary: dict, ignored_keys: set[str]) -> dict:
+    return {key: value for key, value in summary.items() if key not in ignored_keys}
+
+
+def preserve_generated_at_if_unchanged(summary: dict, previous: dict | None, ignored_keys: set[str]) -> dict:
+    if not previous or not previous.get("generated_at"):
+        return summary
+    if comparable_summary(summary, ignored_keys) != comparable_summary(previous, ignored_keys):
+        return summary
+    stable = dict(summary)
+    for key in ignored_keys:
+        if key in previous:
+            stable[key] = previous[key]
+    return stable
+
+
+def preserve_strategy_generated_at_if_no_new_evidence(summary: dict, previous: dict | None) -> dict:
+    if not previous or not previous.get("generated_at") or summary.get("new_evidence_count"):
+        return summary
+    stable = dict(summary)
+    for key in ("generated_at", "source_pgn", "source_stdout", "concepts", "concept_synthesis"):
+        if key in previous:
+            stable[key] = previous[key]
+    return stable
+
+
 def parse_json_object(text: str) -> dict:
     text = text.strip()
     if text.startswith("```"):
@@ -431,7 +457,10 @@ def concept_synthesis_prompt(summary: dict) -> str:
 
 def synthesize_strategy_concepts(summary: dict, model: str, effort: str, timeout: int) -> tuple[list[dict], dict]:
     if not summary.get("new_evidence"):
-        return summary.get("concepts", []), {"status": "unchanged", "message": "no new self-play evidence"}
+        return summary.get("concepts", []), summary.get("concept_synthesis") or {
+            "status": "unchanged",
+            "message": "no new self-play evidence",
+        }
 
     query_script = Path.home() / ".codex" / "skills" / "codex-app-server-query" / "scripts" / "query_app_server.py"
     if not query_script.exists():
@@ -1066,11 +1095,18 @@ def update_memory(memory_path: Path, summary: dict) -> None:
         )
     else:
         updated = current.rstrip() + "\n\n" + block + "\n"
-    memory_path.write_text(updated, encoding="utf-8")
+    if updated != current:
+        memory_path.write_text(updated, encoding="utf-8")
 
 
 def write_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        try:
+            if path.read_text(encoding="utf-8", errors="replace") == text:
+                return
+        except OSError:
+            pass
     temp = path.with_suffix(path.suffix + f".{time.strftime('%H%M%S')}.tmp")
     for attempt in range(8):
         try:
@@ -1088,23 +1124,34 @@ def write_atomic(path: Path, text: str) -> None:
 
 
 def run_once(args: argparse.Namespace) -> dict:
-    reasons, total = read_stdout_reasons(args.stdout)
-    games = merge_reasons(read_games(args.pgn), reasons)
-    summary = summarize(games, total, args.pgn, args.stdout)
+    pgn = args.pgn.resolve()
+    stdout = args.stdout.resolve() if args.stdout else None
+    reasons, total = read_stdout_reasons(stdout)
+    games = merge_reasons(read_games(pgn), reasons)
+    previous_summary = load_previous_strategy_summary(args.json)
+    summary = summarize(games, total, pgn, stdout)
+    run_generated_at = summary["generated_at"]
+    summary = preserve_generated_at_if_unchanged(
+        summary,
+        previous_summary,
+        {"generated_at", "source_pgn", "source_stdout"},
+    )
     write_atomic(args.output, render_markdown(summary))
     write_atomic(args.json, json.dumps(summary, indent=2))
+    previous_strategy = load_previous_strategy_summary(args.strategy_json)
     strategy_summary = build_strategy_lesson_summary(
         games,
-        args.pgn,
-        args.stdout,
-        generated_at=summary["generated_at"],
-        previous=load_previous_strategy_summary(args.strategy_json),
+        pgn,
+        stdout,
+        generated_at=run_generated_at,
+        previous=previous_strategy,
     )
     if args.no_concept_synthesis:
-        strategy_summary["concept_synthesis"] = {
-            "status": "disabled",
-            "message": "concept synthesis disabled for this run",
-        }
+        if strategy_summary.get("new_evidence"):
+            strategy_summary["concept_synthesis"] = {
+                "status": "disabled",
+                "message": "concept synthesis disabled for this run",
+            }
     else:
         concepts, synthesis = synthesize_strategy_concepts(
             strategy_summary,
@@ -1114,11 +1161,12 @@ def run_once(args: argparse.Namespace) -> dict:
         )
         strategy_summary["concepts"] = concepts
         strategy_summary["concept_synthesis"] = synthesis
+    strategy_summary = preserve_strategy_generated_at_if_no_new_evidence(strategy_summary, previous_strategy)
     write_atomic(args.strategy_output, render_strategy_markdown(strategy_summary))
     write_atomic(args.strategy_json, json.dumps(strategy_summary, indent=2))
-    thinking_json = args.thinking_json or default_thinking_json(args.pgn)
-    thinking_md = args.thinking_md or default_thinking_md(args.pgn)
-    thinking_archive = build_thinking_archive(games, args.pgn, args.stdout, args.engine_log_dir)
+    thinking_json = args.thinking_json or default_thinking_json(pgn)
+    thinking_md = args.thinking_md or default_thinking_md(pgn)
+    thinking_archive = build_thinking_archive(games, pgn, stdout, args.engine_log_dir)
     write_atomic(thinking_json, json.dumps(thinking_archive, indent=2))
     write_atomic(thinking_md, render_thinking_markdown(thinking_archive))
     if not args.no_memory_update:

@@ -240,7 +240,8 @@ class CodexAppServer:
         developer_instructions = (
             "Return only JSON matching the schema. "
             "The host GUI will reject illegal moves, so uci must be copied exactly from legal_moves. "
-            "When own_remaining is below 25000ms, answer immediately with one legal uci and an empty comment."
+            "When own_remaining is below 25000ms, answer immediately with one legal uci and an empty comment. "
+            "Otherwise include one short public move comment; do not reveal hidden chain-of-thought."
         )
         if not self.learning_mode:
             developer_instructions += " Do not call tools."
@@ -404,10 +405,25 @@ class CodexAppServer:
             return 1
         return max(1, min(retry_timeout, remaining_after_elapsed - 1))
 
+    def comment_schema(self, require_comment: bool) -> dict:
+        schema = {"type": "string", "maxLength": 240}
+        if require_comment:
+            schema["minLength"] = 1
+        return schema
+
+    def visible_move_comment(self, move: str, comment: object, require_comment: bool) -> str:
+        safe_comment = " ".join(str(comment or "").split())
+        if safe_comment:
+            return safe_comment
+        if require_comment:
+            return f"Selected {move}; model returned no comment."
+        return ""
+
     def urgent_retry_prompt(self, prompt: dict, timeout: int, reason: str) -> dict:
         retry_prompt = copy.deepcopy(prompt)
         retry_prompt.pop("learner_context", None)
         retry_prompt["_turn_effort"] = str(config_value("codex.retryEffort", "low"))
+        retry_prompt["comment_required"] = False
         retry_prompt["learner_context_summary"] = (
             "Urgent retry mode. Do not use memory, skills, tools, files, or long analysis. "
             "Read side_to_move, fen, and legal_moves directly, then copy one legal uci exactly from legal_moves."
@@ -456,6 +472,7 @@ class CodexAppServer:
 
         critical_clock = remaining is not None and remaining < int_config_value("codex.criticalContextBelowMs", 60000)
         lean_clock = remaining is not None and remaining < int_config_value("codex.leanContextBelowMs", 240000)
+        comment_required = not critical_clock
         prompt = {
             "engine": ENGINE_NAME,
             "game_time_control": "Use only the GUI clock fields below; infer the practical time control from them.",
@@ -478,7 +495,13 @@ class CodexAppServer:
                 "If own_remaining is below 60000ms, do not analyze deeply: copy any clearly legal useful move from legal_moves, "
                 "set comment to an empty string, and return strict JSON immediately. The harness will not choose a move for you."
             ),
-            "comment_policy": "Optionally include one short comment explaining the move; it will be shown as a UCI info string in the chess GUI logs.",
+            "comment_required": comment_required,
+            "comment_policy": (
+                "Return one short public move comment, at most 16 words, explaining the selected move. "
+                "Do not leave comment empty and do not include hidden chain-of-thought."
+                if comment_required
+                else "Set comment to an empty string in critical-clock mode."
+            ),
             "invalid_response_policy": (
                 "Return only JSON matching the schema, with uci copied exactly from legal_moves. "
                 "Empty text, non-JSON, and any uci not in legal_moves count as invalid model responses. "
@@ -533,7 +556,7 @@ class CodexAppServer:
                         "required": ["uci", "comment"],
                         "properties": {
                             "uci": {"type": "string"},
-                            "comment": {"type": "string"},
+                            "comment": self.comment_schema(bool(prompt.get("comment_required"))),
                         },
                     },
                 },
@@ -598,8 +621,12 @@ class CodexAppServer:
                 continue
 
             self.invalid_model_moves = 0
-            if comment:
-                safe_comment = " ".join(str(comment).split())
+            safe_comment = self.visible_move_comment(
+                move,
+                comment,
+                bool(prompt.get("comment_required")),
+            )
+            if safe_comment:
                 log(f"decision comment: move={move} comment={safe_comment[:500]}")
                 emit_uci_line(f"info string {safe_comment[:240]}", optional=True)
             else:

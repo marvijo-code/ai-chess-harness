@@ -58,6 +58,11 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 49. The live mirror must reconcile stale FastChess launch stdout with the real FastChess `*.pgn` output and current engine tracks, must not pin an unfinished current game to stale locked moves from an older repeated-opening track, and stale daemon mirrors must stop refreshing live status when their own run artifacts are no longer fresh.
 50. FastChess learner runs stay at 5+0 by default, but Codex move budgeting must avoid self-inflicted timeouts: normal mid-clock moves get enough app-server wait budget, and retry prompts after a timeout or invalid move must drop learner context, drop comments, and use a lower-effort urgent turn instead of restarting multiple full-context high-effort turns that burn the clock.
 51. If FastChess still reports a single unfinished game while current-run engine logs contain multiple move-line tracks, the live mirror must show the freshest active track for that game instead of keeping an older stale track whose wall-clock timeout would make the board look completed while engines keep playing.
+52. Non-urgent Codex-chess and Codex-chess-learner moves must request and surface a short observable move comment; blank model comments should be visible as an explicit no-comment marker instead of leaving the viewer's Comment filter apparently empty.
+53. Learner lesson timestamps should update only when lesson content changes. Watcher cycles that find no new live-match lessons or no new strategy evidence must preserve the prior lesson timestamp instead of rewriting a fresh date.
+54. The active in-progress board game must have a game-specific live URL hash, using `#slug--live-game-N`, so concurrent FastChess games are distinguishable in the address bar while archived replay links keep the existing `#slug--game-N` form.
+55. FastChess live mirror board artifacts must be written as one live PGN file per board game, with the slug timestamp derived from that game's own start time instead of the run start time, while a stable run-level status/control file keeps live selection working.
+56. The board page must show a bold current-game header near the top of the page, naming the active game number and the engines playing it.
 
 ## Validation Requirements
 
@@ -101,7 +106,12 @@ Keep the local FastChess viewer useful during live play and replay without leaki
    - Stale live mirror daemon outputs expire from the live match list instead of advertising old slugs as active.
    - An unfinished current game is allowed to move from stale locked repeated-opening moves to the current active track when older tracks have fallen out of the log window.
    - Loading an explicit archived `#slug--game-N` URL still opens that archived game when a matching completed row exists.
+   - Clicking or following an in-progress match updates the browser hash and active copy URL to the game-specific live hash `#slug--live-game-N`.
+   - Live mirrored board PGNs are per-game files whose URL slug timestamp matches the selected game's start timestamp rather than the overall run timestamp.
+   - A bold current-game header at the top of the page shows the game number and engines currently playing.
    - UCI output sanitization proves non-ASCII model comments do not raise and do not block `bestmove`.
    - Codex move-time budgeting is covered by focused tests for the initial, mid-clock, and critical-clock budgets.
    - Timeout/invalid retry handling is covered by focused tests proving retries use an urgent context-free prompt and bounded retry budget while preserving the 5+0 FastChess time control.
    - No horizontal overflow at desktop width.
+11. Focused engine tests verify non-urgent move requests require a non-empty comment while urgent retries can still use an empty comment.
+12. Focused autolearn tests verify unchanged lesson summaries preserve their previous generated timestamp.

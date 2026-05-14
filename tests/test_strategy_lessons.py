@@ -5,7 +5,13 @@ from pathlib import Path
 import chess
 import chess.pgn
 
-from tools.update_learner_knowledgebase import build_strategy_lesson_summary, read_games
+from tools.update_learner_knowledgebase import (
+    build_strategy_lesson_summary,
+    preserve_generated_at_if_unchanged,
+    preserve_strategy_generated_at_if_no_new_evidence,
+    read_games,
+    synthesize_strategy_concepts,
+)
 
 
 HANGING_CHECKER_FEN = "r7/ppr2ppk/8/3p4/5b2/8/PP3KPP/8 b - - 1 25"
@@ -59,6 +65,68 @@ class StrategyLessonTests(unittest.TestCase):
         matching = [item for item in summary["observations"] if item["category"] == "hanging_checking_piece"]
         self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0]["evidence_count"], 2)
+
+    def test_live_lesson_timestamp_is_preserved_when_summary_is_unchanged(self):
+        previous = {
+            "generated_at": "old",
+            "source_pgn": "old.pgn",
+            "source_stdout": "old.log",
+            "completed_games": 2,
+            "learner_points": 1.0,
+            "reason_counts": {"mate": 1},
+        }
+        current = {
+            "generated_at": "new",
+            "source_pgn": "new.pgn",
+            "source_stdout": "new.log",
+            "completed_games": 2,
+            "learner_points": 1.0,
+            "reason_counts": {"mate": 1},
+        }
+
+        stable = preserve_generated_at_if_unchanged(
+            current,
+            previous,
+            {"generated_at", "source_pgn", "source_stdout"},
+        )
+        changed = preserve_generated_at_if_unchanged(
+            {**current, "completed_games": 3},
+            previous,
+            {"generated_at", "source_pgn", "source_stdout"},
+        )
+
+        self.assertEqual(stable["generated_at"], "old")
+        self.assertEqual(stable["source_pgn"], "old.pgn")
+        self.assertEqual(stable["source_stdout"], "old.log")
+        self.assertEqual(changed["generated_at"], "new")
+
+    def test_strategy_timestamp_is_preserved_when_no_new_evidence(self):
+        previous = {
+            "generated_at": "old",
+            "source_pgn": "old.pgn",
+            "source_stdout": "old.log",
+            "concepts": [{"name": "keep pieces safe"}],
+            "concept_synthesis": {"status": "ok", "message": "previous synthesis"},
+        }
+        current = {
+            "generated_at": "new",
+            "source_pgn": "new.pgn",
+            "source_stdout": "new.log",
+            "new_evidence": [],
+            "new_evidence_count": 0,
+            "concepts": previous["concepts"],
+            "concept_synthesis": previous["concept_synthesis"],
+        }
+
+        concepts, synthesis = synthesize_strategy_concepts(current, "unused", "low", 1)
+        current["concepts"] = concepts
+        current["concept_synthesis"] = synthesis
+        stable = preserve_strategy_generated_at_if_no_new_evidence(current, previous)
+
+        self.assertEqual(stable["generated_at"], "old")
+        self.assertEqual(stable["source_pgn"], "old.pgn")
+        self.assertEqual(stable["source_stdout"], "old.log")
+        self.assertEqual(stable["concept_synthesis"], previous["concept_synthesis"])
 
 
 if __name__ == "__main__":

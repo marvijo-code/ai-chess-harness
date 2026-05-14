@@ -294,6 +294,7 @@ def collect_engine_tracks(log_dir: Path, since_ms: int | None = None) -> list[di
     result = []
     for track in sorted(tracks, key=lambda item: (item["first_seen"], item["updated_at"])):
         state = dict(track["state"])
+        state["first_seen"] = track["first_seen"]
         state["moves"] = list(track["moves"])
         state["clocks_by_ply"] = dict(track["clocks_by_ply"])
         result.append(state)
@@ -428,7 +429,14 @@ def build_game(current: dict, state: dict, now_ms: int | None = None) -> chess.p
     game = chess.pgn.Game()
     game.headers["Event"] = "FastChess live mirror"
     game.headers["Site"] = "C:/dev/chess-harness-codex"
+    started_at_ms = current.get("started_at_ms")
+    if started_at_ms:
+        started_at = datetime.fromtimestamp(int(started_at_ms) / 1000)
+        game.headers["Date"] = started_at.strftime("%Y.%m.%d")
+        game.headers["GameStartTime"] = started_at.strftime("%Y-%m-%d %H:%M:%S")
     game.headers["Round"] = str(current["game"])
+    if current.get("total"):
+        game.headers["TotalGames"] = str(current["total"])
     game.headers["White"] = current["white"]
     game.headers["Black"] = current["black"]
     game.headers["Result"] = current["result"]
@@ -466,12 +474,37 @@ def pgn_text(game: chess.pgn.Game) -> str:
     return output.getvalue()
 
 
-def status_text(games: list[dict], output_path: Path, locked_game: int | None) -> str:
+def run_slug_prefix(output_path: Path) -> str:
+    slug = output_path.stem
+    if slug.endswith("-live"):
+        slug = slug.removesuffix("-live")
+    return re.sub(r"-live-\d{8}-\d{6}$", "-live", slug)
+
+
+def game_started_at_ms(current: dict, state: dict, remembered: dict[int, int]) -> int:
+    game_no = int(current["game"])
+    first_seen = state.get("first_seen") or state.get("updated_at")
+    try:
+        started_at_ms = int(first_seen)
+    except (TypeError, ValueError):
+        started_at_ms = remembered.get(game_no) or current_epoch_ms()
+    remembered.setdefault(game_no, started_at_ms)
+    return remembered[game_no]
+
+
+def game_output_path(output_path: Path, current: dict, started_at_ms: int) -> Path:
+    timestamp = datetime.fromtimestamp(started_at_ms / 1000).strftime("%Y%m%d-%H%M%S")
+    game_no = int(current["game"])
+    return output_path.with_name(f"{run_slug_prefix(output_path)}-{timestamp}-game-{game_no}-live.pgn")
+
+
+def status_text(games: list[dict], output_path: Path, locked_game: int | None, control_path: Path | None = None) -> str:
     generated_at = time.time()
     payload = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(generated_at)),
         "generated_at_epoch": generated_at,
         "output_pgn": str(output_path.resolve()),
+        "control_pgn": str((control_path or output_path).resolve()),
         "locked_game": locked_game,
         "games": [
             {
@@ -498,9 +531,11 @@ def mirror(stdout_path: Path, log_dir: Path, output_path: Path, interval: float,
     since_ms = run_start_ms(stdout_path)
     previous = None
     previous_status = None
+    previous_board_path: Path | None = None
     locked_game: int | None = None
     locked_moves: list[str] | None = None
     last_requested_game: int | None = None
+    game_start_times: dict[int, int] = {}
     while True:
         if not once and not run_artifacts_recent(stdout_path, pgnout_path):
             time.sleep(interval)
@@ -522,17 +557,24 @@ def mirror(stdout_path: Path, log_dir: Path, output_path: Path, interval: float,
         if current is not None:
             now_ms = current_epoch_ms()
             state, locked_moves = select_engine_state(log_dir, games, current, locked_moves, since_ms, tracks, now_ms)
+            started_at_ms = game_started_at_ms(current, state, game_start_times)
+            current = dict(current)
+            current["started_at_ms"] = started_at_ms
             current = game_with_timeout(current, state, now_ms)
             text = pgn_text(build_game(current, state, now_ms))
+            board_output_path = game_output_path(output_path, current, started_at_ms)
+            if board_output_path != previous_board_path:
+                previous = None
+                previous_board_path = board_output_path
             if text != previous:
-                output_path.write_text(text, encoding="utf-8")
+                board_output_path.write_text(text, encoding="utf-8")
                 previous = text
         if games:
             status_games = [
                 current if current is not None and int(game["game"]) == int(current["game"]) else game
                 for game in games
             ]
-            status = status_text(status_games, output_path, locked_game)
+            status = status_text(status_games, previous_board_path or output_path, locked_game, output_path)
             if status != previous_status:
                 status_path.write_text(status, encoding="utf-8")
                 previous_status = status

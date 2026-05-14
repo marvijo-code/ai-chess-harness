@@ -88,9 +88,18 @@ class LiveViewerHashE2ETests(unittest.TestCase):
                         "games": [
                             {
                                 "game": 1,
-                                "total": 100,
+                                "total": 2,
                                 "white": "ActiveWhite",
                                 "black": "ActiveBlack",
+                                "result": "*",
+                                "reason": "",
+                                "finished": False,
+                            },
+                            {
+                                "game": 2,
+                                "total": 2,
+                                "white": "SecondWhite",
+                                "black": "SecondBlack",
                                 "result": "*",
                                 "reason": "",
                                 "finished": False,
@@ -128,7 +137,7 @@ class LiveViewerHashE2ETests(unittest.TestCase):
                     page = browser.new_page(viewport={"width": 1280, "height": 900})
                     page.goto(f"http://127.0.0.1:{port}/#{stale_slug}", wait_until="domcontentloaded")
                     page.wait_for_function(
-                        "slug => window.location.hash === '#' + slug",
+                        "slug => window.location.hash === '#' + slug + '--live-game-1'",
                         arg=active_slug,
                         timeout=10000,
                     )
@@ -138,9 +147,16 @@ class LiveViewerHashE2ETests(unittest.TestCase):
                         timeout=10000,
                     )
                     self.assertIn(active_slug, page.locator("#tournament-chip").inner_text())
+                    self.assertEqual(page.locator("#current-game-title").inner_text(), "Game 1: ActiveWhite vs ActiveBlack")
                     self.assertIn("White: ActiveWhite", page.locator("#white-player").inner_text())
                     self.assertIn("Black: ActiveBlack", page.locator("#black-player").inner_text())
                     self.assertEqual(page.locator(".sq").count(), 64)
+                    page.locator(".match-row.in-progress", has_text="SecondWhite").locator(".match-select").click()
+                    page.wait_for_function(
+                        "slug => window.location.hash === '#' + slug + '--live-game-2'",
+                        arg=active_slug,
+                        timeout=10000,
+                    )
                     browser.close()
             finally:
                 proc.terminate()

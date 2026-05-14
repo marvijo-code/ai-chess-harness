@@ -62,7 +62,15 @@ def main() -> None:
             send(proc, "quit")
         except Exception:
             pass
-        proc.wait(timeout=5)
+        try:
+            proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
 
 
 if __name__ == "__main__":

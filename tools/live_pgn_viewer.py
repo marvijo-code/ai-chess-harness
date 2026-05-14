@@ -160,7 +160,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     /* === SHELL === */
-    .app { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+    .app { min-height: 100vh; display: grid; grid-template-rows: auto auto 1fr; }
 
     /* === TOPBAR === */
     .topbar {
@@ -197,6 +197,14 @@ INDEX_HTML = """<!doctype html>
       font-size: 14px; line-height: 1;
     }
     .copy-path-btn.copied { border-color: var(--ok); color: var(--ok); }
+    .current-game-banner {
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 800;
+      line-height: 1.25;
+      padding: 10px 20px 0;
+      overflow-wrap: anywhere;
+    }
 
     .top-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
@@ -662,6 +670,8 @@ INDEX_HTML = """<!doctype html>
       </div>
     </header>
 
+    <div id="current-game-title" class="current-game-banner">No game loaded</div>
+
     <main id="board-view" class="main view-panel">
       <aside class="left-col">
         <section class="card thinking-card">
@@ -1051,15 +1061,17 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("copy-pgn-path").disabled = !activeMatchUrl;
     }
 
-    function encodeMatchHash(slug, gameIndex = null) {
+    function encodeMatchHash(slug, gameIndex = null, hashKind = "archive") {
       if (!slug) return "";
       const index = Number(gameIndex);
-      const suffix = Number.isFinite(index) && index > 0 ? `--game-${index}` : "";
+      const suffix = Number.isFinite(index) && index > 0
+        ? (hashKind === "live" ? `--live-game-${index}` : `--game-${index}`)
+        : "";
       return `#${encodeURIComponent(`${slug}${suffix}`)}`;
     }
 
-    function matchUrlFor(slug, gameIndex = null) {
-      const hash = encodeMatchHash(slug, gameIndex);
+    function matchUrlFor(slug, gameIndex = null, hashKind = "archive") {
+      const hash = encodeMatchHash(slug, gameIndex, hashKind);
       if (!hash) return "";
       const url = new URL(window.location.href);
       url.hash = hash;
@@ -1068,23 +1080,39 @@ INDEX_HTML = """<!doctype html>
 
     function parseMatchHash() {
       const raw = decodeURIComponent((window.location.hash || "").replace(/^#/, "")).trim();
-      if (!raw) return { slug: "", gameIndex: null };
+      if (!raw) return { slug: "", gameIndex: null, liveGameIndex: null };
+      const liveMatch = raw.match(/^(.*)--live-game-(\\d+)$/);
+      if (liveMatch) return { slug: liveMatch[1], gameIndex: null, liveGameIndex: Number(liveMatch[2]) || null };
       const match = raw.match(/^(.*)--game-(\\d+)$/);
-      if (!match) return { slug: raw, gameIndex: null };
-      return { slug: match[1], gameIndex: Number(match[2]) || null };
+      if (!match) return { slug: raw, gameIndex: null, liveGameIndex: null };
+      return { slug: match[1], gameIndex: Number(match[2]) || null, liveGameIndex: null };
     }
 
-    function setMatchHash(slug, gameIndex = null) {
-      const next = encodeMatchHash(slug, gameIndex);
+    function setMatchHash(slug, gameIndex = null, hashKind = "archive") {
+      const next = encodeMatchHash(slug, gameIndex, hashKind);
       if (!next || window.location.hash === next) return;
       suppressHashChange = true;
       window.history.replaceState(null, "", next);
       window.setTimeout(() => { suppressHashChange = false; }, 0);
     }
 
-    function activeGameHashIndex(data) {
+    function archiveGameHashIndex(data) {
       if (selectedMatch && !followLive) return data.game_index || selectedMatch.game_index || 1;
       if (!followLive && data && data.has_game) return data.game_index || 1;
+      return null;
+    }
+
+    function liveGameHashIndex(data) {
+      if (!followLive) return null;
+      if (requestedLiveGame !== null) return requestedLiveGame;
+      const slug = data && data.tournament_slug ? data.tournament_slug : "";
+      const path = data && data.path ? data.path : activeLivePgnPath;
+      const boardMatch = previousMatches.find(match => {
+        if (match.kind !== "live" || !match.is_board_game) return false;
+        if (slug && (match.tournament_slug || "") !== slug) return false;
+        return !path || !match.path || match.path === path;
+      });
+      if (boardMatch) return boardMatch.game_index || 1;
       return null;
     }
 
@@ -1094,17 +1122,25 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       const parsedHash = parseMatchHash();
-      if (!selectedMatch && parsedHash.slug && parsedHash.gameIndex && !previousMatches.length) {
+      if (!selectedMatch && parsedHash.slug && (parsedHash.gameIndex || parsedHash.liveGameIndex) && !previousMatches.length) {
         setActiveMatchUrl(window.location.href);
         return;
       }
-      const gameIndex = activeGameHashIndex(data);
-      setActiveMatchUrl(matchUrlFor(data.tournament_slug, gameIndex));
-      setMatchHash(data.tournament_slug, gameIndex);
+      if (followLive) {
+        const liveIndex = liveGameHashIndex(data);
+        setActiveMatchUrl(matchUrlFor(data.tournament_slug, liveIndex, liveIndex ? "live" : "archive"));
+        setMatchHash(data.tournament_slug, liveIndex, liveIndex ? "live" : "archive");
+        return;
+      }
+      const gameIndex = archiveGameHashIndex(data);
+      setActiveMatchUrl(matchUrlFor(data.tournament_slug, gameIndex, "archive"));
+      setMatchHash(data.tournament_slug, gameIndex, "archive");
     }
 
     function latestLiveMatch() {
-      return previousMatches.find(match => match.kind === "live") || null;
+      return previousMatches.find(match => match.kind === "live" && match.is_board_game)
+        || previousMatches.find(match => match.kind === "live")
+        || null;
     }
 
     function followLiveMatch(match) {
@@ -1117,8 +1153,8 @@ INDEX_HTML = """<!doctype html>
       activeLivePgnPath = match.path || activeLivePgnPath;
       localStorage.setItem("livePgnFollow", "on");
       document.getElementById("follow-toggle").checked = true;
-      setMatchHash(match.tournament_slug || "");
-      setActiveMatchUrl(matchUrlFor(match.tournament_slug || ""));
+      setMatchHash(match.tournament_slug || "", requestedLiveGame, "live");
+      setActiveMatchUrl(matchUrlFor(match.tournament_slug || "", requestedLiveGame, "live"));
       renderPreviousMatches();
       selectLiveMatch(match);
       return true;
@@ -1126,7 +1162,7 @@ INDEX_HTML = """<!doctype html>
 
     function maybeFollowLatestLiveForBareHash() {
       const parsed = parseMatchHash();
-      if (!parsed.slug || parsed.gameIndex) return false;
+      if (!parsed.slug || parsed.gameIndex || parsed.liveGameIndex) return false;
       const match = latestLiveMatch();
       if (!match) return false;
       const matchSlug = match.tournament_slug || "";
@@ -1135,6 +1171,17 @@ INDEX_HTML = """<!doctype html>
       const pathChanged = !!(match.path && currentLivePath && match.path !== currentLivePath);
       const currentCompleted = !!(latestGame && latestGame.completed);
       if (!slugChanged && !pathChanged && !currentCompleted) return false;
+      return followLiveMatch(match);
+    }
+
+    function maybeFollowCurrentLiveBoard() {
+      if (!followLive || selectedMatch) return false;
+      const match = latestLiveMatch();
+      if (!match) return false;
+      const pathChanged = !!(match.path && activeLivePgnPath && match.path !== activeLivePgnPath);
+      const requestedChanged = requestedLiveGame !== null && Number(match.game_index || 1) !== Number(requestedLiveGame);
+      const currentCompleted = !!(latestGame && latestGame.completed);
+      if (!pathChanged && !requestedChanged && !currentCompleted) return false;
       return followLiveMatch(match);
     }
 
@@ -1176,8 +1223,9 @@ INDEX_HTML = """<!doctype html>
     async function copyMatchRowUrl(index, button) {
       const match = previousMatches[Number(index)];
       if (!match) return;
-      const gameIndex = match.kind === "live" ? null : (match.game_index || 1);
-      await copyTextToClipboard(matchUrlFor(match.tournament_slug || "", gameIndex), button);
+      const gameIndex = match.game_index || 1;
+      const hashKind = match.kind === "live" ? "live" : "archive";
+      await copyTextToClipboard(matchUrlFor(match.tournament_slug || "", gameIndex, hashKind), button);
     }
 
     function squareName(file, rank) {
@@ -1428,6 +1476,16 @@ INDEX_HTML = """<!doctype html>
       return result;
     }
 
+    function currentGameLabel(data, white, black) {
+      const headers = data.headers || {};
+      const gameNumber = Number(headers.Round || data.game_index || 1);
+      const totalGames = Number(headers.TotalGames || data.total_games || 0);
+      const gameText = Number.isFinite(gameNumber) && gameNumber > 0
+        ? `Game ${gameNumber}${Number.isFinite(totalGames) && totalGames > 0 ? ` / ${totalGames}` : ""}`
+        : "Current game";
+      return `${gameText}: ${white} vs ${black}`;
+    }
+
     function liveClockTimeoutResult(data, white, black) {
       if (!data || data.completed || !latestClock || !latestClock.running_side) return "";
       const side = latestClock.running_side;
@@ -1451,6 +1509,7 @@ INDEX_HTML = """<!doctype html>
       viewedPly = ply;
 
       document.getElementById("players").textContent = `${white} vs ${black}`;
+      document.getElementById("current-game-title").textContent = currentGameLabel(data, white, black);
       document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
       document.getElementById("white-player").innerHTML = `<span class="dot-w"></span>White: ${escapeHtml(white)}`;
       document.getElementById("black-player").innerHTML = `<span class="dot-b"></span>Black: ${escapeHtml(black)}`;
@@ -1552,7 +1611,7 @@ INDEX_HTML = """<!doctype html>
       const container = document.getElementById("stats");
       document.getElementById("stats-meta").textContent = `${data.games} games`;
       previousMatches = data.matches || [];
-      if (!maybeFollowLatestLiveForBareHash()) {
+      if (!maybeFollowLatestLiveForBareHash() && !maybeFollowCurrentLiveBoard()) {
         selectPreviousMatchFromHash();
       }
       renderPreviousMatches();
@@ -1645,11 +1704,12 @@ INDEX_HTML = """<!doctype html>
 
     async function selectLiveMatch(match) {
       activeLivePgnPath = match.path || activeLivePgnPath || activePgnPath;
+      const controlPath = match.control_path || activeLivePgnPath || activePgnPath;
       try {
         const resp = await fetch("/api/live-selection", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: activeLivePgnPath || activePgnPath, game: match.game_index || 1 }),
+          body: JSON.stringify({ path: controlPath, game: match.game_index || 1 }),
         });
         if (!resp.ok) throw new Error("selection failed");
         setStatus(true, `Following game ${match.game_index || 1}`);
@@ -1664,6 +1724,21 @@ INDEX_HTML = """<!doctype html>
     function selectPreviousMatchFromHash() {
       const parsed = parseMatchHash();
       if (!parsed.slug || !previousMatches.length) return false;
+      if (parsed.liveGameIndex) {
+        const liveMatch = previousMatches.find(item => {
+          if (item.kind !== "live") return false;
+          if ((item.tournament_slug || "") !== parsed.slug) return false;
+          return Number(item.game_index || 1) === parsed.liveGameIndex;
+        });
+        if (!liveMatch) return false;
+        const alreadyFollowing = followLive
+          && !selectedMatch
+          && requestedLiveGame !== null
+          && Number(requestedLiveGame) === Number(liveMatch.game_index || 1)
+          && (!activeLivePgnPath || !liveMatch.path || activeLivePgnPath === liveMatch.path);
+        if (alreadyFollowing) return true;
+        return followLiveMatch(liveMatch);
+      }
       if (!parsed.gameIndex) return false;
       const match = previousMatches.find(item => {
         if (item.kind === "live") return false;
@@ -1786,6 +1861,7 @@ INDEX_HTML = """<!doctype html>
         if (!followLive && viewedPly !== null) params.set("ply", String(viewedPly));
         const resp = await fetch(`/api/game?${params}`, { cache: "no-store" });
         const data = await resp.json();
+        if (followLive && activeLivePgnPath && data.path && data.path !== activeLivePgnPath) return;
         setActivePgnPath(data.path || "");
         if (followLive && data.path) activeLivePgnPath = data.path;
         if (data.error) {
@@ -1799,6 +1875,7 @@ INDEX_HTML = """<!doctype html>
           syncMatchHash(data);
           setStatus(false, data.exists ? "No game" : "No PGN");
           document.getElementById("players").textContent = "No game loaded";
+          document.getElementById("current-game-title").textContent = "No game loaded";
           document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
           document.getElementById("white-player").innerHTML = '<span class="dot-w"></span>White: —';
           document.getElementById("black-player").innerHTML = '<span class="dot-b"></span>Black: —';
@@ -2295,6 +2372,7 @@ def tournament_slug(path: Path) -> str:
     slug = path.stem
     if slug.endswith("-live"):
         slug = slug.removesuffix("-live")
+    slug = re.sub(r"(-live-\d{8}-\d{6})-game-\d+$", r"\1", slug)
     return slug or path.name
 
 
@@ -2383,6 +2461,10 @@ def read_game(
     stat = path.stat()
     result_header = game.headers.get("Result", "*")
     completed = result_header != "*"
+    try:
+        total_games = int(game.headers.get("TotalGames", "0") or 0)
+    except ValueError:
+        total_games = 0
     result = {
         "exists": True,
         "has_game": True,
@@ -2393,6 +2475,7 @@ def read_game(
         "size": stat.st_size,
         "game_count": game_count,
         "game_index": selected_index,
+        "total_games": total_games,
         "headers": dict(game.headers),
         "fen": board.fen(),
         "turn": "White" if board.turn == chess.WHITE else "Black",
@@ -2515,10 +2598,14 @@ def live_status_matches(out_dir: Path, status_path: Path, fallback_pgn_path: Pat
 
     output_value = payload.get("output_pgn")
     output_pgn = Path(output_value) if output_value else fallback_pgn_path
+    control_value = payload.get("control_pgn")
+    control_pgn = Path(control_value) if control_value else (fallback_pgn_path or output_pgn)
     if output_pgn is None:
         return []
     if not output_pgn.is_absolute():
         output_pgn = fallback_pgn_path if fallback_pgn_path is not None else live_pgn_path_for_status(status_path)
+    if control_pgn is not None and not control_pgn.is_absolute():
+        control_pgn = fallback_pgn_path if fallback_pgn_path is not None else live_pgn_path_for_status(status_path)
     if not output_pgn.exists():
         return []
     if not live_pgn_has_in_progress_clock(output_pgn):
@@ -2551,6 +2638,7 @@ def live_status_matches(out_dir: Path, status_path: Path, fallback_pgn_path: Pat
                 "tournament_slug": slug,
                 "file": str(output_pgn.relative_to(out_dir)) if output_pgn.is_relative_to(out_dir) else str(output_pgn),
                 "path": str(output_pgn.resolve()),
+                "control_path": str((control_pgn or output_pgn).resolve()),
                 "game_index": game_no,
                 "total": int(game.get("total") or 0),
                 "is_board_game": is_board_game,

@@ -88,3 +88,11 @@
 - [x] Make timeout/invalid retries use urgent context-free prompts instead of repeated full-context app-server turns.
 - [x] Validate the revised timeout budget and retry prompt behavior with focused tests.
 - [x] Prefer the freshest active current-run engine track when a single unfinished FastChess game has stale earlier tracks.
+- [x] Require and display non-empty learner move comments outside urgent clock/retry mode.
+- [x] Preserve learner lesson timestamps when watcher cycles find no lesson-content updates.
+- [x] Validate comment and timestamp behavior with focused tests.
+- [x] Add game-specific live URL hashes for in-progress board selections.
+- [x] Validate live hash updates for initial live load and clicked in-progress match rows while preserving archived `--game-N` links.
+- [x] Write FastChess live board PGNs as per-game files with game-start timestamps while preserving run-level live selection/status control.
+- [x] Show a bold current-game header at the top of the viewer page.
+- [x] Validate per-game live filenames, live URL slug accuracy, and current-game header behavior.

@@ -91,6 +91,26 @@ class TimeLossHandlingTests(unittest.TestCase):
         self.assertIn("empty string", retry_prompt["comment_policy"])
         self.assertEqual(prompt["turn_timeout_seconds"], 25)
 
+    def test_codex_engine_non_urgent_comments_are_required_and_visible(self):
+        module = load_module("codex_chess_uci_comment_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
+        client = module.CodexAppServer("gpt-test", "high")
+
+        schema = client.comment_schema(True)
+
+        self.assertEqual(schema["minLength"], 1)
+        self.assertEqual(schema["maxLength"], 240)
+        self.assertEqual(client.visible_move_comment("e2e4", "", True), "Selected e2e4; model returned no comment.")
+        self.assertEqual(client.visible_move_comment("e2e4", "  contests   the center  ", True), "contests the center")
+
+    def test_codex_engine_urgent_comments_may_stay_empty(self):
+        module = load_module("codex_chess_uci_urgent_comment_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
+        client = module.CodexAppServer("gpt-test", "high")
+
+        schema = client.comment_schema(False)
+
+        self.assertNotIn("minLength", schema)
+        self.assertEqual(client.visible_move_comment("e2e4", "", False), "")
+
     def test_codex_engine_lean_context_is_smaller_than_full_context(self):
         module = load_module("codex_chess_uci_context_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
         client = module.CodexAppServer("gpt-test", "high", use_memory=True, use_skills=True, learning_mode=True)
@@ -417,7 +437,7 @@ class TimeLossHandlingTests(unittest.TestCase):
 
             mirror(stdout_path, log_dir, output_path, interval=0, once=True)
             status = json.loads(output_path.with_suffix(".status.json").read_text(encoding="utf-8"))
-            with output_path.open("r", encoding="utf-8") as handle:
+            with Path(status["output_pgn"]).open("r", encoding="utf-8") as handle:
                 game = chess.pgn.read_game(handle)
 
         self.assertIsNotNone(game)
@@ -534,7 +554,7 @@ class TimeLossHandlingTests(unittest.TestCase):
             finally:
                 mirror_module.current_epoch_ms = original_now
             status = json.loads(output_path.with_suffix(".status.json").read_text(encoding="utf-8"))
-            with output_path.open("r", encoding="utf-8") as handle:
+            with Path(status["output_pgn"]).open("r", encoding="utf-8") as handle:
                 game = chess.pgn.read_game(handle)
 
         self.assertIsNotNone(game)
@@ -546,6 +566,76 @@ class TimeLossHandlingTests(unittest.TestCase):
         self.assertEqual([item["status"] for item in status["games"][:4]], ["Completed"] * 4)
         self.assertEqual(status["games"][4]["status"], "In progress")
         self.assertTrue(status["games"][4]["is_board_game"])
+
+    def test_mirror_writes_board_game_to_game_timestamped_live_pgn(self):
+        from tools.live_pgn_viewer import collect_stats, tournament_slug
+
+        stdout_text = "\n".join(
+            [
+                "Started game 1 of 100 (Codex-chess vs Codex-chess-learner)",
+                "Finished game 1 (Codex-chess vs Codex-chess-learner): 1/2-1/2 {normal}",
+                "Started game 2 of 100 (Codex-chess-learner vs Codex-chess)",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stdout_path = root / "codex-vs-codex-learner-live-20260514-125617-launch.out.log"
+            log_dir = root / "logs"
+            output_path = root / "live" / "codex-vs-codex-learner-live-20260514-125617-live.pgn"
+            log_dir.mkdir()
+            output_path.parent.mkdir()
+            stdout_path.write_text(stdout_text, encoding="utf-8")
+            os.utime(stdout_path, (log_timestamp_ms("2026-05-14 12:56:10") / 1000, log_timestamp_ms("2026-05-14 12:56:10") / 1000))
+            (root / "codex-vs-codex-learner-live-20260514-125617.pgn").write_text("", encoding="utf-8")
+            (log_dir / "codex-chess-game1.log").write_text(
+                "\n".join(
+                    [
+                        "[2026-05-14 12:56:17] > position startpos",
+                        "[2026-05-14 12:56:17] > go wtime 999999999 btime 999999999",
+                        "[2026-05-14 12:56:21] > position startpos moves e2e4",
+                        "[2026-05-14 12:56:21] > go wtime 999990000 btime 999999999",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (log_dir / "codex-chess-game2.log").write_text(
+                "\n".join(
+                    [
+                        "[2026-05-14 15:47:11] > position startpos",
+                        "[2026-05-14 15:47:11] > go wtime 999999999 btime 999999999",
+                        "[2026-05-14 15:47:15] > position startpos moves d2d4",
+                        "[2026-05-14 15:47:15] > go wtime 999990000 btime 999999999",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            original_now = mirror_module.current_epoch_ms
+            mirror_module.current_epoch_ms = lambda: log_timestamp_ms("2026-05-14 15:47:18")
+            try:
+                mirror(stdout_path, log_dir, output_path, interval=0, once=True)
+            finally:
+                mirror_module.current_epoch_ms = original_now
+            status = json.loads(output_path.with_suffix(".status.json").read_text(encoding="utf-8"))
+            board_path = Path(status["output_pgn"])
+            with board_path.open("r", encoding="utf-8") as handle:
+                game = chess.pgn.read_game(handle)
+            stats = collect_stats(root, None, None, output_path)
+            live_match = next(item for item in stats["matches"] if item["kind"] == "live")
+
+        self.assertEqual(board_path.name, "codex-vs-codex-learner-live-20260514-154711-game-2-live.pgn")
+        self.assertEqual(tournament_slug(board_path), "codex-vs-codex-learner-live-20260514-154711")
+        self.assertEqual(live_match["tournament_slug"], "codex-vs-codex-learner-live-20260514-154711")
+        self.assertEqual(live_match["game_index"], 2)
+        self.assertEqual(Path(live_match["control_path"]), output_path)
+        self.assertEqual(Path(status["control_pgn"]), output_path)
+        self.assertIsNotNone(game)
+        assert game is not None
+        self.assertEqual(game.headers["Round"], "2")
+        self.assertEqual(game.headers["TotalGames"], "100")
+        self.assertEqual(game.headers["GameStartTime"], "2026-05-14 15:47:11")
+        self.assertIn("1. d4", str(game))
 
     def test_viewer_stats_prefers_newest_in_progress_live_status(self):
         from tools.live_pgn_viewer import collect_stats
