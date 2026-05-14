@@ -1,12 +1,13 @@
 # Live Match Lessons
 
-Generated: 2026-05-13 12:27:31
-Completed games: 2 / 10
-Learner score: 0.0 (0.0%)
+Generated: 2026-05-14 15:11:28
+Completed games: 12 / 100
+Learner score: 5.0 (41.67%)
 
 ## Result Shape
-- illegal move: 1
-- white's connection stalls: 1
+- mate: 7
+- threefold repetition: 3
+- time: 2
 
 ## Durable Move Rules
 - Copy `uci` exactly from `legal_moves`; never output `0000` while legal moves exist.
@@ -16,9 +17,20 @@ Learner score: 0.0 (0.0%)
 - In winning endings, convert material with forcing moves and pawn promotion plans; do not shuffle the king until the clock collapses.
 
 ## Repeated Lines To Avoid
-- 1 games, score 0.0: 1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 Nc6
-- 1 games, score 0.0: 1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O
+- 2 games, score 1.5: 1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 Nc6
+- 2 games, score 0.0: 1. e4 e5 2. Nf3 Nc6 3. Bb5 Nf6 4. O-O Be7 5. Re1 O-O
+- 1 games, score 0.5: 1. Nf3 d5 2. d4 Nf6 3. c4 c6 4. Nc3 e6 5. Bg5 Be7
+- 1 games, score 0.5: 1. Nf3 d5 2. d4 Nf6 3. c4 dxc4 4. Qa4+ b5 5. Qxb5+ c6
+- 1 games, score 0.5: 1. Nf3 d5 2. d4 Nf6 3. c4 e6 4. Nc3 Bb4 5. e3 O-O
+- 1 games, score 0.5: 1. Nf3 d5 2. d4 Nf6 3. c4 e6 4. Nc3 Be7 5. Bg5 O-O
+- 1 games, score 0.5: 1. Nf3 d5 2. d4 Nf6 3. c4 e6 4. Nc3 c5 5. cxd5 exd5
+- 1 games, score 0.0: 1. d4 d5 2. Nf3 Nf6 3. c4 e6 4. Nc3 Be7 5. Bg5 O-O
 
-## Learner Illegal-Move Losses
-- A `0000` illegal move after real plies usually means the model timed out or returned invalid JSON three consecutive times. Treat it as a clock/format failure, not a chess tactic.
-- Game 1 as Black: Black makes an illegal move after 17 plies; 1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O
+## Learner Mate Losses
+- Game 6 as White: Black mates after 48 plies; 1. e4 e5 2. Nf3 Nc6 3. Bb5 Nf6 4. O-O Be7 5. Re1 O-O
+
+## Learner Time Losses
+- Time losses are move-selection failures. Improve time management, but still choose a move intentionally from the position.
+- Prefer a forcing capture, check, passed-pawn push, king move toward passed pawns, or simple recapture when that is the best evaluated plan.
+- Game 8 as White: White loses on time after 242 plies; 1. d4 d5 2. Nf3 Nf6 3. c4 e6 4. Nc3 Be7 5. Bg5 O-O
+- Game 12 as White: White loses on time after 176 plies; 1. e4 e5 2. Nf3 Nc6 3. Bb5 Nf6 4. O-O Be7 5. Re1 O-O

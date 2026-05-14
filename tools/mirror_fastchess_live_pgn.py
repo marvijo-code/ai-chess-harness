@@ -307,6 +307,7 @@ def select_engine_state(
     locked_moves: list[str] | None,
     since_ms: int | None = None,
     tracks: list[dict] | None = None,
+    now_ms: int | None = None,
 ) -> tuple[dict, list[str] | None]:
     if tracks is None:
         tracks = collect_engine_tracks(log_dir, since_ms)
@@ -323,6 +324,12 @@ def select_engine_state(
             selected = tracks[game_index]
         else:
             selected = max(tracks, key=lambda item: item["updated_at"])
+        unfinished_games = [game for game in games if not game.get("finished")]
+        if len(unfinished_games) == 1 and len(tracks) > 1:
+            active_tracks = [track for track in tracks if time_loss_for(current, track, now_ms) is None]
+            latest = max(active_tracks or tracks, key=lambda item: (item.get("updated_at", 0), len(item.get("moves", []))))
+            if latest.get("updated_at", 0) >= selected.get("updated_at", 0):
+                selected = latest
         return selected, list(selected.get("moves", []))
 
     if locked_moves:
@@ -513,8 +520,8 @@ def mirror(stdout_path: Path, log_dir: Path, output_path: Path, interval: float,
         if locked_game != previous_locked_game:
             locked_moves = None
         if current is not None:
-            state, locked_moves = select_engine_state(log_dir, games, current, locked_moves, since_ms, tracks)
             now_ms = current_epoch_ms()
+            state, locked_moves = select_engine_state(log_dir, games, current, locked_moves, since_ms, tracks, now_ms)
             current = game_with_timeout(current, state, now_ms)
             text = pgn_text(build_game(current, state, now_ms))
             if text != previous:

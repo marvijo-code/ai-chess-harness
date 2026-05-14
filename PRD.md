@@ -57,6 +57,7 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 48. A completed or stale bare live URL hash must resolve to the newest fresh in-progress live match even when that active match slug sorts before the stale hash, while explicit `#slug--game-N` links stay archived replay links.
 49. The live mirror must reconcile stale FastChess launch stdout with the real FastChess `*.pgn` output and current engine tracks, must not pin an unfinished current game to stale locked moves from an older repeated-opening track, and stale daemon mirrors must stop refreshing live status when their own run artifacts are no longer fresh.
 50. FastChess learner runs stay at 5+0 by default, but Codex move budgeting must avoid self-inflicted timeouts: normal mid-clock moves get enough app-server wait budget, and retry prompts after a timeout or invalid move must drop learner context, drop comments, and use a lower-effort urgent turn instead of restarting multiple full-context high-effort turns that burn the clock.
+51. If FastChess still reports a single unfinished game while current-run engine logs contain multiple move-line tracks, the live mirror must show the freshest active track for that game instead of keeping an older stale track whose wall-clock timeout would make the board look completed while engines keep playing.
 
 ## Validation Requirements
 

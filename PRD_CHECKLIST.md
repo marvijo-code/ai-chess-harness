@@ -87,3 +87,4 @@
 - [x] Keep the default FastChess run at 5+0 while fixing Codex app-server timeout budgeting.
 - [x] Make timeout/invalid retries use urgent context-free prompts instead of repeated full-context app-server turns.
 - [x] Validate the revised timeout budget and retry prompt behavior with focused tests.
+- [x] Prefer the freshest active current-run engine track when a single unfinished FastChess game has stale earlier tracks.

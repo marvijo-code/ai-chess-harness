@@ -271,6 +271,39 @@ class TimeLossHandlingTests(unittest.TestCase):
         self.assertEqual(state["moves"], ["d2d4", "d7d5"])
         self.assertEqual(locked_moves, ["d2d4", "d7d5"])
 
+    def test_live_mirror_prefers_fresh_single_game_track_over_stale_timeout_track(self):
+        games = [
+            {"game": 1, "finished": False, "white": "Codex-chess", "black": "Codex-chess-learner"},
+        ]
+        stale_track = {
+            "moves": ["e2e4", "c7c5"],
+            "updated_at": 1000,
+            "wtime": 0,
+            "btime": 200000,
+            "running_side": "White",
+            "clocks_by_ply": {},
+        }
+        current_track = {
+            "moves": ["g1f3", "d7d5", "d2d4", "g8f6"],
+            "updated_at": 2000,
+            "wtime": 290000,
+            "btime": 291000,
+            "running_side": "White",
+            "clocks_by_ply": {},
+        }
+
+        state, locked_moves = select_engine_state(
+            Path("."),
+            games,
+            games[0],
+            None,
+            tracks=[stale_track, current_track],
+            now_ms=2500,
+        )
+
+        self.assertEqual(state["moves"], current_track["moves"])
+        self.assertEqual(locked_moves, current_track["moves"])
+
     def test_live_mirror_does_not_pin_unfinished_game_to_stale_locked_moves(self):
         games = [
             {"game": 1, "finished": True},
