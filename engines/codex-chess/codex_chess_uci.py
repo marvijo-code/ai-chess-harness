@@ -93,6 +93,11 @@ def int_env_value(name: str, default: int) -> int:
         return default
 
 
+def context_limit(engine_profile: str, context_profile: str, key: str, default: int) -> int:
+    value = int_config_value(f"codex.contextLimits.{engine_profile}.{context_profile}.{key}", default)
+    return max(0, value)
+
+
 def material_balance(board: chess.Board, color: bool) -> int:
     own = 0
     enemy = 0
@@ -500,21 +505,34 @@ class CodexAppServer:
             return {}
         lean = profile == "lean"
         if self.zero_mode:
-            memory_chars = 700 if lean else 1000
-            fen_chars = 300 if lean else 500
-            strategy_chars = 500 if lean else 800
-            kb_files = 2
-            kb_chars = 500 if lean else 700
-            skill_files = 0 if lean else 1
-            skill_chars = 400
+            engine_profile = "zero"
+            default_limits = {
+                "memoryChars": 600 if lean else 900,
+                "fenChars": 250 if lean else 450,
+                "strategyChars": 300 if lean else 600,
+                "knowledgebaseFiles": 1 if lean else 2,
+                "knowledgebaseChars": 300 if lean else 500,
+                "skillFiles": 0,
+                "skillChars": 0,
+            }
         else:
-            memory_chars = 1400 if lean else 3000
-            fen_chars = 900 if lean else 1800
-            strategy_chars = 1400 if lean else 2800
-            kb_files = 2 if lean else 4
-            kb_chars = 700 if lean else 1400
-            skill_files = 1 if lean else 2
-            skill_chars = 600 if lean else 1000
+            engine_profile = "learner"
+            default_limits = {
+                "memoryChars": 700 if lean else 1200,
+                "fenChars": 350 if lean else 700,
+                "strategyChars": 500 if lean else 1000,
+                "knowledgebaseFiles": 1 if lean else 2,
+                "knowledgebaseChars": 350 if lean else 600,
+                "skillFiles": 0 if lean else 1,
+                "skillChars": 0 if lean else 350,
+            }
+        memory_chars = context_limit(engine_profile, profile, "memoryChars", default_limits["memoryChars"])
+        fen_chars = context_limit(engine_profile, profile, "fenChars", default_limits["fenChars"])
+        strategy_chars = context_limit(engine_profile, profile, "strategyChars", default_limits["strategyChars"])
+        kb_files = context_limit(engine_profile, profile, "knowledgebaseFiles", default_limits["knowledgebaseFiles"])
+        kb_chars = context_limit(engine_profile, profile, "knowledgebaseChars", default_limits["knowledgebaseChars"])
+        skill_files = context_limit(engine_profile, profile, "skillFiles", default_limits["skillFiles"])
+        skill_chars = context_limit(engine_profile, profile, "skillChars", default_limits["skillChars"])
         fen_knowledge = read_limited_text(FEN_KNOWLEDGE_PATH, fen_chars)
         strategy_lessons = read_limited_text(STRATEGY_LESSONS_PATH, strategy_chars)
         policy = (
@@ -578,6 +596,15 @@ class CodexAppServer:
         if remaining_after_elapsed <= 1:
             return 1
         return max(1, min(retry_timeout, remaining_after_elapsed - 1))
+
+    def move_effort(self, critical_clock: bool) -> str:
+        if critical_clock:
+            return str(config_value("codex.criticalMoveEffort", config_value("codex.retryEffort", "low")))
+        if self.zero_mode:
+            return str(config_value("codex.zeroMoveEffort", "low"))
+        if self.learning_mode:
+            return str(config_value("codex.learnerMoveEffort", "medium"))
+        return self.effort
 
     def comment_schema(self, require_comment: bool) -> dict:
         schema = {"type": "string", "maxLength": 240}
@@ -643,13 +670,16 @@ class CodexAppServer:
 
         await self.start()
         repetition = self.client_repetition_risk(board, legal_moves)
-        material_safety = material_safety_summary(board, legal_moves)
+        material_safety_limit = max(1, int_config_value("codex.materialSafetyMaxItems", 8))
+        material_safety = material_safety_summary(board, legal_moves, max_items=material_safety_limit)
 
         critical_context_below = int_env_value("CODEX_CHESS_CRITICAL_CONTEXT_BELOW_MS", int_config_value("codex.criticalContextBelowMs", 60000))
         lean_context_below = int_env_value("CODEX_CHESS_LEAN_CONTEXT_BELOW_MS", int_config_value("codex.leanContextBelowMs", 240000))
         critical_clock = remaining is not None and remaining < critical_context_below
         lean_clock = self.force_lean_context or (remaining is not None and remaining < lean_context_below)
         comment_required = not critical_clock and not self.zero_mode
+        history_limit = max(0, int_config_value("codex.historyMoveLimit", 16))
+        recent_history = history[-history_limit:] if history_limit else []
         prompt = {
             "engine": ENGINE_NAME,
             "engine_profile": "zero" if self.zero_mode else "standard",
@@ -658,7 +688,8 @@ class CodexAppServer:
             "fen": board.fen(),
             "legal_moves": legal_moves,
             "material_safety": material_safety,
-            "uci_history": history[-20:] if critical_clock else history,
+            "uci_history": recent_history,
+            "omitted_history_count": max(0, len(history) - len(recent_history)),
             "clock_ms": {
                 "white": go_args.get("wtime"),
                 "black": go_args.get("btime"),
@@ -690,6 +721,7 @@ class CodexAppServer:
                 "Use material_safety as current-position tactical context. Do not describe a move as simplifying "
                 "if material_safety says an immediate legal reply wins your queen, rook, or large material with no forced compensation."
             ),
+            "_turn_effort": self.move_effort(critical_clock),
         }
         if self.zero_mode:
             prompt["time_management"] += (
@@ -720,6 +752,8 @@ class CodexAppServer:
             f"side={prompt['side_to_move']} fen={board.fen()} "
             f"legal_moves={len(legal_moves)} own_remaining={remaining} own_increment={increment or 0} "
             f"learner_context={context_profile} timeout={prompt['turn_timeout_seconds']}s "
+            f"effort={prompt['_turn_effort']} history={len(recent_history)}/{len(history)} "
+            f"material_risks={len(material_safety.get('risky_moves', []))} "
             f"repeat_moves={repetition['repeat_moves']} threefold_moves={repetition['threefold_moves']}"
         )
 

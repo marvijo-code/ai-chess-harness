@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from unittest.mock import patch
 
 import chess
 import chess.pgn
@@ -76,6 +77,40 @@ class StrategyLessonTests(unittest.TestCase):
         matching = [item for item in summary["observations"] if item["category"] == "hanging_checking_piece"]
         self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0]["evidence_count"], 2)
+
+    def test_pending_strategy_evidence_survives_deferred_watch_cycle(self):
+        games, path = self.read_synthetic_games(1)
+        first = build_strategy_lesson_summary(games, path, None, generated_at="first")
+        first["concept_synthesis"] = {
+            "status": "deferred",
+            "message": "concept synthesis deferred while live training is running",
+        }
+
+        second = build_strategy_lesson_summary(games, path, None, generated_at="second", previous=first)
+
+        self.assertEqual(second["new_evidence_count"], 0)
+        self.assertGreater(len(second["pending_synthesis_evidence"]), 0)
+        self.assertEqual(second["concept_synthesis"]["status"], "deferred")
+
+    def test_pending_strategy_evidence_triggers_later_synthesis_attempt(self):
+        games, path = self.read_synthetic_games(1)
+        summary = build_strategy_lesson_summary(games, path, None, generated_at="test")
+        summary["new_evidence"] = []
+        summary["new_evidence_count"] = 0
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("tools.update_learner_knowledgebase.Path.home", return_value=Path(temp_dir)):
+                concepts, synthesis = synthesize_strategy_concepts(summary, "gpt-test", "low", 1)
+
+        previous = {**summary, "generated_at": "old", "concept_synthesis": {"status": "deferred"}}
+        summary["concepts"] = concepts
+        summary["concept_synthesis"] = synthesis
+        stable = preserve_strategy_generated_at_if_no_new_evidence(summary, previous)
+
+        self.assertEqual(concepts, [])
+        self.assertEqual(synthesis["status"], "unavailable")
+        self.assertIn("query script not found", synthesis["message"])
+        self.assertEqual(stable["concept_synthesis"]["status"], "unavailable")
 
     def test_live_lesson_timestamp_is_preserved_when_summary_is_unchanged(self):
         previous = {

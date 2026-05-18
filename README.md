@@ -150,7 +150,7 @@ Run the same harness against Zero instead of the learner:
 .\play-games.ps1 -LearningEngine zero -n 20
 ```
 
-With the checked-in config, the script sets both engine processes to `CODEX_CHESS_MODEL=gpt-5.3-codex` and `CODEX_CHESS_EFFORT=high`. This is an environment override for the tournament run only; it does not modify the installed Codex app or CLI configuration. The script preflights the selected Codex model before starting FastChess, so a usage-limit or unavailable-model error fails before a long match can produce zero-ply forfeits. Results are written to `out\fastchess`.
+With the checked-in config, the script sets both engine processes to `CODEX_CHESS_MODEL=gpt-5.3-codex` and `CODEX_CHESS_EFFORT=high`. This is an environment override for the tournament run only; it does not modify the installed Codex app or CLI configuration. During learner training, the engine still uses that model but caps prompt payloads and uses the configured faster per-turn learner/critical/Zero efforts in `chess-harness.config.json` so active games are not dominated by oversized high-effort turns. The script preflights the selected Codex model before starting FastChess, so a usage-limit or unavailable-model error fails before a long match can produce zero-ply forfeits. Results are written to `out\fastchess`.
 
 The script prints the exact PGN path before the match starts. FastChess writes it under `out\fastchess\codex-vs-codex-learner-<timestamp>.pgn` by default, or the configured Zero run name when `-LearningEngine zero` is selected; the file is created during the run and populated as games finish. Matching FastChess config and log files are written beside it.
 
@@ -171,6 +171,8 @@ Use FastChess wording for parallel games. `-Concurrency` is the public launcher 
 ```powershell
 .\play-games.ps1 -Games 20 -Concurrency 2
 ```
+
+If CPU becomes the bottleneck, keep `-Concurrency` low and rely on the fast training profile instead of starting more Codex app-server processes. The checked-in defaults cap history, material-safety rows, learner memory, FEN lessons, strategy lessons, knowledgebase files, and skills per move, while leaving the no-fallback legal-move boundary intact.
 
 The FastChess live wrapper uses the single dedicated local viewer URL `http://127.0.0.1:8766/`. If an older live-viewer process is already on that port, the wrapper restarts that viewer on the same port instead of moving to another URL. The wrapper does not expose a port selector. While FastChess is still inside a game, the wrapper starts `tools\mirror_fastchess_live_pgn.py` and points the viewer at `out\live\<run>-live.pgn` so the board has a current position before FastChess writes the final `-pgnout` game.
 
@@ -207,6 +209,16 @@ python .\tools\update_learner_knowledgebase.py `
   --stdout .\out\fastchess\<run>-launch.out.log `
   --watch
 ```
+
+The live wrapper defers concept synthesis during active games by default (`learner.conceptSynthesisDuringWatch=false`) and runs one final synthesis pass after FastChess exits (`learner.conceptSynthesisAfterRun=true`). That keeps the watcher cheap while games are running, preserves pending evidence in `strategy-lessons.json`, and still writes generalized concepts at the end of the run.
+
+To prove the learner can actually use newly written context and improve, run the isolated before/after UCI proof:
+
+```powershell
+python .\tools\prove_learner_improvement.py --model gpt-5.3-codex --effort medium
+```
+
+The proof creates temporary learner contexts under `out\learner-proof\<timestamp>`, asks the same UCI engine to move before and after a new proof lesson is present, and passes only when the learned-context score improves. It does not edit the real learner memory or knowledgebase.
 
 For Zero autolearn, target its separate context explicitly; the live wrapper does this automatically when started with `-LearningEngine zero`:
 

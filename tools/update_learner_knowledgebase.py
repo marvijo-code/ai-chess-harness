@@ -423,6 +423,8 @@ def preserve_generated_at_if_unchanged(summary: dict, previous: dict | None, ign
 def preserve_strategy_generated_at_if_no_new_evidence(summary: dict, previous: dict | None) -> dict:
     if not previous or not previous.get("generated_at") or summary.get("new_evidence_count"):
         return summary
+    if summary.get("concepts") != previous.get("concepts") or summary.get("concept_synthesis") != previous.get("concept_synthesis"):
+        return summary
     stable = dict(summary)
     for key in ("generated_at", "source_pgn", "source_stdout", "concepts", "concept_synthesis"):
         if key in previous:
@@ -446,7 +448,7 @@ def parse_json_object(text: str) -> dict:
 
 def concept_synthesis_prompt(summary: dict) -> str:
     existing = summary.get("concepts", [])[:12]
-    evidence = summary.get("new_evidence", [])[:30]
+    evidence = (summary.get("pending_synthesis_evidence") or summary.get("new_evidence", []))[:30]
     payload = {
         "task": (
             "Update a chess learner's own generalized concepts from self-play evidence. "
@@ -480,7 +482,8 @@ def concept_synthesis_prompt(summary: dict) -> str:
 
 
 def synthesize_strategy_concepts(summary: dict, model: str, effort: str, timeout: int) -> tuple[list[dict], dict]:
-    if not summary.get("new_evidence"):
+    evidence = summary.get("pending_synthesis_evidence") or summary.get("new_evidence")
+    if not evidence:
         return summary.get("concepts", []), summary.get("concept_synthesis") or {
             "status": "unchanged",
             "message": "no new self-play evidence",
@@ -539,7 +542,7 @@ def synthesize_strategy_concepts(summary: dict, model: str, effort: str, timeout
                 normalized.append(concept)
         return normalized, {
             "status": "ok",
-            "message": f"synthesized {len(normalized)} generalized concepts from {summary['new_evidence_count']} new observations",
+            "message": f"synthesized {len(normalized)} generalized concepts from {len(evidence)} pending observations",
             "model": model,
             "effort": effort,
         }
@@ -725,6 +728,8 @@ def build_strategy_lesson_summary(
     observations: dict[str, dict] = {}
     seen_keys: list[str] = []
     seen_key_set: set[str] = set()
+    pending_synthesis: list[dict] = []
+    pending_synthesis_keys: set[str] = set()
     concepts = previous.get("concepts", []) if previous and isinstance(previous.get("concepts"), list) else []
     concept_synthesis = previous.get("concept_synthesis", {}) if previous and isinstance(previous.get("concept_synthesis"), dict) else {}
     if previous:
@@ -751,6 +756,14 @@ def build_strategy_lesson_summary(
                     if key not in seen_key_set:
                         seen_keys.append(key)
                         seen_key_set.add(key)
+        for event in previous.get("pending_synthesis_evidence", []):
+            if not isinstance(event, dict):
+                continue
+            key = strategy_evidence_key(event)
+            if key in pending_synthesis_keys:
+                continue
+            pending_synthesis.append(event)
+            pending_synthesis_keys.add(key)
 
     new_events = []
     for event in events:
@@ -773,6 +786,9 @@ def build_strategy_lesson_summary(
         entry["evidence_count"] += 1
         if len(entry["evidence"]) < 6:
             entry["evidence"].append(event)
+        if key not in pending_synthesis_keys:
+            pending_synthesis.append(event)
+            pending_synthesis_keys.add(key)
 
     priority = {category: index for index, category in enumerate(EVIDENCE_TYPES)}
     observation_items = sorted(observations.values(), key=lambda item: (-item["evidence_count"], priority[item["category"]]))[:12]
@@ -786,6 +802,7 @@ def build_strategy_lesson_summary(
         "evidence_keys": seen_keys[-1000:],
         "new_evidence": new_events[:40],
         "new_evidence_count": len(new_events),
+        "pending_synthesis_evidence": pending_synthesis[-80:],
         "observations": observation_items,
         "concepts": concepts,
         "concept_synthesis": concept_synthesis,
@@ -1182,10 +1199,10 @@ def run_once(args: argparse.Namespace) -> dict:
         previous=previous_strategy,
     )
     if args.no_concept_synthesis:
-        if strategy_summary.get("new_evidence"):
+        if strategy_summary.get("pending_synthesis_evidence") or strategy_summary.get("new_evidence"):
             strategy_summary["concept_synthesis"] = {
-                "status": "disabled",
-                "message": "concept synthesis disabled for this run",
+                "status": "deferred",
+                "message": "concept synthesis deferred while live training is running",
             }
     else:
         concepts, synthesis = synthesize_strategy_concepts(
@@ -1196,6 +1213,8 @@ def run_once(args: argparse.Namespace) -> dict:
         )
         strategy_summary["concepts"] = concepts
         strategy_summary["concept_synthesis"] = synthesis
+        if synthesis.get("status") == "ok":
+            strategy_summary["pending_synthesis_evidence"] = []
     strategy_summary = preserve_strategy_generated_at_if_no_new_evidence(strategy_summary, previous_strategy)
     write_atomic(args.strategy_output, render_strategy_markdown(strategy_summary))
     write_atomic(args.strategy_json, json.dumps(strategy_summary, indent=2))

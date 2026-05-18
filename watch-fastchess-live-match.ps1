@@ -171,6 +171,8 @@ $liveRunNamePath = if ($learningEngineSpec.Key -eq "zero") { "fastChess.zeroLive
 $liveRunNameDefault = if ($learningEngineSpec.Key -eq "zero") { "codex-vs-codex-zero-live" } else { "codex-vs-codex-learner-live" }
 $runName = [string](Get-HarnessConfigValue -Config $config -Path $liveRunNamePath -Default $liveRunNameDefault)
 $autoLearnIntervalSeconds = [int](Get-HarnessConfigValue -Config $config -Path "learner.autoLearnIntervalSeconds" -Default 10)
+$conceptSynthesisDuringWatch = [bool](Get-HarnessConfigValue -Config $config -Path "learner.conceptSynthesisDuringWatch" -Default $false)
+$conceptSynthesisAfterRun = [bool](Get-HarnessConfigValue -Config $config -Path "learner.conceptSynthesisAfterRun" -Default $true)
 
 if ($Games -lt 1) {
     throw "-Games must be at least 1."
@@ -349,6 +351,9 @@ if (-not $runFastChess) {
             "--watch",
             "--interval", "$autoLearnIntervalSeconds"
         )
+        if (-not $conceptSynthesisDuringWatch) {
+            $autolearnArgs += "--no-concept-synthesis"
+        }
         $autolearnProcess = Start-Process `
             -FilePath "python" `
             -ArgumentList (ConvertTo-ProcessArguments -Arguments $autolearnArgs) `
@@ -399,6 +404,9 @@ if (-not $learnerAutoLearnDisabled) {
         "--watch",
         "--interval", "$autoLearnIntervalSeconds"
     )
+    if (-not $conceptSynthesisDuringWatch) {
+        $autolearnArgs += "--no-concept-synthesis"
+    }
     $autolearnProcess = Start-Process `
         -FilePath "python" `
         -ArgumentList (ConvertTo-ProcessArguments -Arguments $autolearnArgs) `
@@ -413,6 +421,29 @@ if (-not $learnerAutoLearnDisabled) {
 
 try {
     & $runnerScript @runParams 2>&1 | Tee-Object -FilePath $launchOut
+    if ((-not $learnerAutoLearnDisabled) -and $conceptSynthesisAfterRun) {
+        if ($autolearnProcess -and -not $autolearnProcess.HasExited) {
+            Wait-Process -Id $autolearnProcess.Id -Timeout ([Math]::Max(3, $autoLearnIntervalSeconds + 3)) -ErrorAction SilentlyContinue
+        }
+        if ($autolearnProcess -and -not $autolearnProcess.HasExited) {
+            Stop-Process -Id $autolearnProcess.Id -Force
+            Write-Host "Stopped live-watch autolearn process $($autolearnProcess.Id) before final concept synthesis."
+        }
+        $finalAutolearnArgs = @(
+            $autolearnScript,
+            "--engine-name", $learningEngineSpec.EngineName,
+            "--context-dir", $learningEngineSpec.ContextDir,
+            "--pgn", $pgnPath,
+            "--stdout", $launchOut
+        )
+        Write-Host "Running final $($learningEngineSpec.EngineName) concept synthesis after FastChess completed..."
+        & python @finalAutolearnArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Final $($learningEngineSpec.EngineName) concept synthesis exited with code $LASTEXITCODE."
+        } else {
+            Write-Host "Final $($learningEngineSpec.EngineName) concept synthesis complete."
+        }
+    }
 } finally {
     if ($stopViewerWhenDoneEnabled) {
         $viewerStopTargets = @(Get-LiveViewerProcessOnPort -ViewerPort $viewerPort)

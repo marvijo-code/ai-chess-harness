@@ -70,6 +70,9 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 61. Learner and Zero post-game feedback should share the same autolearn code path through a target engine/name/context option, so the watcher can update either engine after games without mixing their memories.
 62. Learner `MEMORY.md` autolearn updates should only rewrite the block when score, reasons, or rule content changes; watcher cycles must not dirty the file with only a newer `Last updated` value.
 63. The live viewer should reduce fixed browser polling for game, stats, learner, and hot-reload updates by using the existing Python viewer process as a push source. SignalR is not the preferred implementation unless a future .NET host or bidirectional hub contract is introduced; the current account-free one-way file-change workflow should use a lightweight server-sent events stream with polling fallback.
+64. Learner training should reduce active-game Codex latency without weakening the no-fallback contract: move prompts should cap history, material-safety rows, memory, FEN lessons, strategy lessons, knowledgebase, and skills to compact configurable limits, and training/critical/Zero turns may use lower per-turn effort while preserving the configured default model.
+65. Learner autolearn watchers should avoid competing with active games for Codex app-server and CPU time. During a live FastChess run, the watcher may defer concept synthesis while still collecting evidence and updating lightweight lesson summaries; after FastChess exits, the wrapper should run one final synthesis pass so generalized concepts are still written.
+66. Learner improvement claims need a repeatable proof artifact, not only passing unit tests. A controlled proof may use a temporary learner context, run the same UCI engine before and after adding a knowledgebase lesson, and pass only when the learned-context score is higher while the no-fallback legal-move boundary is preserved.
 
 ## Validation Requirements
 
@@ -128,3 +131,6 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 12. Focused autolearn tests verify unchanged lesson summaries preserve their previous generated timestamp.
 13. Focused autolearn tests verify unchanged `MEMORY.md` autolearn content does not rewrite only the `Last updated` value.
 14. Focused viewer tests verify the push update stream advertises game, stats, learner, and viewer-version changes, and browser E2E proves the viewer uses the stream without continuing fixed game/stats/learner polling when the stream is connected.
+15. Focused engine tests verify fast learner training caps prompt payload size and uses configured lower per-turn effort for learner, critical-clock, and Zero moves without changing the default model or fallback boundary.
+16. Focused autolearn tests verify deferred concept synthesis preserves pending evidence during watch cycles and a later final pass can synthesize from that pending evidence.
+17. A learner-improvement proof run writes JSON/Markdown artifacts showing the exact before/after prompts, model, expected legal moves, observed UCI moves, score delta, and pass/fail verdict.

@@ -110,3 +110,8 @@
 - [x] Validate unchanged autolearn memory content preserves the existing `Last updated` line.
 - [x] Add a lightweight push-update stream to reduce fixed viewer API polling without introducing a SignalR/.NET service.
 - [x] Validate the push stream server behavior and browser behavior, including fallback polling when the stream is unavailable.
+- [x] Cap learner training prompt payloads and use configured faster per-turn effort for learner, critical-clock, and Zero turns.
+- [x] Defer live-watch concept synthesis until after FastChess exits while preserving pending evidence.
+- [x] Validate focused engine/autolearn behavior and parser/compile checks.
+- [x] Add a repeatable learner-improvement proof script that uses a temporary context and records before/after UCI behavior.
+- [x] Run the proof script against the local Codex app-server model and archive the JSON/Markdown result.

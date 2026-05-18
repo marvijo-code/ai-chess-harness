@@ -125,6 +125,18 @@ class TimeLossHandlingTests(unittest.TestCase):
         self.assertLessEqual(len(lean_context["knowledgebase"]), len(full_context["knowledgebase"]))
         self.assertLessEqual(len(lean_context["skills"]), len(full_context["skills"]))
 
+    def test_codex_engine_training_effort_is_lower_than_default_high(self):
+        module = load_module("codex_chess_uci_fast_training_effort_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
+
+        baseline = module.CodexAppServer("gpt-test", "high")
+        learner = module.CodexAppServer("gpt-test", "high", learning_mode=True)
+        zero = module.CodexAppServer("gpt-test", "high", learning_mode=True, zero_mode=True)
+
+        self.assertEqual(baseline.move_effort(False), "high")
+        self.assertEqual(learner.move_effort(False), "medium")
+        self.assertEqual(learner.move_effort(True), "low")
+        self.assertEqual(zero.move_effort(False), "low")
+
     def test_codex_zero_mode_uses_fast_lean_first_principles_context(self):
         module = load_module("codex_chess_uci_zero_context_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
         client = module.CodexAppServer(

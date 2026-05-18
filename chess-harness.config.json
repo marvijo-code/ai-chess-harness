@@ -2,6 +2,9 @@
   "codex": {
     "model": "gpt-5.3-codex",
     "effort": "high",
+    "learnerMoveEffort": "medium",
+    "criticalMoveEffort": "low",
+    "zeroMoveEffort": "low",
     "preflightTimeoutSeconds": 45,
     "moveTimeoutSeconds": 45,
     "moveTimeoutClockDivisor": 4,
@@ -13,7 +16,51 @@
     "zeroRetryMoveTimeoutSeconds": 3,
     "zeroCriticalMoveTimeoutSeconds": 2,
     "leanContextBelowMs": 301000,
-    "criticalContextBelowMs": 60000
+    "criticalContextBelowMs": 60000,
+    "historyMoveLimit": 16,
+    "materialSafetyMaxItems": 8,
+    "contextLimits": {
+      "learner": {
+        "full": {
+          "memoryChars": 1200,
+          "fenChars": 700,
+          "strategyChars": 1000,
+          "knowledgebaseFiles": 2,
+          "knowledgebaseChars": 600,
+          "skillFiles": 1,
+          "skillChars": 350
+        },
+        "lean": {
+          "memoryChars": 700,
+          "fenChars": 350,
+          "strategyChars": 500,
+          "knowledgebaseFiles": 1,
+          "knowledgebaseChars": 350,
+          "skillFiles": 0,
+          "skillChars": 0
+        }
+      },
+      "zero": {
+        "full": {
+          "memoryChars": 900,
+          "fenChars": 450,
+          "strategyChars": 600,
+          "knowledgebaseFiles": 2,
+          "knowledgebaseChars": 500,
+          "skillFiles": 0,
+          "skillChars": 0
+        },
+        "lean": {
+          "memoryChars": 600,
+          "fenChars": 250,
+          "strategyChars": 300,
+          "knowledgebaseFiles": 1,
+          "knowledgebaseChars": 300,
+          "skillFiles": 0,
+          "skillChars": 0
+        }
+      }
+    }
   },
   "fastChess": {
     "games": 10,
@@ -46,7 +93,9 @@
   },
   "learner": {
     "autoLearn": true,
-    "autoLearnIntervalSeconds": 10
+    "autoLearnIntervalSeconds": 10,
+    "conceptSynthesisDuringWatch": false,
+    "conceptSynthesisAfterRun": true
   },
   "fenCurriculum": {
     "model": "gpt-5.3-codex",

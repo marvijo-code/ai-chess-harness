@@ -913,6 +913,7 @@ INDEX_HTML = """<!doctype html>
     let suppressHashChange = false;
     let pushEvents = null;
     let pushConnected = false;
+    let initialPushEventsSeen = new Set();
     let fallbackRefreshTimer = null;
     let fallbackStatsTimer = null;
     let fallbackLearnerTimer = null;
@@ -1202,6 +1203,16 @@ INDEX_HTML = """<!doctype html>
 
     function maybeFollowCurrentLiveBoard() {
       if (!followLive || selectedMatch) return false;
+      if (requestedLiveGame !== null) {
+        const requestedMatch = previousMatches.find(item => {
+          if (item.kind !== "live") return false;
+          return Number(item.game_index || 1) === Number(requestedLiveGame);
+        });
+        if (requestedMatch) {
+          activeLivePgnPath = requestedMatch.path || activeLivePgnPath;
+          return false;
+        }
+      }
       const match = latestLiveMatch();
       if (!match) return false;
       const pathChanged = !!(match.path && activeLivePgnPath && match.path !== activeLivePgnPath);
@@ -2005,18 +2016,29 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       if (pushEvents) pushEvents.close();
+      initialPushEventsSeen = new Set();
       pushEvents = new EventSource("/api/events");
       pushEvents.onopen = () => markPushConnected(true);
       pushEvents.onerror = () => {
         markPushConnected(false);
+        const currentPushEvents = pushEvents;
         window.setTimeout(() => {
-          if (!pushConnected) startFallbackPolling();
+          if (!pushConnected && (!currentPushEvents || currentPushEvents.readyState === EventSource.CLOSED)) {
+            startFallbackPolling();
+          }
         }, 1500);
       };
-      pushEvents.addEventListener("game", () => refresh());
-      pushEvents.addEventListener("stats", () => loadStats());
-      pushEvents.addEventListener("learner", () => loadLearner());
-      pushEvents.addEventListener("viewer-version", () => checkViewerVersion());
+      const onPushEvent = (name, callback) => {
+        if (!initialPushEventsSeen.has(name)) {
+          initialPushEventsSeen.add(name);
+          return;
+        }
+        callback();
+      };
+      pushEvents.addEventListener("game", () => onPushEvent("game", () => refresh()));
+      pushEvents.addEventListener("stats", () => onPushEvent("stats", () => loadStats()));
+      pushEvents.addEventListener("learner", () => onPushEvent("learner", () => loadLearner()));
+      pushEvents.addEventListener("viewer-version", () => onPushEvent("viewer-version", () => checkViewerVersion()));
     }
 
     async function loadConfig() {
