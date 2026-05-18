@@ -28,7 +28,9 @@
           "knowledgebaseFiles": 2,
           "knowledgebaseChars": 600,
           "skillFiles": 1,
-          "skillChars": 350
+          "skillChars": 350,
+          "toolFiles": 1,
+          "toolChars": 500
         },
         "lean": {
           "memoryChars": 700,
@@ -37,7 +39,9 @@
           "knowledgebaseFiles": 1,
           "knowledgebaseChars": 350,
           "skillFiles": 0,
-          "skillChars": 0
+          "skillChars": 0,
+          "toolFiles": 0,
+          "toolChars": 0
         }
       },
       "zero": {
@@ -48,7 +52,9 @@
           "knowledgebaseFiles": 2,
           "knowledgebaseChars": 500,
           "skillFiles": 0,
-          "skillChars": 0
+          "skillChars": 0,
+          "toolFiles": 1,
+          "toolChars": 300
         },
         "lean": {
           "memoryChars": 600,
@@ -57,7 +63,9 @@
           "knowledgebaseFiles": 1,
           "knowledgebaseChars": 300,
           "skillFiles": 0,
-          "skillChars": 0
+          "skillChars": 0,
+          "toolFiles": 0,
+          "toolChars": 0
         }
       }
     }
@@ -68,7 +76,9 @@
     "timeControl": "600+0",
     "maxMoves": 0,
     "version": "latest",
-    "learningEngine": "learner",
+    "player1": "learner",
+    "player2": "zero",
+    "learningEngine": "zero",
     "runName": "codex-vs-codex-learner",
     "liveRunName": "codex-vs-codex-learner-live",
     "zeroRunName": "codex-vs-codex-zero",
@@ -96,6 +106,18 @@
     "autoLearnIntervalSeconds": 10,
     "conceptSynthesisDuringWatch": false,
     "conceptSynthesisAfterRun": true
+  },
+  "zeroResearch": {
+    "localPuctEnabled": true,
+    "reasoningController": "deliberative-human-v1",
+    "puctRole": "calculation_support",
+    "visits": 32,
+    "timeLimitMs": 1200,
+    "cPuct": 1.5,
+    "selfPlayGames": 1,
+    "selfPlayMaxPlies": 120,
+    "promotionGames": 2,
+    "promotionThreshold": 0.55
   },
   "fenCurriculum": {
     "model": "gpt-5.3-codex",

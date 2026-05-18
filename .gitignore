@@ -7,3 +7,4 @@ venv/
 out/
 *.log
 tools/.fastchess/
+engines/codex-chess-zero/research/

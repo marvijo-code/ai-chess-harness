@@ -1,4 +1,5 @@
 import argparse
+import importlib.util
 import io
 import json
 import os
@@ -25,6 +26,13 @@ LEARNER_DIR = ROOT / "engines" / "codex-chess-learner"
 LEARNER_MEMORY_PATH = LEARNER_DIR / "MEMORY.md"
 LEARNER_SKILLS_DIR = LEARNER_DIR / "skills"
 LEARNER_KNOWLEDGEBASE_DIR = LEARNER_DIR / "knowledgebase"
+ZERO_DIR = ROOT / "engines" / "codex-chess-zero"
+ZERO_RESEARCH_PATH = ZERO_DIR / "zero_research.py"
+ZERO_RESEARCH_DIR = ZERO_DIR / "research"
+ZERO_CLIMB_STATE_PATH = ZERO_RESEARCH_DIR / "climb" / "climb-state.json"
+ZERO_CLIMB_LOG_PATH = ZERO_RESEARCH_DIR / "climb" / "climb-log.jsonl"
+ZERO_MEMORY_PATH = ZERO_DIR / "MEMORY.md"
+ZERO_KNOWLEDGEBASE_DIR = ZERO_DIR / "knowledgebase"
 ENGINE_LOG_DIR = OUT_DIR / "codex-chess-logs"
 CLK_COMMENT_RE = re.compile(r"\[%clk\s+(?P<value>\d+(?::\d{1,2}){1,2}(?:\.\d+)?)\]")
 LIVE_STATUS_MAX_AGE_SECONDS = 3 * 60
@@ -36,6 +44,7 @@ HOT_RELOAD_FILES = (
     ROOT / "PRD_CHECKLIST.md",
     ROOT / "AGENTS.md",
     ROOT / "chess-harness.config.json",
+    ZERO_RESEARCH_PATH,
 )
 
 
@@ -277,6 +286,18 @@ INDEX_HTML = """<!doctype html>
     }
     .learner-col { display: grid; gap: 16px; min-width: 0; }
     .learner-summary { display: grid; gap: 0; }
+    .research-list { display: grid; gap: 8px; }
+    .research-item {
+      display: grid; gap: 4px;
+      padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--r-md);
+      background: var(--surface);
+      min-width: 0;
+    }
+    .research-item strong { font-size: 13px; overflow-wrap: anywhere; }
+    .research-item span { color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+    .research-item.ok { border-left: 4px solid var(--ok); }
+    .research-item.warn { border-left: 4px solid var(--warn); }
+    .research-item.err { border-left: 4px solid var(--danger); }
     .summary-row {
       display: grid; grid-template-columns: 138px 1fr;
       gap: 12px; padding: 8px 0;
@@ -655,6 +676,7 @@ INDEX_HTML = """<!doctype html>
         <div class="view-tabs" role="tablist" aria-label="Viewer screen">
           <button id="board-view-tab" class="active" type="button">Board</button>
           <button id="learner-view-tab" type="button">Learner</button>
+          <button id="research-view-tab" type="button">Research</button>
         </div>
         <label class="pill-toggle"><input id="follow-toggle" type="checkbox" checked> Follow live</label>
         <div class="nav-cluster">
@@ -859,6 +881,60 @@ INDEX_HTML = """<!doctype html>
         </section>
       </div>
     </main>
+
+    <main id="research-view" class="learner-main view-panel hidden">
+      <div class="learner-col">
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Zero Research</span>
+            <span id="research-updated" class="card-sub"></span>
+          </div>
+          <div id="research-summary" class="card-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Network</span>
+            <span id="research-network-meta" class="card-sub"></span>
+          </div>
+          <div id="research-network" class="card-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Anti-Memorization</span>
+            <span id="research-anti-mem-meta" class="card-sub"></span>
+          </div>
+          <div id="research-anti-mem" class="card-body"></div>
+        </section>
+      </div>
+
+      <div class="learner-col">
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Benchmark Ladder</span>
+            <span id="research-ladder-meta" class="card-sub"></span>
+          </div>
+          <div id="research-ladder" class="card-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Climb Progress</span>
+            <span id="research-climb-meta" class="card-sub"></span>
+          </div>
+          <div id="research-climb" class="card-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Concepts</span>
+            <span id="research-concepts-meta" class="card-sub"></span>
+          </div>
+          <div id="research-concepts" class="card-body"></div>
+        </section>
+      </div>
+    </main>
   </div>
 
   <script>
@@ -897,6 +973,7 @@ INDEX_HTML = """<!doctype html>
     let serverClockOffsetMs = 0;
     let activeView = "board";
     let latestLearnerData = null;
+    let latestResearchData = null;
     let logSideFilter = localStorage.getItem("livePgnLogSide") || "all";
     const logKindOptions = ["setup", "prompt", "comment", "move", "repair", "account", "log"];
     const logKindStorageKey = "livePgnLogKindsV2";
@@ -913,10 +990,12 @@ INDEX_HTML = """<!doctype html>
     let suppressHashChange = false;
     let pushEvents = null;
     let pushConnected = false;
+    let pushReconnectTimer = null;
     let initialPushEventsSeen = new Set();
     let fallbackRefreshTimer = null;
     let fallbackStatsTimer = null;
     let fallbackLearnerTimer = null;
+    let fallbackResearchTimer = null;
     let fallbackVersionTimer = null;
     const previousMatchesPageSize = 5;
 
@@ -1049,13 +1128,16 @@ INDEX_HTML = """<!doctype html>
     }
 
     function setActiveView(view) {
-      activeView = view === "learner" ? "learner" : "board";
+      activeView = ["learner", "research"].includes(view) ? view : "board";
       document.getElementById("board-view").classList.toggle("hidden", activeView !== "board");
       document.getElementById("learner-view").classList.toggle("hidden", activeView !== "learner");
+      document.getElementById("research-view").classList.toggle("hidden", activeView !== "research");
       document.getElementById("board-view-tab").classList.toggle("active", activeView === "board");
       document.getElementById("learner-view-tab").classList.toggle("active", activeView === "learner");
+      document.getElementById("research-view-tab").classList.toggle("active", activeView === "research");
       localStorage.setItem("livePgnView", activeView);
       if (activeView === "learner") loadLearner();
+      if (activeView === "research") loadResearch();
     }
 
     function setActivePgnPath(path) {
@@ -1170,7 +1252,7 @@ INDEX_HTML = """<!doctype html>
         || null;
     }
 
-    function followLiveMatch(match) {
+    function followLiveMatch(match, persistSelection = true) {
       if (!match) return false;
       selectedMatch = null;
       followLive = true;
@@ -1183,7 +1265,11 @@ INDEX_HTML = """<!doctype html>
       setMatchHash(match.tournament_slug || "", requestedLiveGame, "live");
       setActiveMatchUrl(matchUrlFor(match.tournament_slug || "", requestedLiveGame, "live"));
       renderPreviousMatches();
-      selectLiveMatch(match);
+      if (persistSelection) {
+        selectLiveMatch(match);
+      } else {
+        refresh(true);
+      }
       return true;
     }
 
@@ -1198,7 +1284,7 @@ INDEX_HTML = """<!doctype html>
       const pathChanged = !!(match.path && currentLivePath && match.path !== currentLivePath);
       const currentCompleted = !!(latestGame && latestGame.completed);
       if (!slugChanged && !pathChanged && !currentCompleted) return false;
-      return followLiveMatch(match);
+      return followLiveMatch(match, false);
     }
 
     function maybeFollowCurrentLiveBoard() {
@@ -1219,7 +1305,7 @@ INDEX_HTML = """<!doctype html>
       const requestedChanged = requestedLiveGame !== null && Number(match.game_index || 1) !== Number(requestedLiveGame);
       const currentCompleted = !!(latestGame && latestGame.completed);
       if (!pathChanged && !requestedChanged && !currentCompleted) return false;
-      return followLiveMatch(match);
+      return followLiveMatch(match, false);
     }
 
     function fallbackCopy(text) {
@@ -1654,8 +1740,8 @@ INDEX_HTML = """<!doctype html>
       const container = document.getElementById("stats");
       document.getElementById("stats-meta").textContent = `${data.games} games`;
       previousMatches = data.matches || [];
-      if (!maybeFollowLatestLiveForBareHash() && !maybeFollowCurrentLiveBoard()) {
-        selectPreviousMatchFromHash();
+      if (!selectPreviousMatchFromHash() && !maybeFollowLatestLiveForBareHash()) {
+        maybeFollowCurrentLiveBoard();
       }
       renderPreviousMatches();
       if (data.error) {
@@ -1789,17 +1875,11 @@ INDEX_HTML = """<!doctype html>
         });
         if (!liveMatch) return false;
         if (!followLive && !selectedMatch) {
-          const currentPath = (latestGame && latestGame.path) || activeLivePgnPath || "";
-          const sameLiveGame = requestedLiveGame !== null
-            && Number(requestedLiveGame) === Number(liveMatch.game_index || 1)
-            && (!currentPath || !liveMatch.path || currentPath === liveMatch.path);
-          if (sameLiveGame) {
-            requestedLiveGame = liveMatch.game_index || requestedLiveGame;
-            activeLivePgnPath = liveMatch.path || activeLivePgnPath;
-            setMatchHash(liveMatch.tournament_slug || "", requestedLiveGame, "live");
-            setActiveMatchUrl(matchUrlFor(liveMatch.tournament_slug || "", requestedLiveGame, "live"));
-            return true;
-          }
+          requestedLiveGame = liveMatch.game_index || parsed.liveGameIndex;
+          activeLivePgnPath = liveMatch.path || activeLivePgnPath;
+          setMatchHash(liveMatch.tournament_slug || "", requestedLiveGame, "live");
+          setActiveMatchUrl(matchUrlFor(liveMatch.tournament_slug || "", requestedLiveGame, "live"));
+          return true;
         }
         const alreadyFollowing = followLive
           && !selectedMatch
@@ -1912,6 +1992,139 @@ INDEX_HTML = """<!doctype html>
       renderLearner(await resp.json());
     }
 
+    function researchListHtml(items, emptyText = "No rows yet.") {
+      if (!items || !items.length) return `<div class="empty">${escapeHtml(emptyText)}</div>`;
+      return `<div class="research-list">${items.map(item => {
+        const state = item.state || "";
+        return `<div class="research-item ${escapeAttr(state)}">
+          <strong>${escapeHtml(item.title || "")}</strong>
+          <span>${escapeHtml(item.detail || "")}</span>
+        </div>`;
+      }).join("")}</div>`;
+    }
+
+    function renderResearch(data) {
+      latestResearchData = data;
+      document.getElementById("research-updated").textContent = data.updated_at || "";
+      if (data.error) {
+        document.getElementById("research-summary").innerHTML = `<div class="empty err">${escapeHtml(data.error)}</div>`;
+        return;
+      }
+      const counts = data.counts || {};
+      const current = data.current_network || {};
+      const candidate = data.candidate_network || null;
+      const promotion = data.latest_promotion || {};
+      document.getElementById("research-summary").innerHTML = `<div class="learner-summary">
+        <div class="summary-row"><span>Context</span><strong>${escapeHtml(data.root || "")}</strong></div>
+        <div class="summary-row"><span>Self-play</span><strong>${escapeHtml(counts.selfplay_games ?? 0)} games</strong></div>
+        <div class="summary-row"><span>Replay</span><strong>${escapeHtml(counts.replay_positions ?? 0)} positions</strong></div>
+        <div class="summary-row"><span>Promotions</span><strong>${escapeHtml(counts.promotions ?? 0)} gates</strong></div>
+        <div class="summary-row"><span>Feasibility</span><strong>${escapeHtml(data.feasibility_gate || "")}</strong></div>
+      </div>`;
+
+      const networkRows = [
+        {
+          title: current.network_id || "missing current network",
+          detail: `generation ${current.generation ?? 0}, ${current.source_positions ?? 0} source positions, ${current.training_steps ?? 0} training steps`,
+          state: "ok",
+        },
+      ];
+      if (candidate) {
+        networkRows.push({
+          title: candidate.network_id || "candidate",
+          detail: `generation ${candidate.generation ?? 0}, ${candidate.source_positions ?? 0} source positions`,
+          state: "warn",
+        });
+      }
+      if (promotion && promotion.candidate) {
+        networkRows.push({
+          title: promotion.promoted ? "Latest gate promoted" : "Latest gate held",
+          detail: `${promotion.candidate} vs ${promotion.current || "current"}; score ${promotion.match && promotion.match.score !== undefined ? promotion.match.score : "n/a"}`,
+          state: promotion.promoted ? "ok" : "warn",
+        });
+      }
+      document.getElementById("research-network-meta").textContent = current.network_id || "missing";
+      document.getElementById("research-network").innerHTML = researchListHtml(networkRows);
+
+      const anti = data.anti_memorization || {};
+      const antiRows = anti.ok
+        ? [{ title: "No exact FEN move rules found", detail: anti.policy || "", state: "ok" }]
+        : (anti.violations || []).map(v => ({
+            title: v.path || "violation",
+            detail: `${v.move || ""} near ${v.fen || ""}`.trim(),
+            state: "err",
+          }));
+      document.getElementById("research-anti-mem-meta").textContent = anti.ok ? "clean" : `${(anti.violations || []).length} flagged`;
+      document.getElementById("research-anti-mem").innerHTML = researchListHtml(antiRows, "No anti-memorization scan yet.");
+
+      const ladder = data.benchmark_ladder || [];
+      document.getElementById("research-ladder-meta").textContent = `${ladder.length} rows`;
+      if (!ladder.length) {
+        document.getElementById("research-ladder").innerHTML = '<div class="empty">No ladder rows yet.</div>';
+      } else {
+        const rows = ladder.map(row => `
+          <tr>
+            <td>${escapeHtml(row.name || "")}</td>
+            <td>${escapeHtml(row.role || "")}</td>
+            <td class="n">${row.available ? "yes" : "no"}</td>
+            <td class="n">${row.training_allowed ? "yes" : "no"}</td>
+          </tr>`).join("");
+        document.getElementById("research-ladder").innerHTML = `<table class="stats-tbl"><thead><tr><th>Name</th><th>Role</th><th class="n">Ready</th><th class="n">Train</th></tr></thead><tbody>${rows}</tbody></table>`;
+      }
+
+      const climb = data.climb || {};
+      const currentStage = climb.current_stage || {};
+      const last = climb.last_result || {};
+      const evaluation = last.evaluation || {};
+      const training = last.training || {};
+      const beaten = climb.beaten_stages || [];
+      document.getElementById("research-climb-meta").textContent = climb.exists ? `${beaten.length} stages cleared` : "not started";
+      const climbRows = [];
+      if (climb.exists) {
+        climbRows.push({
+          title: currentStage.name ? `Current gate: ${currentStage.name}` : "All configured gates passed",
+          detail: currentStage.name
+            ? `${currentStage.opponent || "opponent"}; need ${currentStage.pass_score ?? "?"}; games ${currentStage.games ?? "?"}`
+            : "No remaining configured stage.",
+          state: currentStage.name ? "warn" : "ok",
+        });
+        if (evaluation.stage) {
+          climbRows.push({
+            title: evaluation.passed ? `Passed ${evaluation.stage}` : `Held at ${evaluation.stage}`,
+            detail: `score ${evaluation.score ?? "?"}/${evaluation.pass_score ?? "?"}; ${evaluation.zero_points ?? "?"}/${evaluation.games ?? "?"} points; opponent labels used: ${evaluation.training_sources && evaluation.training_sources.opponent_labels_used ? "yes" : "no"}`,
+            state: evaluation.passed ? "ok" : "warn",
+          });
+        }
+        if (training && training.promotion) {
+          climbRows.push({
+            title: training.promotion.promoted ? "Self-play candidate promoted" : "Self-play candidate held",
+            detail: `${training.candidate && training.candidate.network_id ? training.candidate.network_id : "candidate"}; promotion score ${training.promotion.match && training.promotion.match.score !== undefined ? training.promotion.match.score : "n/a"}; external labels used: ${training.training_sources && Object.values(training.training_sources).some(Boolean) ? "yes" : "no"}`,
+            state: training.promotion.promoted ? "ok" : "warn",
+          });
+        }
+        for (const stage of beaten.slice(-4).reverse()) {
+          climbRows.push({
+            title: `Cleared ${stage.stage}`,
+            detail: `score ${stage.score}; games ${stage.games}; ${stage.passed_at || ""}`,
+            state: "ok",
+          });
+        }
+      }
+      document.getElementById("research-climb").innerHTML = researchListHtml(climbRows, "No climb cycle has been run yet.");
+
+      const concepts = data.concepts || [];
+      document.getElementById("research-concepts-meta").textContent = `${concepts.length} rows`;
+      document.getElementById("research-concepts").innerHTML = researchListHtml(
+        concepts.map((concept, index) => ({ title: `Concept ${index + 1}`, detail: concept, state: "ok" })),
+        "No generalized Zero concepts yet."
+      );
+    }
+
+    async function loadResearch() {
+      const resp = await fetch("/api/research", { cache: "no-store" });
+      renderResearch(await resp.json());
+    }
+
     function setStatus(ok, text) {
       document.getElementById("status-dot").className = "pulse" + (ok ? " ok" : "");
       document.getElementById("status-text").textContent = text;
@@ -1987,12 +2200,13 @@ INDEX_HTML = """<!doctype html>
     }
 
     function clearFallbackPolling() {
-      for (const timer of [fallbackRefreshTimer, fallbackStatsTimer, fallbackLearnerTimer, fallbackVersionTimer]) {
+      for (const timer of [fallbackRefreshTimer, fallbackStatsTimer, fallbackLearnerTimer, fallbackResearchTimer, fallbackVersionTimer]) {
         if (timer !== null) window.clearInterval(timer);
       }
       fallbackRefreshTimer = null;
       fallbackStatsTimer = null;
       fallbackLearnerTimer = null;
+      fallbackResearchTimer = null;
       fallbackVersionTimer = null;
     }
 
@@ -2001,13 +2215,26 @@ INDEX_HTML = """<!doctype html>
       fallbackRefreshTimer = window.setInterval(refresh, 1000);
       fallbackStatsTimer = window.setInterval(loadStats, 3000);
       fallbackLearnerTimer = window.setInterval(loadLearner, 2500);
+      fallbackResearchTimer = window.setInterval(loadResearch, 4000);
       fallbackVersionTimer = window.setInterval(checkViewerVersion, 1200);
     }
 
     function markPushConnected(connected) {
       pushConnected = connected;
       window.__viewerPushConnected = connected;
-      if (connected) clearFallbackPolling();
+      if (connected) {
+        if (pushReconnectTimer !== null) window.clearTimeout(pushReconnectTimer);
+        pushReconnectTimer = null;
+        clearFallbackPolling();
+      }
+    }
+
+    function schedulePushReconnect() {
+      if (pushReconnectTimer !== null) return;
+      pushReconnectTimer = window.setTimeout(() => {
+        pushReconnectTimer = null;
+        if (!pushConnected) startPushUpdates();
+      }, 1000);
     }
 
     function startPushUpdates() {
@@ -2021,12 +2248,7 @@ INDEX_HTML = """<!doctype html>
       pushEvents.onopen = () => markPushConnected(true);
       pushEvents.onerror = () => {
         markPushConnected(false);
-        const currentPushEvents = pushEvents;
-        window.setTimeout(() => {
-          if (!pushConnected && (!currentPushEvents || currentPushEvents.readyState === EventSource.CLOSED)) {
-            startFallbackPolling();
-          }
-        }, 1500);
+        schedulePushReconnect();
       };
       const onPushEvent = (name, callback) => {
         if (!initialPushEventsSeen.has(name)) {
@@ -2038,6 +2260,7 @@ INDEX_HTML = """<!doctype html>
       pushEvents.addEventListener("game", () => onPushEvent("game", () => refresh()));
       pushEvents.addEventListener("stats", () => onPushEvent("stats", () => loadStats()));
       pushEvents.addEventListener("learner", () => onPushEvent("learner", () => loadLearner()));
+      pushEvents.addEventListener("research", () => onPushEvent("research", () => loadResearch()));
       pushEvents.addEventListener("viewer-version", () => onPushEvent("viewer-version", () => checkViewerVersion()));
     }
 
@@ -2180,6 +2403,7 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("theme-toggle").addEventListener("click", () => applyTheme(activeTheme === "dark" ? "light" : "dark"));
     document.getElementById("board-view-tab").addEventListener("click", () => setActiveView("board"));
     document.getElementById("learner-view-tab").addEventListener("click", () => setActiveView("learner"));
+    document.getElementById("research-view-tab").addEventListener("click", () => setActiveView("research"));
     document.getElementById("follow-toggle").addEventListener("change", e => setFollowLive(e.target.checked));
     document.getElementById("prev-move").addEventListener("click", () => navigateMove(-1));
     document.getElementById("next-move").addEventListener("click", () => navigateMove(1));
@@ -2231,6 +2455,7 @@ INDEX_HTML = """<!doctype html>
     loadStats();
     loadConfig();
     loadLearner();
+    loadResearch();
     setInterval(updateClockDisplays, 250);
     checkViewerVersion();
     startPushUpdates();
@@ -2684,6 +2909,23 @@ def live_selection_path_for(pgn_path: Path) -> Path:
     return pgn_path.with_suffix(".selection.json")
 
 
+def resolve_live_default_game_path(pgn_path: Path) -> Path:
+    if pgn_path.exists():
+        return pgn_path
+    status_path = live_status_path_for(pgn_path)
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except Exception:
+        return pgn_path
+    output_value = payload.get("output_pgn")
+    if not output_value:
+        return pgn_path
+    output_pgn = Path(output_value)
+    if not output_pgn.is_absolute():
+        output_pgn = pgn_path.parent / output_pgn
+    return output_pgn if output_pgn.exists() else pgn_path
+
+
 def write_live_selection(pgn_path: Path, game_index: int) -> dict:
     if game_index < 1:
         raise ValueError("Live game index must be at least 1.")
@@ -2740,32 +2982,43 @@ def live_status_matches(out_dir: Path, status_path: Path, fallback_pgn_path: Pat
         control_pgn = fallback_pgn_path if fallback_pgn_path is not None else live_pgn_path_for_status(status_path)
     if not output_pgn.exists():
         return []
-    if not live_pgn_has_in_progress_clock(output_pgn):
+    locked_game = payload.get("locked_game")
+    payload_games = payload.get("games", [])
+    has_locked_board_game = False
+    if locked_game is not None:
+        try:
+            locked_game_no = int(locked_game)
+            has_locked_board_game = any(int(game.get("game") or 0) == locked_game_no for game in payload_games)
+        except (TypeError, ValueError):
+            has_locked_board_game = False
+    if not live_pgn_has_in_progress_clock(output_pgn) and not has_locked_board_game:
         return []
 
     slug = tournament_slug(output_pgn)
     started_epoch = live_slug_epoch(slug)
     updated_at = payload.get("generated_at") or time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
     updated_epoch = float(payload.get("generated_at_epoch") or mtime)
-    locked_game = payload.get("locked_game")
     matches: list[dict] = []
-    for game in payload.get("games", []):
-        if game.get("finished"):
-            continue
+    for game in payload_games:
         game_no = int(game.get("game") or 0)
         is_board_game = locked_game is not None and game_no == int(locked_game)
+        finished = bool(game.get("finished"))
+        if finished and not is_board_game:
+            continue
+        status_label = "Completed" if finished else "In progress"
+        winner_label = (game.get("reason") or game.get("result") or "Completed") if finished else "In progress"
         matches.append(
             {
                 "kind": "live",
-                "date": "In progress",
+                "date": status_label,
                 "updated_at": updated_at,
                 "updated_at_epoch": updated_epoch,
                 "live_started_epoch": started_epoch or updated_epoch,
                 "white": game.get("white") or "White",
                 "black": game.get("black") or "Black",
                 "result": "*",
-                "winner_label": "In progress",
-                "status_label": "In progress",
+                "winner_label": winner_label,
+                "status_label": status_label,
                 "round": str(game_no),
                 "tournament_slug": slug,
                 "file": str(output_pgn.relative_to(out_dir)) if output_pgn.is_relative_to(out_dir) else str(output_pgn),
@@ -2972,10 +3225,17 @@ def viewer_event_signatures(pgn_path: Path, stats_dir: Path) -> dict[str, str]:
         tree_signature(LEARNER_SKILLS_DIR, {".md", ".json", ".txt", ".yaml", ".yml"}),
         tree_signature(ENGINE_LOG_DIR, {".log"}),
     ]
+    research_parts = [
+        file_signature(ZERO_RESEARCH_PATH),
+        file_signature(ZERO_MEMORY_PATH),
+        tree_signature(ZERO_KNOWLEDGEBASE_DIR, {".md", ".json", ".txt", ".yaml", ".yml"}),
+        tree_signature(ZERO_RESEARCH_DIR, {".md", ".json", ".jsonl", ".txt"}),
+    ]
     return {
         "game": "|".join(game_parts),
         "stats": tree_signature(stats_dir, {".pgn", ".json"}, {"backups"}),
         "learner": "|".join(learner_parts),
+        "research": "|".join(research_parts),
         "viewer-version": hot_reload_stamp(),
     }
 
@@ -3253,6 +3513,89 @@ def collect_learner_data() -> dict:
     }
 
 
+def load_zero_research_module():
+    if not ZERO_RESEARCH_PATH.exists():
+        raise FileNotFoundError(str(ZERO_RESEARCH_PATH))
+    spec = importlib.util.spec_from_file_location("codex_chess_zero_research_viewer", ZERO_RESEARCH_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load {ZERO_RESEARCH_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def collect_zero_research_data() -> dict:
+    module = load_zero_research_module()
+    data = module.research_summary(write_summary=False)
+    data["climb"] = collect_zero_climb_data()
+    return data
+
+
+def read_json_file(path: Path, default):
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"error": f"{type(exc).__name__}: {exc}", "path": str(path)}
+
+
+def read_jsonl_tail(path: Path, limit: int = 8) -> list[dict]:
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]:
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            rows.append({"error": "invalid climb log row", "raw": line[:240]})
+    return rows
+
+
+def collect_zero_climb_data() -> dict:
+    state = read_json_file(ZERO_CLIMB_STATE_PATH, {})
+    log_tail = read_jsonl_tail(ZERO_CLIMB_LOG_PATH)
+    stages = []
+    try:
+        climb_path = ROOT / "tools" / "run_zero_climb.py"
+        spec = importlib.util.spec_from_file_location("codex_chess_zero_climb_viewer", climb_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            stages = [stage.__dict__ for stage in module.stage_catalog()]
+    except Exception as exc:
+        stages = [{"error": f"{type(exc).__name__}: {exc}"}]
+    current_index = int(state.get("current_stage_index", 0) or 0) if isinstance(state, dict) else 0
+    current_stage = stages[current_index] if current_index < len(stages) else {}
+    return {
+        "exists": bool(ZERO_CLIMB_STATE_PATH.exists()),
+        "state_path": str(ZERO_CLIMB_STATE_PATH),
+        "log_path": str(ZERO_CLIMB_LOG_PATH),
+        "updated_at": state.get("updated_at") if isinstance(state, dict) else "",
+        "current_stage_index": current_index,
+        "current_stage": current_stage,
+        "beaten_stages": state.get("beaten_stages", []) if isinstance(state, dict) else [],
+        "last_result": state.get("last_result", {}) if isinstance(state, dict) else {},
+        "attempt_count": len(state.get("attempts", [])) if isinstance(state, dict) else 0,
+        "log_tail": log_tail,
+        "policy": "Climb opponents and Stockfish stages are evaluation gates only; Zero training remains self-play only.",
+    }
+
+
+class QuietThreadingHTTPServer(ThreadingHTTPServer):
+    def handle_error(self, request, client_address) -> None:
+        exc_type, exc, _ = sys.exc_info()
+        if exc_type in {BrokenPipeError, ConnectionAbortedError, ConnectionResetError}:
+            return
+        if isinstance(exc, OSError) and getattr(exc, "winerror", None) in {10053, 10054}:
+            return
+        super().handle_error(request, client_address)
+
+
 class LivePgnHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     pgn_path = DEFAULT_PGN_PATH
@@ -3266,12 +3609,15 @@ class LivePgnHandler(BaseHTTPRequestHandler):
         return
 
     def send_bytes(self, body: bytes, content_type: str, status: HTTPStatus = HTTPStatus.OK) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
+            return
 
     def send_json(self, data: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -3314,10 +3660,13 @@ class LivePgnHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/game":
             query = parse_qs(parsed.query)
+            has_explicit_path = "path" in query
             raw_path = query.get("path", [str(self.pgn_path)])[0]
             pgn_path = Path(raw_path)
             if not pgn_path.is_absolute():
                 pgn_path = self.stats_dir / pgn_path
+            if not has_explicit_path:
+                pgn_path = resolve_live_default_game_path(pgn_path)
             include_analysis = query.get("analysis", ["1"])[0] not in {"0", "false", "off"}
             include_logs = query.get("logs", ["0"])[0] not in {"0", "false", "off"}
             game_index = None
@@ -3354,6 +3703,13 @@ class LivePgnHandler(BaseHTTPRequestHandler):
                 self.send_json(collect_learner_data())
             except Exception as exc:
                 self.send_json({"root": str(LEARNER_DIR), "error": str(exc)})
+            return
+
+        if parsed.path == "/api/research":
+            try:
+                self.send_json(collect_zero_research_data())
+            except Exception as exc:
+                self.send_json({"root": str(ZERO_DIR), "error": str(exc)})
             return
 
         if parsed.path == "/api/viewer-version":
@@ -3460,7 +3816,7 @@ def main() -> None:
     LivePgnHandler.viewer_version = hot_reload_stamp()
     LivePgnHandler.hot_reload = args.hot_reload
 
-    server = ThreadingHTTPServer((args.host, args.port), LivePgnHandler)
+    server = QuietThreadingHTTPServer((args.host, args.port), LivePgnHandler)
     print(f"Live PGN viewer: http://{args.host}:{args.port}/")
     print(f"PGN: {args.pgn}")
     print(f"Engine config: {args.config}")

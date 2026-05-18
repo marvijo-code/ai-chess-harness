@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import importlib.util
 import json
 import os
 import re
@@ -25,6 +26,7 @@ CONTEXT_DIR = Path(os.environ.get("CODEX_CHESS_CONTEXT_DIR", ENGINE_DIR)).resolv
 MEMORY_PATH = CONTEXT_DIR / "MEMORY.md"
 SKILLS_DIR = CONTEXT_DIR / "skills"
 KNOWLEDGEBASE_DIR = CONTEXT_DIR / "knowledgebase"
+TOOLS_DIR = CONTEXT_DIR / "tools"
 FEN_KNOWLEDGE_PATH = KNOWLEDGEBASE_DIR / "fen-curriculum-lessons.md"
 STRATEGY_LESSONS_PATH = KNOWLEDGEBASE_DIR / "strategy-lessons.md"
 DEFAULT_USE_MEMORY = os.environ.get("CODEX_CHESS_USE_MEMORY", "false").lower() in {"1", "true", "yes", "on"}
@@ -61,6 +63,7 @@ PIECE_NAMES = {
     chess.QUEEN: "queen",
     chess.KING: "king",
 }
+_ZERO_RESEARCH_MODULE = None
 
 
 def config_value(path: str, default=None):
@@ -83,6 +86,32 @@ def int_config_value(path: str, default: int) -> int:
         return default
 
 
+def float_config_value(path: str, default: float) -> float:
+    try:
+        return float(config_value(path, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def bool_text_value(value: object, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def bool_config_value(path: str, default: bool) -> bool:
+    return bool_text_value(config_value(path, default), default)
+
+
 def int_env_value(name: str, default: int) -> int:
     value = os.environ.get(name)
     if value is None or value == "":
@@ -91,6 +120,48 @@ def int_env_value(name: str, default: int) -> int:
         return int(value)
     except ValueError:
         return default
+
+
+def float_env_value(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def bool_env_value(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return bool_text_value(value, default)
+
+
+def zero_local_puct_enabled() -> bool:
+    return bool_env_value("CODEX_CHESS_ZERO_LOCAL_PUCT", bool_config_value("zeroResearch.localPuctEnabled", True))
+
+
+def load_zero_research_module():
+    global _ZERO_RESEARCH_MODULE
+    if _ZERO_RESEARCH_MODULE is not None:
+        return _ZERO_RESEARCH_MODULE
+    candidates = [
+        CONTEXT_DIR / "zero_research.py",
+        ROOT / "engines" / "codex-chess-zero" / "zero_research.py",
+    ]
+    for path in candidates:
+        if path.exists():
+            spec = importlib.util.spec_from_file_location("codex_chess_zero_research", path)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            _ZERO_RESEARCH_MODULE = module
+            return module
+    raise FileNotFoundError("engines/codex-chess-zero/zero_research.py not found")
 
 
 def context_limit(engine_profile: str, context_profile: str, key: str, default: int) -> int:
@@ -400,8 +471,9 @@ class CodexAppServer:
             )
         if self.learning_mode:
             developer_instructions += (
-                f" Post-game learning is handled by a local autolearn process that writes {MEMORY_PATH}, {SKILLS_DIR}, and {KNOWLEDGEBASE_DIR}. "
+                f" Post-game learning is handled by a local autolearn process that writes {MEMORY_PATH}, {SKILLS_DIR}, {TOOLS_DIR}, and {KNOWLEDGEBASE_DIR}. "
                 "During UCI move selection, use the learner_context included in each prompt and do not spend clock time editing files. "
+                "Learner-created skills/tools are allowed only when they are engine-local concept or current-position feature aids, not exact move memory. "
                 "Do not use network access. Return only the required move JSON."
             )
 
@@ -514,6 +586,8 @@ class CodexAppServer:
                 "knowledgebaseChars": 300 if lean else 500,
                 "skillFiles": 0,
                 "skillChars": 0,
+                "toolFiles": 1 if not lean else 0,
+                "toolChars": 300 if not lean else 0,
             }
         else:
             engine_profile = "learner"
@@ -525,6 +599,8 @@ class CodexAppServer:
                 "knowledgebaseChars": 350 if lean else 600,
                 "skillFiles": 0 if lean else 1,
                 "skillChars": 0 if lean else 350,
+                "toolFiles": 0 if lean else 1,
+                "toolChars": 0 if lean else 500,
             }
         memory_chars = context_limit(engine_profile, profile, "memoryChars", default_limits["memoryChars"])
         fen_chars = context_limit(engine_profile, profile, "fenChars", default_limits["fenChars"])
@@ -533,16 +609,20 @@ class CodexAppServer:
         kb_chars = context_limit(engine_profile, profile, "knowledgebaseChars", default_limits["knowledgebaseChars"])
         skill_files = context_limit(engine_profile, profile, "skillFiles", default_limits["skillFiles"])
         skill_chars = context_limit(engine_profile, profile, "skillChars", default_limits["skillChars"])
+        tool_files = context_limit(engine_profile, profile, "toolFiles", default_limits["toolFiles"])
+        tool_chars = context_limit(engine_profile, profile, "toolChars", default_limits["toolChars"])
         fen_knowledge = read_limited_text(FEN_KNOWLEDGE_PATH, fen_chars)
         strategy_lessons = read_limited_text(STRATEGY_LESSONS_PATH, strategy_chars)
         policy = (
             "Apply the learner memory, fen_knowledge, strategy_lessons, and knowledgebase directly. "
+            "Apply engine-local skills and tool summaries only as generalized concept/current-position feature aids. "
             "Use model-discovered strategy_lessons as generic value adjustments before finalizing a move, not as memorized move answers. "
             "Never invent UCI: copy uci exactly from legal_moves, and never return 0000 while legal moves exist."
         )
         if self.zero_mode:
             policy = (
                 "Zero mode: use memory and knowledgebase only as compact post-game feedback. "
+                "Treat engine-local tools as transparent current-position feature summaries, never as move labels. "
                 "Current FEN, legal_moves, clocks, and material_safety are the source of truth. "
                 "Do not copy memorized openings; choose quickly from first principles and let post-game feedback improve future choices. "
                 "Never invent UCI or return 0000 while legal moves exist."
@@ -561,6 +641,8 @@ class CodexAppServer:
             "knowledgebase": collect_text_context(KNOWLEDGEBASE_DIR, max_files=kb_files, max_chars_per_file=kb_chars),
             "skills_path": str(SKILLS_DIR),
             "skills": collect_text_context(SKILLS_DIR, max_files=skill_files, max_chars_per_file=skill_chars),
+            "tools_path": str(TOOLS_DIR),
+            "tools": collect_text_context(TOOLS_DIR, max_files=tool_files, max_chars_per_file=tool_chars),
             "policy": policy,
         }
 
@@ -654,6 +736,37 @@ class CodexAppServer:
             "threefold_moves": len(threefold),
         }
 
+    def choose_zero_puct_move(self, board: chess.Board, legal_moves: list[str], remaining: int | None) -> str:
+        visits = max(1, int_env_value("CODEX_CHESS_ZERO_PUCT_VISITS", int_config_value("zeroResearch.visits", 32)))
+        configured_limit = max(0, int_env_value("CODEX_CHESS_ZERO_PUCT_TIME_LIMIT_MS", int_config_value("zeroResearch.timeLimitMs", 1200)))
+        time_limit_ms = configured_limit or None
+        if remaining is not None and time_limit_ms is not None:
+            time_limit_ms = max(1, min(time_limit_ms, max(1, remaining - 25)))
+        c_puct = max(0.01, float_env_value("CODEX_CHESS_ZERO_C_PUCT", float_config_value("zeroResearch.cPuct", 1.5)))
+        try:
+            zero_research = load_zero_research_module()
+            result = zero_research.choose_zero_move(board.copy(stack=False), visits=visits, time_limit_ms=time_limit_ms, c_puct=c_puct)
+            move = result.move.uci()
+        except Exception as exc:
+            log(f"zero puct engine failed: {type(exc).__name__}: {exc}; forfeiting with bestmove 0000")
+            emit_uci_line("info string zero puct engine failed; forfeiting game")
+            print_neutral_score_info()
+            return "0000"
+        if move not in legal_moves:
+            log(f"zero puct returned illegal move {move!r}; forfeiting with bestmove 0000")
+            emit_uci_line("info string zero puct returned an illegal move; forfeiting game")
+            print_neutral_score_info()
+            return "0000"
+        self.invalid_model_moves = 0
+        log(
+            "zero puct decision: "
+            f"move={move} network={result.network_id} visits={result.visits} nodes={result.nodes} "
+            f"root_value={result.root_value:.4f} time_limit_ms={time_limit_ms or 0}"
+        )
+        if result.comment:
+            emit_uci_line(f"info string {result.comment[:240]}", optional=True)
+        return move
+
     async def choose_move(self, board: chess.Board, go_args: dict, history: list[str]) -> str:
         legal_moves = [move.uci() for move in board.legal_moves]
         if not legal_moves:
@@ -667,6 +780,9 @@ class CodexAppServer:
             emit_uci_line(f"info string {side} clock expired; forfeiting game without starting model turn")
             print_neutral_score_info()
             return "0000"
+
+        if self.zero_mode and zero_local_puct_enabled():
+            return self.choose_zero_puct_move(board, legal_moves, remaining)
 
         await self.start()
         repetition = self.client_repetition_risk(board, legal_moves)
@@ -958,6 +1074,8 @@ class CodexChessUci:
         elif name == "zeromode":
             self.codex.zero_mode = bool_value
             self.codex.force_lean_context = bool_value or DEFAULT_FORCE_LEAN_CONTEXT
+        elif name == "zerolocalpuct":
+            os.environ["CODEX_CHESS_ZERO_LOCAL_PUCT"] = "true" if bool_value else "false"
 
 
 def parse_go_args(tokens: list[str]) -> dict:
@@ -1001,6 +1119,7 @@ async def main() -> None:
                 emit_uci_line(f"option name UseSkills type check default {'true' if DEFAULT_USE_SKILLS else 'false'}")
                 emit_uci_line(f"option name LearningMode type check default {'true' if DEFAULT_LEARNING_MODE else 'false'}")
                 emit_uci_line(f"option name ZeroMode type check default {'true' if DEFAULT_ZERO_MODE else 'false'}")
+                emit_uci_line(f"option name ZeroLocalPuct type check default {'true' if zero_local_puct_enabled() else 'false'}")
                 emit_uci_line("uciok")
             elif command == "isready":
                 emit_uci_line("readyok")

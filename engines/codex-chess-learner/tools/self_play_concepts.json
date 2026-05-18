@@ -1,0 +1,32 @@
+{
+  "concepts": [
+    {
+      "confidence": 0.69,
+      "name": "recapture_only_if_structure_does_not_uncover_immediate_piece_loss",
+      "trigger": "a center recapture/capture with a pawn or minor piece changes protection lines for own developed pieces that are already candidate targets",
+      "value_adjustment": "penalize the recapture if it removes or weakens defenders and allows an immediate favorable opponent pickup/exchange; reward alternatives that keep the target piece defended before recapturing",
+      "why": "a natural center capture was followed by an immediate opponent capture that improved their material outcome, indicating defender-structure damage after the recapture"
+    },
+    {
+      "confidence": 0.9,
+      "name": "forcing_minor_capture_needs_global_loose_piece_scan",
+      "trigger": "a forcing knight capture is considered and either the moved knight or another nearby developed piece becomes attackable in one move",
+      "value_adjustment": "strongly penalize the forcing capture unless both the moved piece and other exposed pieces remain tactically covered after the opponent's best immediate reply; reward consolidating moves that remove loose-piece vulnerabilities first",
+      "why": "the forcing knight capture created immediate tactical liability and was followed by a material loss sequence, showing the tactic failed due to post-move loose pieces rather than lack of forcing intent"
+    }
+  ],
+  "engine_name": "Codex-chess-learner",
+  "generated_at": "2026-05-18 11:27:58",
+  "policy": "Generic self-play concepts and current-position feature tools only; no exact FEN move answers or external engine labels.",
+  "schema": "learner-self-extension-v1",
+  "source": "self_play_concepts",
+  "training_sources": {
+    "human game": false,
+    "lc0": false,
+    "leela": false,
+    "maia": false,
+    "opening book": false,
+    "stockfish": false,
+    "tablebase": false
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "concepts": [
+    {
+      "confidence": 0.94,
+      "name": "Do-not-sac-initiator-without-net-gain",
+      "trigger": "A forcing capture/check is made by a higher-value piece and that piece is immediately recapturable by equal or lower-value enemy piece with no follow-up material win",
+      "value_adjustment": "Strongly decrease move value; apply larger penalty when the initiating piece value is >= bishop/rook",
+      "why": "Multiple forcing moves won tempo but immediately lost the attacker, producing repeated material swings against the mover"
+    },
+    {
+      "confidence": 0.9,
+      "name": "Penalty-for-hanging-checking-piece",
+      "trigger": "A checking move places the checking piece on a square capturable by the king or simple recapture, without mating net or major gain",
+      "value_adjustment": "Decrease move value; increase penalty if the checking piece is bishop/rook and capture is by king with low tactical risk",
+      "why": "Checks looked forcing but were neutralized by immediate king recapture, causing direct material loss"
+    },
+    {
+      "confidence": 0.93,
+      "name": "Recapture-risk-filter-on-forcing-moves",
+      "trigger": "Candidate move is forcing (capture/check/threat) but lands on a square attacked by multiple enemy units and defended weakly",
+      "value_adjustment": "Apply pre-move safety tax proportional to (enemy_attackers - friendly_defenders) and attacker piece value",
+      "why": "Repeated early forcing moves created immediate recapture opportunities and consistent ~300cp losses"
+    },
+    {
+      "confidence": 0.82,
+      "name": "Preserve-large-advantage-by-trade-safety",
+      "trigger": "Side has large material edge and can choose between sharp forcing line vs simplification/secure defense",
+      "value_adjustment": "Increase value of safe exchanges and king-safety consolidation; decrease speculative tactics that reopen counterplay",
+      "why": "A position with very large edge still ended drawn, indicating conversion failures from unnecessary complexity"
+    },
+    {
+      "confidence": 0.76,
+      "name": "King-capture-alert-priority",
+      "trigger": "After opponent sacrifice/entry, legal king capture exists that wins material and does not expose immediate tactical collapse",
+      "value_adjustment": "Increase priority of evaluating legal king recaptures before quieter alternatives",
+      "why": "Evidence shows missed or delayed king captures around forcing exchanges; fast recognition improves material retention"
+    },
+    {
+      "confidence": 0.74,
+      "name": "Post-castle-tactical-blunder-check",
+      "trigger": "King-safety move (e.g., castling) is considered while loose material/tactical captures are available to opponent",
+      "value_adjustment": "Before rewarding king safety, subtract value if opponent has immediate high-confidence material win next move",
+      "why": "A nominally good king-safety move was followed by immediate material loss, implying tactical scan must gate strategic bonuses"
+    },
+    {
+      "confidence": 0.61,
+      "name": "Low-clock-decision-simplification",
+      "trigger": "Clock pressure with multiple tactical candidates of similar static score",
+      "value_adjustment": "Prefer low-branching, materially safe continuations; reduce value of complex forcing sacs requiring long verification",
+      "why": "Pattern of forcing but unsafe captures suggests over-optimistic tactical choices; simplifying under time should reduce blunders"
+    }
+  ],
+  "engine_name": "Codex-chess-zero",
+  "generated_at": "2026-05-18 17:02:05",
+  "policy": "Generic self-play concepts and current-position feature tools only; no exact FEN move answers or external engine labels.",
+  "schema": "learner-self-extension-v1",
+  "source": "self_play_concepts",
+  "training_sources": {
+    "human game": false,
+    "lc0": false,
+    "leela": false,
+    "maia": false,
+    "opening book": false,
+    "stockfish": false,
+    "tablebase": false
+  }
+}

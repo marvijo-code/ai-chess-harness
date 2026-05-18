@@ -1,116 +1,117 @@
 {
-  "generated_at": "2026-05-14 18:30:18",
-  "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634.pgn",
-  "source_stdout": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260514-160634-launch.out.log",
-  "completed_games": 16,
+  "generated_at": "2026-05-18 11:27:58",
+  "source_pgn": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260518-102027.pgn",
+  "source_stdout": "C:\\dev\\chess-harness-codex\\out\\fastchess\\codex-vs-codex-learner-live-20260518-102027-launch.out.log",
+  "completed_games": 13,
   "scheduled_games": 100,
-  "learner_points": 7.0,
-  "learner_score_percent": 43.75,
+  "learner_points": 6.0,
+  "learner_score_percent": 46.15,
   "reason_counts": {
-    "mate": 10,
-    "threefold repetition": 5,
-    "illegal move": 1
+    "illegal move": 6,
+    "threefold repetition": 4,
+    "mate": 3
   },
   "illegal_losses": [
     {
-      "game": 13,
+      "game": 5,
       "white": "Codex-chess",
       "black": "Codex-chess-learner",
       "result": "1-0",
-      "plies": 81,
+      "plies": 47,
       "reason": "Black makes an illegal move",
-      "opening": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O Nf6 5. d3 O-O"
-    }
-  ],
-  "illegal_wins": [],
-  "zero_ply_engine_failures": [],
-  "mate_losses": [
-    {
-      "game": 1,
-      "white": "Codex-chess",
-      "black": "Codex-chess-learner",
-      "result": "1-0",
-      "plies": 35,
-      "reason": "White mates",
-      "opening": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O"
+      "opening": "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7"
     },
     {
       "game": 6,
       "white": "Codex-chess-learner",
       "black": "Codex-chess",
       "result": "0-1",
-      "plies": 42,
-      "reason": "Black mates",
-      "opening": "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7"
+      "plies": 68,
+      "reason": "White makes an illegal move",
+      "opening": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Be7 5. d3 O-O"
     },
     {
-      "game": 8,
+      "game": 9,
       "white": "Codex-chess-learner",
       "black": "Codex-chess",
-      "result": "0-1",
-      "plies": 28,
-      "reason": "Black mates",
-      "opening": "1. e4 e5 2. Nf3 Nc6 3. d4 exd4 4. Nxd4 Nf6 5. Nc3 Bb4"
+      "result": "1/2-1/2",
+      "plies": 131,
+      "reason": "White makes an illegal move",
+      "opening": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. d3 O-O"
     }
   ],
-  "mate_wins": [
+  "illegal_wins": [
     {
-      "game": 3,
+      "game": 1,
       "white": "Codex-chess",
       "black": "Codex-chess-learner",
       "result": "0-1",
-      "plies": 30,
-      "reason": "Black mates",
-      "opening": "1. e4 c5 2. Nf3 Nc6 3. Bb5 Nf6 4. O-O e5 5. Nc3 Be7"
+      "plies": 44,
+      "reason": "White makes an illegal move",
+      "opening": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Be7 5. Nc3 O-O"
     },
     {
-      "game": 14,
-      "white": "Codex-chess-learner",
-      "black": "Codex-chess",
-      "result": "1-0",
-      "plies": 101,
-      "reason": "White mates",
+      "game": 7,
+      "white": "Codex-chess",
+      "black": "Codex-chess-learner",
+      "result": "0-1",
+      "plies": 32,
+      "reason": "White makes an illegal move",
       "opening": "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7"
     }
   ],
+  "zero_ply_engine_failures": [],
+  "mate_losses": [
+    {
+      "game": 11,
+      "white": "Codex-chess",
+      "black": "Codex-chess-learner",
+      "result": "1-0",
+      "plies": 67,
+      "reason": "White mates",
+      "opening": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. d3 O-O"
+    },
+    {
+      "game": 12,
+      "white": "Codex-chess-learner",
+      "black": "Codex-chess",
+      "result": "0-1",
+      "plies": 88,
+      "reason": "Black mates",
+      "opening": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. d3 O-O"
+    }
+  ],
+  "mate_wins": [],
   "time_losses": [],
   "time_wins": [],
-  "repetition_draws": 5,
+  "repetition_draws": 4,
   "repeated_opening_lines": [
     {
       "line": "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7",
-      "games": 3,
-      "learner_score": 1.5,
+      "games": 4,
+      "learner_score": 2.0,
       "wins": 1,
-      "draws": 1,
-      "losses": 1
-    },
-    {
-      "line": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. c3 O-O",
-      "games": 3,
-      "learner_score": 1.0,
-      "wins": 0,
       "draws": 2,
       "losses": 1
-    },
-    {
-      "line": "1. e4 c5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 b5 5. O-O Bb7",
-      "games": 2,
-      "learner_score": 1.0,
-      "wins": 0,
-      "draws": 2,
-      "losses": 0
     },
     {
       "line": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Bc5 5. d3 O-O",
-      "games": 2,
-      "learner_score": 1.0,
+      "games": 3,
+      "learner_score": 0.5,
       "wins": 0,
-      "draws": 2,
+      "draws": 1,
+      "losses": 2
+    },
+    {
+      "line": "1. e4 c5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 b5 5. Bb3 Nf6",
+      "games": 1,
+      "learner_score": 0.5,
+      "wins": 0,
+      "draws": 1,
       "losses": 0
     },
     {
-      "line": "1. e4 c5 2. Nf3 Nc6 3. Bb5 Nf6 4. O-O e5 5. Nc3 Be7",
+      "line": "1. e4 c5 2. Nf3 Nc6 3. d4 cxd4 4. c3 dxc3 5. bxc3 Nf6",
       "games": 1,
       "learner_score": 1.0,
       "wins": 1,
@@ -118,23 +119,31 @@
       "losses": 0
     },
     {
-      "line": "1. e4 c5 2. Nf3 Nc6 3. Bb5 g6 4. O-O Bg7 5. c3 Nf6",
+      "line": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Be7 5. Nc3 O-O",
       "games": 1,
-      "learner_score": 0.5,
-      "wins": 0,
-      "draws": 1,
+      "learner_score": 1.0,
+      "wins": 1,
+      "draws": 0,
       "losses": 0
     },
     {
-      "line": "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O b5",
+      "line": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Be7 5. Re1 O-O",
       "games": 1,
-      "learner_score": 0.5,
-      "wins": 0,
-      "draws": 1,
+      "learner_score": 1.0,
+      "wins": 1,
+      "draws": 0,
       "losses": 0
     },
     {
-      "line": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O Nf6 5. d3 O-O",
+      "line": "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. O-O Be7 5. d3 O-O",
+      "games": 1,
+      "learner_score": 0.0,
+      "wins": 0,
+      "draws": 0,
+      "losses": 1
+    },
+    {
+      "line": "1. e4 e5 2. Nf3 Nc6 3. Nc3 Nf6 4. Bc4 Bc5 5. O-O O-O",
       "games": 1,
       "learner_score": 0.0,
       "wins": 0,

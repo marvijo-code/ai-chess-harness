@@ -98,6 +98,8 @@
 - [x] Validate per-game live filenames, live URL slug accuracy, and current-game header behavior.
 - [x] Keep arrow-key replay on the same current live-game PGN and `--live-game-N` hash after Follow Live is disabled.
 - [x] Validate left/right navigation no longer falls back to the viewer startup PGN, an unrelated archived game, or archived `--game-N` URL mode.
+- [x] Keep explicit `#slug--live-game-N` selections pinned to the same live-game PGN with Follow Live on or off, including after that game completes.
+- [x] Validate explicit live-game pins against concurrent FastChess status updates and mirror completion.
 - [x] Fix archived same-PGN game switching while Follow Live is off so the board navigates the newly selected game, not the previously displayed game.
 - [x] Validate archived same-PGN switching with focused browser E2E coverage.
 - [x] Add deterministic learner material-safety audit context for legal moves that hang high-value pieces or allow large immediate material swings.
@@ -115,3 +117,42 @@
 - [x] Validate focused engine/autolearn behavior and parser/compile checks.
 - [x] Add a repeatable learner-improvement proof script that uses a temporary context and records before/after UCI behavior.
 - [x] Run the proof script against the local Codex app-server model and archive the JSON/Markdown result.
+- [x] Add simple `player1` / `player2` defaults and CLI overrides without breaking `-LearningEngine`.
+- [x] Validate default, legacy, custom, and conflict player-resolution behavior.
+- [x] Preserve `.\play-games.ps1 -n 100 -p 2` as a compatibility shorthand for `-Concurrency 2`.
+- [x] Validate `-p` binds to `Concurrency` without ambiguity after adding `Player1` and `Player2`.
+- [x] Change the checked-in short-run default to learner-vs-Zero so `.\play-games.ps1 -n 100 -p 2` compares `Codex-chess-learner` against `Codex-chess-zero` without extra flags.
+- [x] Persist mirror-inferred live timeout finishes so concurrent live boards advance to the next running game.
+- [x] Validate inferred-timeout live mirror advancement with a focused regression test.
+- [x] Resolve default `/api/game` through the live status sidecar when the run-level control PGN is absent.
+- [x] Validate missing-control-PGN default game resolution with a focused viewer test.
+- [x] Add the Zero first-principles board encoder, legal-move mask, policy/value evaluator, PUCT/MCTS selection, self-play records, replay buffer, trainer, and promotion gate.
+- [x] Keep Stockfish, Lc0, Maia, human games, opening books, and tablebases out of Zero move-selection training and learner prompts.
+- [x] Add human-readable Zero research summaries: candidate moves, threat map, plan continuity, best-reply check, tactical blunder check, clock-aware choice, and public comment.
+- [x] Add anti-memorization guards for exact FEN/opening move-answer rules and repeated-position training artifacts.
+- [x] Add the viewer Research screen with current Zero network, benchmark ladder, promotion status, concept summaries, and anti-memorization status.
+- [x] Validate Zero research units, UCI PUCT behavior, viewer research data, and compile/parser checks.
+- [x] Reframe Zero as a deliberative human-reasoning engine with PUCT as fast calculation support, not the defining architecture.
+- [x] Validate Zero deliberative candidate buckets, plan intent, opponent-refutation notes, and selected-move comments with focused tests.
+- [x] Add guarded learner/Zero self-extension that writes engine-local Agent Skills and transparent tool artifacts from generalized self-play concepts.
+- [x] Validate self-extension rejects exact FEN/move-answer content and exposes only non-cheating current-position/concept tools.
+- [x] Update README, source skill, installed skill, and metadata for the deliberative Zero and self-extension contract.
+- [x] Add a persisted Zero climb ladder that starts against weak local engines and advances toward installed Stockfish gates.
+- [x] Keep climb training self-play-only while using weak engines and Stockfish only as evaluation gates.
+- [x] Validate stage advancement, failed-gate self-play training, promotion retry behavior, and Stockfish evaluation-only metadata.
+- [x] Start a bounded first climb pass and persist the current stage/result.
+- [x] Add climb progress to the existing Research view without changing live match tracker behavior.
+- [x] Validate `/api/research` exposes current gate, latest score, passed stages, training result, and no-external-label evidence.
+- [x] Sanitize persisted Zero strategy lesson JSON so prompt-readable knowledgebase files contain hashed evidence IDs and no raw exact FEN-to-move records.
+- [x] Validate Zero strategy sanitization with focused autolearn/viewer tests.
+- [x] Add failed-gate self-diagnosis for replay-add counts, duplicate self-play, promotion failure, and unchanged external-label guard status.
+- [x] Add bounded seeded self-play exploration so failed gates can produce new Zero-only replay positions instead of repeating one deterministic game.
+- [x] Add self-play-only material adjudication so capped non-terminal self-play games produce training signal without external labels.
+- [x] Update stale replay-buffer duplicates when a later Zero-only self-play record supplies outcome signal for the same position.
+- [x] Add a small self-play-only draw penalty so drawn trajectories are treated as not winning rather than zero-gradient success.
+- [x] Add per-cycle human-readable Zero wisdom deltas that distinguish promoted lessons from candidate hypotheses.
+- [x] Upgrade the `zero-stockfish-climb` automation into an active GM-track sprint that scales bounded settings, attacks the current failed gate, and preserves no-external-label training.
+- [x] Add material-aware draw penalties so failed conversion in drawn Zero self-play produces stronger self-play-only correction.
+- [x] Add local opponent-checking-reply refutation risk to Zero's deliberative evaluator without external labels.
+- [x] Keep Zero draw/failure training penalties from globally depressing network bias.
+- [x] Strengthen self-play-only training penalties for risky forcing non-wins exposed by the current Stockfish-depth-1 climb gate.

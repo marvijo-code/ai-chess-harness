@@ -5,3 +5,5 @@ Place learner-specific Agent Skills in this folder. Each skill should live in it
 The engine prompt points Codex at this folder as durable local skill context for learner runs.
 
 The learner engine starts with `UseMemory=true`, `UseSkills=true`, and `LearningMode=true`. Future learner-specific skills should be added here as normal Agent Skill folders containing `SKILL.md`.
+
+Post-game autolearn may maintain `self-play-concepts/SKILL.md` from generalized self-play concepts. Generated skills must stay concept/feature based and must not contain exact FEN-to-move answers, opening books, tablebases, Stockfish/Lc0/Maia PVs, or human-game imitation labels.

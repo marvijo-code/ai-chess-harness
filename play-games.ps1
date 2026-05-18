@@ -1,12 +1,15 @@
 param(
     [Alias("n")]
     [Nullable[int]]$Games = $null,
+    [Alias("p")]
     [Nullable[int]]$Concurrency = $null,
     [string]$Model = $null,
     [string]$Effort = $null,
     [string]$TimeControl = $null,
     [Nullable[int]]$MaxMoves = $null,
     [string]$FastChessVersion = $null,
+    [string]$Player1 = $null,
+    [string]$Player2 = $null,
     [ValidateSet("learner", "zero")]
     [string]$LearningEngine = $null,
     [Nullable[int]]$AnalysisMovetimeMs = $null,
@@ -34,7 +37,7 @@ $Effort = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -N
 $TimeControl = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "TimeControl" -CurrentValue $TimeControl -Config $config -Path "fastChess.timeControl" -Default "300+0")
 $MaxMoves = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "MaxMoves" -CurrentValue $MaxMoves -Config $config -Path "fastChess.maxMoves" -Default 0)
 $FastChessVersion = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "FastChessVersion" -CurrentValue $FastChessVersion -Config $config -Path "fastChess.version" -Default "latest")
-$LearningEngine = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "LearningEngine" -CurrentValue $LearningEngine -Config $config -Path "fastChess.learningEngine" -Default "learner")
+$players = Resolve-ChessHarnessPlayers -BoundParameters $PSBoundParameters -Player1 $Player1 -Player2 $Player2 -LearningEngine $LearningEngine -Config $config -RepoRoot $repoRoot
 $AnalysisMovetimeMs = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "AnalysisMovetimeMs" -CurrentValue $AnalysisMovetimeMs -Config $config -Path "viewer.analysisMovetimeMs" -Default 250)
 $AnalysisMultipv = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "AnalysisMultipv" -CurrentValue $AnalysisMultipv -Config $config -Path "viewer.analysisMultipv" -Default 3)
 $forceInstallEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "ForceInstall" -CurrentValue $ForceInstall -Config $config -Path "fastChess.forceInstall" -Default $false
@@ -58,7 +61,8 @@ $runParams = @{
     Effort               = $Effort
     TimeControl          = $TimeControl
     FastChessVersion     = $FastChessVersion
-    LearningEngine       = $LearningEngine
+    Player1              = $players.Player1.Key
+    Player2              = $players.Player2.Key
     AnalysisMovetimeMs   = $AnalysisMovetimeMs
     AnalysisMultipv      = $AnalysisMultipv
 }

@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from argparse import Namespace
@@ -18,10 +19,13 @@ from tools.update_learner_knowledgebase import (
     apply_context_defaults,
     build_strategy_lesson_summary,
     context_dir_for_engine,
+    exact_move_rule_violations,
     preserve_generated_at_if_unchanged,
     preserve_strategy_generated_at_if_no_new_evidence,
     read_games,
+    sanitized_strategy_summary,
     synthesize_strategy_concepts,
+    update_self_extension_artifacts,
     update_memory,
 )
 
@@ -91,6 +95,18 @@ class StrategyLessonTests(unittest.TestCase):
         self.assertEqual(second["new_evidence_count"], 0)
         self.assertGreater(len(second["pending_synthesis_evidence"]), 0)
         self.assertEqual(second["concept_synthesis"]["status"], "deferred")
+
+    def test_persisted_strategy_json_omits_raw_fen_move_evidence(self):
+        games, path = self.read_synthetic_games(1)
+        summary = build_strategy_lesson_summary(games, path, None, generated_at="test")
+
+        safe = sanitized_strategy_summary(summary)
+        safe_text = json.dumps(safe)
+
+        self.assertNotIn("fen_before", safe_text)
+        self.assertNotIn("fen_after", safe_text)
+        self.assertTrue(all(key.startswith("sha256:") for key in safe["evidence_keys"]))
+        self.assertEqual(exact_move_rule_violations(safe_text), [])
 
     def test_pending_strategy_evidence_triggers_later_synthesis_attempt(self):
         games, path = self.read_synthetic_games(1)
@@ -189,6 +205,7 @@ class StrategyLessonTests(unittest.TestCase):
                         "- Result reasons: mate=2.",
                         "- Apply `knowledgebase/live-match-lessons.md` before choosing moves.",
                         "- Apply model-discovered concepts from `knowledgebase/strategy-lessons.md` as generic value adjustments, not as memorized move answers.",
+                        "- Use engine-local `skills/self-play-concepts/SKILL.md` and `tools/self_play_concepts.json` only as generalized self-play concept aids, never as exact move memory.",
                         "- Avoid threefold repetition loops unless drawing is the only practical outcome.",
                         "- Manage the clock while still choosing a move intentionally; there is no fallback or client-picked move.",
                         "- Never return a move outside `legal_moves`; never return `0000` while legal moves exist.",
@@ -233,6 +250,58 @@ class StrategyLessonTests(unittest.TestCase):
         self.assertEqual(args.json, zero_context / "knowledgebase" / "live-match-lessons.json")
         self.assertEqual(args.strategy_output, zero_context / "knowledgebase" / "strategy-lessons.md")
         self.assertEqual(args.strategy_json, zero_context / "knowledgebase" / "strategy-lessons.json")
+
+    def test_self_extension_writes_engine_local_skill_and_tools_from_concepts(self):
+        summary = {
+            "generated_at": "test",
+            "concepts": [
+                {
+                    "name": "Loose forcing piece",
+                    "trigger": "a checking or forcing move leaves the moved piece undefended",
+                    "value_adjustment": "penalize candidate unless the opponent has no safe capture",
+                    "why": "self-play evidence showed material loss after forcing moves",
+                    "confidence": 0.8,
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = Path(temp_dir)
+            result = update_self_extension_artifacts(context, "Codex-chess-learner", summary)
+
+            skill = context / "skills" / "self-play-concepts" / "SKILL.md"
+            concept_json = context / "tools" / "self_play_concepts.json"
+            audit_tool = context / "tools" / "concept_audit.py"
+
+            self.assertEqual(result["status"], "ok")
+            self.assertTrue(skill.exists())
+            self.assertTrue(concept_json.exists())
+            self.assertTrue(audit_tool.exists())
+            self.assertIn("Loose forcing piece", skill.read_text(encoding="utf-8"))
+            manifest = json.loads(concept_json.read_text(encoding="utf-8"))
+            audit_text = audit_tool.read_text(encoding="utf-8").lower()
+
+        self.assertEqual(manifest["schema"], "learner-self-extension-v1")
+        self.assertFalse(any(manifest["training_sources"].values()))
+        self.assertIn("feature audit only", audit_text)
+
+    def test_self_extension_rejects_exact_fen_move_answers(self):
+        summary = {
+            "generated_at": "test",
+            "concepts": [
+                {
+                    "name": "Exact answer",
+                    "trigger": "In rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1, play e2e4",
+                    "value_adjustment": "always choose the move",
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = update_self_extension_artifacts(Path(temp_dir), "Codex-chess-learner", summary)
+
+        self.assertEqual(result["status"], "rejected")
+        self.assertIn("exact FEN", result["problems"][0])
 
 
 if __name__ == "__main__":

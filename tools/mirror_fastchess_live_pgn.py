@@ -165,8 +165,12 @@ def synthesize_active_game_from_tracks(games: list[dict], tracks: list[dict], no
     ]
 
 
-def select_board_game(games: list[dict], locked_game: int | None) -> tuple[dict | None, int | None]:
+def select_board_game(games: list[dict], locked_game: int | None, pin_locked: bool = False) -> tuple[dict | None, int | None]:
     if locked_game is not None:
+        if pin_locked:
+            for game in games:
+                if int(game["game"]) == locked_game:
+                    return game, locked_game
         for game in games:
             if int(game["game"]) == locked_game and not game["finished"]:
                 return game, locked_game
@@ -183,6 +187,23 @@ def select_board_game(games: list[dict], locked_game: int | None) -> tuple[dict 
         game = games[-1]
         return game, int(game["game"])
     return None, locked_game
+
+
+def apply_inferred_finishes(games: list[dict], inferred_finishes: dict[int, dict]) -> list[dict]:
+    if not inferred_finishes:
+        return games
+    updated: list[dict] = []
+    for game in games:
+        override = inferred_finishes.get(int(game.get("game") or 0))
+        if override is None or game.get("finished"):
+            updated.append(game)
+            continue
+        merged = dict(game)
+        for key in ("result", "reason", "finished", "timeout_inferred", "timeout_clock_key", "started_at_ms"):
+            if key in override:
+                merged[key] = override[key]
+        updated.append(merged)
+    return updated
 
 
 def selection_path_for(output_path: Path) -> Path:
@@ -498,6 +519,36 @@ def game_output_path(output_path: Path, current: dict, started_at_ms: int) -> Pa
     return output_path.with_name(f"{run_slug_prefix(output_path)}-{timestamp}-game-{game_no}-live.pgn")
 
 
+def existing_game_output_path(output_path: Path, current: dict) -> Path | None:
+    game_no = int(current["game"])
+    pattern = f"{run_slug_prefix(output_path)}-*-game-{game_no}-live.pgn"
+    for candidate in sorted(output_path.parent.glob(pattern), key=lambda path: path.name):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def update_existing_game_result(path: Path, current: dict) -> None:
+    result = str(current.get("result") or "*")
+    if result == "*":
+        return
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            game = chess.pgn.read_game(handle)
+    except OSError:
+        return
+    if game is None:
+        return
+    reason = str(current.get("reason") or "").strip()
+    if game.headers.get("Result") == result and (not reason or game.headers.get("Termination") == reason):
+        return
+    game.headers["Result"] = result
+    if reason:
+        game.headers["Termination"] = reason
+    game.headers["ClockRunningSide"] = ""
+    path.write_text(pgn_text(game), encoding="utf-8")
+
+
 def status_text(games: list[dict], output_path: Path, locked_game: int | None, control_path: Path | None = None) -> str:
     generated_at = time.time()
     payload = {
@@ -536,6 +587,7 @@ def mirror(stdout_path: Path, log_dir: Path, output_path: Path, interval: float,
     locked_moves: list[str] | None = None
     last_requested_game: int | None = None
     game_start_times: dict[int, int] = {}
+    inferred_finishes: dict[int, dict] = {}
     while True:
         if not once and not run_artifacts_recent(stdout_path, pgnout_path):
             time.sleep(interval)
@@ -545,13 +597,15 @@ def mirror(stdout_path: Path, log_dir: Path, output_path: Path, interval: float,
         games = merge_pgnout_games(games, parse_pgnout_games(pgnout_path, total))
         tracks = collect_engine_tracks(log_dir, since_ms)
         games = synthesize_active_game_from_tracks(games, tracks)
+        games = apply_inferred_finishes(games, inferred_finishes)
         requested_game = read_selected_game(output_path)
+        pin_locked = requested_game is not None
         if requested_game is not None and requested_game != last_requested_game:
             locked_game = requested_game
             locked_moves = None
             last_requested_game = requested_game
         previous_locked_game = locked_game
-        current, locked_game = select_board_game(games, locked_game)
+        current, locked_game = select_board_game(games, locked_game, pin_locked)
         if locked_game != previous_locked_game:
             locked_moves = None
         if current is not None:
@@ -561,14 +615,36 @@ def mirror(stdout_path: Path, log_dir: Path, output_path: Path, interval: float,
             current = dict(current)
             current["started_at_ms"] = started_at_ms
             current = game_with_timeout(current, state, now_ms)
+            if current.get("timeout_inferred") and current.get("finished"):
+                inferred_finishes[int(current["game"])] = dict(current)
+                games = apply_inferred_finishes(games, inferred_finishes)
+                next_current, next_locked_game = select_board_game(games, locked_game, pin_locked)
+                if next_current is not None and int(next_current["game"]) != int(current["game"]):
+                    locked_game = next_locked_game
+                    locked_moves = None
+                    current = dict(next_current)
+                    state, locked_moves = select_engine_state(log_dir, games, current, locked_moves, since_ms, tracks, now_ms)
+                    started_at_ms = game_started_at_ms(current, state, game_start_times)
+                    current["started_at_ms"] = started_at_ms
+                    current = game_with_timeout(current, state, now_ms)
+                    if current.get("timeout_inferred") and current.get("finished"):
+                        inferred_finishes[int(current["game"])] = dict(current)
+                        games = apply_inferred_finishes(games, inferred_finishes)
             text = pgn_text(build_game(current, state, now_ms))
-            board_output_path = game_output_path(output_path, current, started_at_ms)
+            existing_output_path = (
+                existing_game_output_path(output_path, current)
+                if pin_locked and current.get("finished")
+                else None
+            )
+            board_output_path = existing_output_path or game_output_path(output_path, current, started_at_ms)
             if board_output_path != previous_board_path:
                 previous = None
                 previous_board_path = board_output_path
-            if text != previous:
+            if existing_output_path is None and text != previous:
                 board_output_path.write_text(text, encoding="utf-8")
                 previous = text
+            elif existing_output_path is not None:
+                update_existing_game_result(board_output_path, current)
         if games:
             status_games = [
                 current if current is not None and int(game["game"]) == int(current["game"]) else game

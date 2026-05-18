@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import io
 import json
 import re
@@ -31,6 +32,11 @@ FINISHED_RE = re.compile(
 )
 MEMORY_START = "<!-- learner-autolearn:start -->"
 MEMORY_END = "<!-- learner-autolearn:end -->"
+FEN_RE = re.compile(
+    r"\b(?:[pnbrqkPNBRQK1-8]+/){7}[pnbrqkPNBRQK1-8]+\s+[wb]\s+(?:K?Q?k?q?|-)\s+(?:[a-h][36]|-)\s+\d+\s+\d+\b"
+)
+UCI_RE = re.compile(r"\b[a-h][1-8][a-h][1-8][qrbn]?\b")
+FORBIDDEN_EXTENSION_SOURCES = ("stockfish", "lc0", "leela", "maia", "tablebase", "opening book", "human game")
 THINKING_MARKERS = (
     "thread started:",
     "decision prompt:",
@@ -387,11 +393,67 @@ def make_strategy_event(
     }
 
 
-def strategy_evidence_key(event: dict) -> str:
+def raw_strategy_evidence_key(event: dict) -> str:
     return "|".join(
         str(event.get(part, ""))
         for part in ("source_pgn", "category", "game", "ply", "move", "fen_before", "detail")
     )
+
+
+def normalize_strategy_evidence_key(key: str) -> str:
+    if key.startswith("sha256:"):
+        return key
+    return "sha256:" + hashlib.sha256(key.encode("utf-8", errors="replace")).hexdigest()
+
+
+def strategy_evidence_key(event: dict) -> str:
+    evidence_id = event.get("evidence_id")
+    if isinstance(evidence_id, str) and evidence_id.startswith("sha256:"):
+        return evidence_id
+    return normalize_strategy_evidence_key(raw_strategy_evidence_key(event))
+
+
+def sanitized_strategy_event(event: dict) -> dict:
+    return {
+        "evidence_id": strategy_evidence_key(event),
+        "category": event.get("category", ""),
+        "game": event.get("game", ""),
+        "side": event.get("side", ""),
+        "ply": event.get("ply", ""),
+        "move": event.get("move", ""),
+        "san": event.get("san", ""),
+        "detail": event.get("detail", ""),
+        "source_pgn": event.get("source_pgn", ""),
+    }
+
+
+def sanitized_strategy_summary(summary: dict) -> dict:
+    safe = dict(summary)
+    safe["evidence_keys"] = [
+        normalize_strategy_evidence_key(key)
+        for key in summary.get("evidence_keys", [])
+        if isinstance(key, str)
+    ][-1000:]
+    for key in ("new_evidence", "pending_synthesis_evidence"):
+        safe[key] = [
+            sanitized_strategy_event(event)
+            for event in summary.get(key, [])
+            if isinstance(event, dict)
+        ]
+    observations = []
+    for observation in summary.get("observations", []):
+        if not isinstance(observation, dict):
+            continue
+        item = dict(observation)
+        evidence = observation.get("evidence", [])
+        item["evidence"] = [
+            sanitized_strategy_event(event)
+            for event in evidence
+            if isinstance(event, dict)
+        ]
+        observations.append(item)
+    safe["observations"] = observations
+    return safe
 
 
 def load_previous_strategy_summary(path: Path | None) -> dict | None:
@@ -461,6 +523,7 @@ def concept_synthesis_prompt(summary: dict) -> str:
             "Concepts must be general and reusable across positions.",
             "Use evidence_refs to cite observations, but do not create rules that only replay a cited move.",
             "Prefer value adjustments such as penalize loose moved pieces, reward preserving material, or reduce search time in low-clock states when evidence supports them.",
+            "Concepts may later be compiled into engine-local Agent Skills and transparent feature-audit tools, so keep them operational and feature based.",
             "Do not use Stockfish, engine PVs, or outside chess databases.",
         ],
         "existing_concepts": existing,
@@ -734,9 +797,11 @@ def build_strategy_lesson_summary(
     concept_synthesis = previous.get("concept_synthesis", {}) if previous and isinstance(previous.get("concept_synthesis"), dict) else {}
     if previous:
         for key in previous.get("evidence_keys", []):
-            if isinstance(key, str) and key not in seen_key_set:
-                seen_keys.append(key)
-                seen_key_set.add(key)
+            if isinstance(key, str):
+                normalized_key = normalize_strategy_evidence_key(key)
+                if normalized_key not in seen_key_set:
+                    seen_keys.append(normalized_key)
+                    seen_key_set.add(normalized_key)
         for observation in previous.get("observations", previous.get("lessons", [])):
             category = observation.get("category")
             if category not in EVIDENCE_TYPES:
@@ -770,6 +835,7 @@ def build_strategy_lesson_summary(
         key = strategy_evidence_key(event)
         if key in seen_key_set:
             continue
+        event["evidence_id"] = key
         seen_keys.append(key)
         seen_key_set.add(key)
         new_events.append(event)
@@ -825,6 +891,14 @@ def render_strategy_markdown(summary: dict) -> str:
         if synthesis.get("message"):
             lines.append(f"- message: {synthesis['message']}")
 
+    extension = summary.get("self_extension", {})
+    if extension:
+        lines += ["", "## Self Extension", f"- status: {extension.get('status', 'unknown')}"]
+        if extension.get("concept_count") is not None:
+            lines.append(f"- concept_count: {extension['concept_count']}")
+        if extension.get("skill"):
+            lines.append(f"- skill: {extension['skill']}")
+
     concepts = summary.get("concepts", [])
     lines += ["", "## Discovered Concepts"]
     if not concepts:
@@ -856,6 +930,223 @@ def render_strategy_markdown(summary: dict) -> str:
             )
     lines.append("")
     return "\n".join(lines)
+
+
+def slugify_skill_name(text: str, fallback: str = "self-play-concepts") -> str:
+    slug = re.sub(r"[^a-z0-9_-]+", "-", str(text).lower()).strip("-")
+    return slug or fallback
+
+
+def exact_move_rule_violations(text: str) -> list[dict]:
+    violations = []
+    for match in FEN_RE.finditer(text or ""):
+        window = text[max(0, match.start() - 80) : min(len(text), match.end() + 140)]
+        lower = window.lower()
+        if any(marker in lower for marker in ("best", "play", "preferred", "answer", "move")):
+            move = UCI_RE.search(window)
+            if move:
+                violations.append({"fen": match.group(0), "move": move.group(0), "context": window.strip()[:220]})
+    return violations
+
+
+def extension_text_is_safe(text: str) -> tuple[bool, list[str]]:
+    problems = []
+    if exact_move_rule_violations(text):
+        problems.append("contains exact FEN-to-move rule")
+    lower = text.lower()
+    for source in FORBIDDEN_EXTENSION_SOURCES:
+        if source in lower:
+            problems.append(f"mentions forbidden source: {source}")
+    return not problems, problems
+
+
+def safe_concepts_for_extension(summary: dict) -> list[dict]:
+    def clean(value: object, limit: int) -> str:
+        text = " ".join(str(value or "").replace("\ufffd", "'").split())
+        return text.encode("ascii", errors="replace").decode("ascii")[:limit]
+
+    safe = []
+    for concept in summary.get("concepts", [])[:12]:
+        if not isinstance(concept, dict):
+            continue
+        item = {
+            "name": clean(concept.get("name") or "unnamed concept", 80),
+            "trigger": clean(concept.get("trigger"), 260),
+            "value_adjustment": clean(concept.get("value_adjustment") or concept.get("value_update"), 260),
+            "why": clean(concept.get("why"), 300),
+            "confidence": concept.get("confidence", ""),
+        }
+        safe_text = json.dumps(item, sort_keys=True)
+        ok, _ = extension_text_is_safe(safe_text)
+        if ok and item["name"]:
+            safe.append(item)
+    return safe
+
+
+def render_self_extension_skill(engine_name: str, summary: dict, concepts: list[dict]) -> str:
+    lines = [
+        "---",
+        "name: self-play-concepts",
+        "description: Use engine-local self-play concepts as a chess candidate-move checklist without memorized move answers.",
+        "---",
+        "",
+        "# Self-Play Concepts",
+        "",
+        f"Generated: {summary.get('generated_at', '')}",
+        f"Engine: {engine_name}",
+        "",
+        "## Rules",
+        "",
+        "- Use these concepts as candidate-move evaluation features, not as an opening book.",
+        "- Do not map exact FENs, move numbers, or game IDs to preferred moves.",
+        "- Do not use Stockfish, Lc0, Maia, tablebases, opening books, or human-game imitation as move labels.",
+        "- For each candidate, check legal move, own king safety, immediate material swing, opponent best reply, and plan continuity.",
+        "- Prefer concepts that generalize across positions: loose pieces, failed forcing moves, conversion, promotion, time pressure, and repetition.",
+        "",
+        "## Concepts",
+        "",
+    ]
+    if not concepts:
+        lines.append("- No safe generalized concepts available yet.")
+    for concept in concepts:
+        line = f"- {concept['name']}"
+        if concept.get("confidence") != "":
+            line += f" (confidence {concept['confidence']})"
+        if concept.get("trigger"):
+            line += f"; trigger: {concept['trigger']}"
+        if concept.get("value_adjustment"):
+            line += f"; adjustment: {concept['value_adjustment']}"
+        if concept.get("why"):
+            line += f"; why: {concept['why']}"
+        lines.append(line)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_concept_audit_tool() -> str:
+    return '''from __future__ import annotations
+
+import argparse
+import json
+
+import chess
+
+PIECE_VALUES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 300,
+    chess.BISHOP: 300,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 0,
+}
+
+
+def material_balance(board: chess.Board, color: bool) -> int:
+    total = 0
+    for piece in board.piece_map().values():
+        value = PIECE_VALUES.get(piece.piece_type, 0)
+        total += value if piece.color == color else -value
+    return total
+
+
+def audit(fen: str) -> dict:
+    board = chess.Board(fen)
+    color = board.turn
+    checks = []
+    captures = []
+    risky = []
+    before = material_balance(board, color)
+    for move in board.legal_moves:
+        san = board.san(move)
+        after = board.copy(stack=False)
+        is_capture = board.is_capture(move)
+        gives_check = board.gives_check(move)
+        after.push(move)
+        reply_swing = 0
+        for reply in after.legal_moves:
+            reply_board = after.copy(stack=False)
+            reply_board.push(reply)
+            reply_swing = max(reply_swing, before - material_balance(reply_board, color))
+        row = {"uci": move.uci(), "san": san, "reply_material_swing_cp": reply_swing}
+        if gives_check:
+            checks.append(row)
+        if is_capture:
+            captures.append(row)
+        if reply_swing >= 300:
+            risky.append(row)
+    return {
+        "fen": fen,
+        "side_to_move": "white" if color == chess.WHITE else "black",
+        "legal_moves": board.legal_moves.count(),
+        "checks": checks[:12],
+        "captures": captures[:12],
+        "risky_moves": risky[:12],
+        "policy": "Current-position feature audit only. This tool does not choose a move and contains no opening book, tablebase, or engine labels.",
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Audit current-position concept features without choosing a move.")
+    parser.add_argument("--fen", required=True)
+    args = parser.parse_args()
+    print(json.dumps(audit(args.fen), indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def update_self_extension_artifacts(context_dir: Path, engine_name: str, strategy_summary: dict) -> dict:
+    concepts = safe_concepts_for_extension(strategy_summary)
+    raw_text = json.dumps(strategy_summary.get("concepts", []), sort_keys=True)
+    ok, problems = extension_text_is_safe(raw_text)
+    if not ok:
+        return {"status": "rejected", "problems": problems, "concept_count": 0}
+
+    skills_dir = context_dir / "skills" / "self-play-concepts"
+    tools_dir = context_dir / "tools"
+    skill_path = skills_dir / "SKILL.md"
+    concepts_path = tools_dir / "self_play_concepts.json"
+    audit_path = tools_dir / "concept_audit.py"
+    readme_path = tools_dir / "README.md"
+
+    skill_text = render_self_extension_skill(engine_name, strategy_summary, concepts)
+    if exact_move_rule_violations(skill_text):
+        return {"status": "rejected", "problems": ["generated skill contained exact FEN-to-move rule"], "concept_count": 0}
+
+    manifest = {
+        "schema": "learner-self-extension-v1",
+        "generated_at": strategy_summary.get("generated_at", time.strftime("%Y-%m-%d %H:%M:%S")),
+        "engine_name": engine_name,
+        "source": "self_play_concepts",
+        "concepts": concepts,
+        "training_sources": {source: False for source in FORBIDDEN_EXTENSION_SOURCES},
+        "policy": "Generic self-play concepts and current-position feature tools only; no exact FEN move answers or external engine labels.",
+    }
+    readme = "\n".join(
+        [
+            "# Learner Tools",
+            "",
+            "This folder is maintained by post-game autolearn.",
+            "",
+            "- `self_play_concepts.json` stores safe generalized concepts from self-play.",
+            "- `concept_audit.py` audits current-position features without choosing a move.",
+            "- These tools must not call online services, Stockfish, Lc0, Maia, tablebases, opening books, or human-game datasets.",
+            "",
+        ]
+    )
+
+    write_atomic(skill_path, skill_text)
+    write_atomic(concepts_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    write_atomic(audit_path, render_concept_audit_tool())
+    write_atomic(readme_path, readme)
+    return {
+        "status": "ok",
+        "concept_count": len(concepts),
+        "skill": str(skill_path),
+        "tools": [str(concepts_path), str(audit_path), str(readme_path)],
+    }
 
 
 def render_markdown(summary: dict) -> str:
@@ -1125,6 +1416,7 @@ def update_memory(memory_path: Path, summary: dict) -> None:
             f"- Result reasons: {', '.join(f'{key}={value}' for key, value in sorted(summary['reason_counts'].items()))}.",
             "- Apply `knowledgebase/live-match-lessons.md` before choosing moves.",
             "- Apply model-discovered concepts from `knowledgebase/strategy-lessons.md` as generic value adjustments, not as memorized move answers.",
+            "- Use engine-local `skills/self-play-concepts/SKILL.md` and `tools/self_play_concepts.json` only as generalized self-play concept aids, never as exact move memory.",
             "- Avoid threefold repetition loops unless drawing is the only practical outcome.",
             "- Manage the clock while still choosing a move intentionally; there is no fallback or client-picked move.",
             "- Never return a move outside `legal_moves`; never return `0000` while legal moves exist.",
@@ -1216,8 +1508,12 @@ def run_once(args: argparse.Namespace) -> dict:
         if synthesis.get("status") == "ok":
             strategy_summary["pending_synthesis_evidence"] = []
     strategy_summary = preserve_strategy_generated_at_if_no_new_evidence(strategy_summary, previous_strategy)
+    if args.no_self_extension:
+        strategy_summary["self_extension"] = {"status": "disabled"}
+    else:
+        strategy_summary["self_extension"] = update_self_extension_artifacts(args.context_dir, args.engine_name, strategy_summary)
     write_atomic(args.strategy_output, render_strategy_markdown(strategy_summary))
-    write_atomic(args.strategy_json, json.dumps(strategy_summary, indent=2))
+    write_atomic(args.strategy_json, json.dumps(sanitized_strategy_summary(strategy_summary), indent=2))
     thinking_json = args.thinking_json or default_thinking_json(pgn)
     thinking_md = args.thinking_md or default_thinking_md(pgn)
     thinking_archive = build_thinking_archive(games, pgn, stdout, args.engine_log_dir)
@@ -1251,6 +1547,7 @@ def main() -> None:
     parser.add_argument("--watch", action="store_true")
     parser.add_argument("--interval", type=float, default=10.0)
     parser.add_argument("--no-memory-update", action="store_true")
+    parser.add_argument("--no-self-extension", action="store_true")
     args = parser.parse_args()
     apply_context_defaults(args)
     LEARNER = args.engine_name

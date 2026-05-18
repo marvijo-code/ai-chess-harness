@@ -124,6 +124,8 @@ class TimeLossHandlingTests(unittest.TestCase):
         self.assertLessEqual(len(lean_context["strategy_lessons"]), len(full_context["strategy_lessons"]))
         self.assertLessEqual(len(lean_context["knowledgebase"]), len(full_context["knowledgebase"]))
         self.assertLessEqual(len(lean_context["skills"]), len(full_context["skills"]))
+        self.assertLessEqual(len(lean_context["tools"]), len(full_context["tools"]))
+        self.assertIn("tools_path", full_context)
 
     def test_codex_engine_training_effort_is_lower_than_default_high(self):
         module = load_module("codex_chess_uci_fast_training_effort_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
@@ -158,8 +160,33 @@ class TimeLossHandlingTests(unittest.TestCase):
         self.assertEqual(client.retry_timeout_seconds(600000, 0), 3)
         self.assertEqual(context["profile"], "lean")
         self.assertEqual(context["skills"], [])
+        self.assertEqual(context["tools"], [])
         self.assertIn("Zero mode", context["policy"])
         self.assertIn("first principles", context["policy"])
+
+    def test_codex_zero_local_puct_does_not_start_model_turn(self):
+        module = load_module("codex_chess_uci_zero_local_puct_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
+        client = module.CodexAppServer("gpt-test", "high", learning_mode=True, zero_mode=True)
+
+        async def fail_start():
+            raise AssertionError("start should not be called while ZeroLocalPuct is enabled")
+
+        client.start = fail_start
+        original_env = {name: os.environ.get(name) for name in ["CODEX_CHESS_ZERO_LOCAL_PUCT", "CODEX_CHESS_ZERO_PUCT_VISITS", "CODEX_CHESS_ZERO_PUCT_TIME_LIMIT_MS"]}
+        try:
+            os.environ["CODEX_CHESS_ZERO_LOCAL_PUCT"] = "true"
+            os.environ["CODEX_CHESS_ZERO_PUCT_VISITS"] = "2"
+            os.environ["CODEX_CHESS_ZERO_PUCT_TIME_LIMIT_MS"] = "100"
+            board = chess.Board()
+            move = asyncio.run(client.choose_move(board, {"wtime": 300000, "btime": 300000}, []))
+        finally:
+            for name, value in original_env.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+        self.assertIn(chess.Move.from_uci(move), board.legal_moves)
 
     def test_codex_engine_material_safety_flags_live_qxd4_blunder(self):
         module = load_module("codex_chess_uci_material_safety_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
@@ -259,6 +286,61 @@ class TimeLossHandlingTests(unittest.TestCase):
         self.assertEqual(status["games"][0]["status"], "Completed")
         self.assertIn("lost on time", status["games"][0]["reason"])
 
+    def test_live_mirror_advances_from_inferred_timeout_to_next_running_game(self):
+        stdout_text = "\n".join(
+            [
+                "Started game 1 of 100 (Codex-chess vs Codex-chess-learner)",
+                "Started game 2 of 100 (Codex-chess-learner vs Codex-chess)",
+            ]
+        )
+        expired_first_game_track = "\n".join(
+            [
+                "[2026-05-12 10:00:00] > position startpos",
+                "[2026-05-12 10:00:00] > go wtime 1000 btime 300000",
+            ]
+        )
+        running_second_game_track = "\n".join(
+            [
+                "[2026-05-12 10:01:00] > position startpos",
+                "[2026-05-12 10:01:00] > go wtime 300000 btime 300000",
+                "[2026-05-12 10:01:05] > position startpos moves e2e4 e7e5 g1f3 b8c6",
+                "[2026-05-12 10:01:05] > go wtime 295000 btime 295000",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stdout_path = root / "run-launch.out.log"
+            log_dir = root / "logs"
+            output_path = root / "live" / "run-live.pgn"
+            log_dir.mkdir()
+            output_path.parent.mkdir()
+            stdout_path.write_text(stdout_text, encoding="utf-8")
+            os.utime(stdout_path, (log_timestamp_ms("2026-05-12 09:59:55") / 1000, log_timestamp_ms("2026-05-12 09:59:55") / 1000))
+            (log_dir / "codex-chess-game1.log").write_text(expired_first_game_track, encoding="utf-8")
+            (log_dir / "codex-chess-game2.log").write_text(running_second_game_track, encoding="utf-8")
+
+            original_now = mirror_module.current_epoch_ms
+            mirror_module.current_epoch_ms = lambda: log_timestamp_ms("2026-05-12 10:01:06")
+            try:
+                mirror(stdout_path, log_dir, output_path, interval=0, once=True)
+            finally:
+                mirror_module.current_epoch_ms = original_now
+            status = json.loads(output_path.with_suffix(".status.json").read_text(encoding="utf-8"))
+            with Path(status["output_pgn"]).open("r", encoding="utf-8") as handle:
+                game = chess.pgn.read_game(handle)
+
+        self.assertIsNotNone(game)
+        assert game is not None
+        self.assertEqual(game.headers["Round"], "2")
+        self.assertEqual(game.headers["Result"], "*")
+        self.assertIn("1. e4 e5 2. Nf3 Nc6", str(game))
+        self.assertEqual(status["locked_game"], 2)
+        self.assertEqual(status["games"][0]["status"], "Completed")
+        self.assertIn("lost on time", status["games"][0]["reason"])
+        self.assertEqual(status["games"][1]["status"], "In progress")
+        self.assertTrue(status["games"][1]["is_board_game"])
+
     def test_live_mirror_advances_stale_completed_selection_to_running_game(self):
         games = [
             {"game": 1, "finished": True},
@@ -271,6 +353,19 @@ class TimeLossHandlingTests(unittest.TestCase):
 
         self.assertEqual(current["game"], 4)
         self.assertEqual(locked_game, 4)
+
+    def test_live_mirror_keeps_explicit_completed_selection_pinned(self):
+        games = [
+            {"game": 1, "finished": True},
+            {"game": 2, "finished": True},
+            {"game": 3, "finished": True},
+            {"game": 4, "finished": False},
+        ]
+
+        current, locked_game = select_board_game(games, 3, pin_locked=True)
+
+        self.assertEqual(current["game"], 3)
+        self.assertEqual(locked_game, 3)
 
     def test_live_mirror_keeps_selected_game_when_it_is_running(self):
         games = [
@@ -449,7 +544,7 @@ class TimeLossHandlingTests(unittest.TestCase):
 
         self.assertEqual([track["moves"] for track in tracks], [["e2e4", "e7e5"]])
 
-    def test_live_mirror_e2e_advances_completed_selection_to_current_track(self):
+    def test_live_mirror_e2e_keeps_explicit_completed_selection_pinned(self):
         stdout_text = "\n".join(
             [
                 "Started game 1 of 100 (Codex-chess vs Codex-chess-learner)",
@@ -495,13 +590,75 @@ class TimeLossHandlingTests(unittest.TestCase):
 
         self.assertIsNotNone(game)
         assert game is not None
-        self.assertEqual(game.headers["Round"], "2")
-        self.assertEqual(game.headers["Result"], "*")
-        self.assertIn("3. Bc4", str(game))
-        self.assertEqual(status["locked_game"], 2)
+        self.assertEqual(game.headers["Round"], "1")
+        self.assertEqual(game.headers["Result"], "0-1")
+        self.assertIn("3. Bb5", str(game))
+        self.assertEqual(status["locked_game"], 1)
         self.assertEqual(status["games"][0]["status"], "Completed")
         self.assertEqual(status["games"][1]["status"], "In progress")
-        self.assertTrue(status["games"][1]["is_board_game"])
+        self.assertTrue(status["games"][0]["is_board_game"])
+        self.assertFalse(status["games"][1]["is_board_game"])
+
+    def test_live_mirror_reuses_existing_completed_pinned_game_after_restart(self):
+        stdout_text = "\n".join(
+            [
+                "Started game 1 of 100 (Codex-chess vs Codex-chess-learner)",
+                "Finished game 1 (Codex-chess vs Codex-chess-learner): 0-1 {Black mates}",
+                "Started game 2 of 100 (Codex-chess-learner vs Codex-chess)",
+            ]
+        )
+        current_game_track = "\n".join(
+            [
+                "[2026-05-12 10:05:00] > position startpos",
+                "[2026-05-12 10:05:00] > go wtime 999999999 btime 999999999",
+                "[2026-05-12 10:05:10] > position startpos moves d2d4 d7d5",
+                "[2026-05-12 10:05:10] > go wtime 999990000 btime 999990000",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stdout_path = root / "run-launch.out.log"
+            log_dir = root / "logs"
+            output_path = root / "live" / "run-live.pgn"
+            existing_game_path = root / "live" / "run-20260512-095500-game-1-live.pgn"
+            log_dir.mkdir()
+            output_path.parent.mkdir()
+            stdout_path.write_text(stdout_text, encoding="utf-8")
+            os.utime(stdout_path, (log_timestamp_ms("2026-05-12 09:59:55") / 1000, log_timestamp_ms("2026-05-12 09:59:55") / 1000))
+            existing_game_path.write_text(
+                "\n".join(
+                    [
+                        '[Event "FastChess live mirror"]',
+                        '[Site "C:/dev/chess-harness-codex"]',
+                        '[Date "2026.05.12"]',
+                        '[Round "1"]',
+                        '[White "Codex-chess"]',
+                        '[Black "Codex-chess-learner"]',
+                        '[Result "*"]',
+                        '[TotalGames "100"]',
+                        "",
+                        "1. a3 e5 *",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (output_path.with_suffix(".selection.json")).write_text(json.dumps({"locked_game": 1}), encoding="utf-8")
+            (log_dir / "codex-chess-game2.log").write_text(current_game_track, encoding="utf-8")
+
+            mirror(stdout_path, log_dir, output_path, interval=0, once=True)
+            status = json.loads(output_path.with_suffix(".status.json").read_text(encoding="utf-8"))
+            text = existing_game_path.read_text(encoding="utf-8")
+
+        self.assertEqual(Path(status["output_pgn"]), existing_game_path)
+        self.assertEqual(status["locked_game"], 1)
+        self.assertEqual(status["games"][0]["status"], "Completed")
+        self.assertTrue(status["games"][0]["is_board_game"])
+        self.assertIn('[Result "0-1"]', text)
+        self.assertIn('[Termination "Black mates"]', text)
+        self.assertIn("1. a3 e5", text)
+        self.assertNotIn("1. d4 d5", text)
 
     def test_live_mirror_e2e_reconciles_stale_stdout_with_pgnout_and_active_track(self):
         stdout_text = "\n".join(
@@ -585,7 +742,6 @@ class TimeLossHandlingTests(unittest.TestCase):
             stdout_path.write_text(stdout_text, encoding="utf-8")
             pgnout_path.write_text(pgnout_text, encoding="utf-8")
             os.utime(stdout_path, (log_timestamp_ms("2026-05-12 09:59:55") / 1000, log_timestamp_ms("2026-05-12 09:59:55") / 1000))
-            (output_path.with_suffix(".selection.json")).write_text(json.dumps({"locked_game": 3}), encoding="utf-8")
             for name, first_ts, moves in tracks:
                 later_ts = first_ts[:-2] + "10"
                 (log_dir / f"codex-chess-{name}.log").write_text(

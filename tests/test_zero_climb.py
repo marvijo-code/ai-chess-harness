@@ -1,0 +1,160 @@
+import importlib.util
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_climb_module():
+    path = ROOT / "tools" / "run_zero_climb.py"
+    spec = importlib.util.spec_from_file_location("zero_climb_test", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+class ZeroClimbTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.climb = load_climb_module()
+
+    def test_stage_catalog_marks_stockfish_as_evaluation_only(self):
+        stages = self.climb.stage_catalog(stockfish_available=True)
+        stockfish = [stage for stage in stages if stage.opponent == "stockfish"]
+
+        self.assertTrue(stockfish)
+        self.assertTrue(all(stage.evaluation_only for stage in stockfish))
+        self.assertTrue(all(not stage.training_allowed for stage in stockfish))
+
+    def test_gm_sprint_profile_scales_bounded_learning_work(self):
+        defaults = self.climb.profile_defaults("gm-sprint")
+
+        self.assertGreater(defaults["zero_visits"], self.climb.PROFILE_DEFAULTS["quick"]["zero_visits"])
+        self.assertGreater(defaults["self_play_games"], self.climb.PROFILE_DEFAULTS["quick"]["self_play_games"])
+        self.assertGreater(defaults["promotion_games"], self.climb.PROFILE_DEFAULTS["quick"]["promotion_games"])
+        self.assertEqual(defaults["self_play_max_plies"], 120)
+
+    def test_profile_settings_keep_cli_overrides(self):
+        args = type(
+            "Args",
+            (),
+            {
+                "profile": "gm-sprint",
+                "cycles": 1,
+                "zero_visits": None,
+                "self_play_games": 2,
+                "self_play_visits": None,
+                "self_play_max_plies": None,
+                "train_epochs": None,
+                "promotion_games": None,
+                "promotion_visits": None,
+            },
+        )()
+
+        settings = self.climb.resolve_profile_settings(args)
+
+        self.assertEqual(settings["cycles"], 1)
+        self.assertEqual(settings["self_play_games"], 2)
+        self.assertEqual(settings["zero_visits"], self.climb.PROFILE_DEFAULTS["gm-sprint"]["zero_visits"])
+
+    def test_climb_advances_when_stage_gate_is_passed(self):
+        stages = [
+            self.climb.LadderStage(
+                name="always-pass-random",
+                opponent="random",
+                games=1,
+                pass_score=0.0,
+                max_plies=4,
+            )
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            log = Path(tmp) / "log.jsonl"
+            result = self.climb.run_climb_cycle(
+                state_path=state,
+                log_path=log,
+                stages=stages,
+                zero_visits=1,
+                self_play_games=0,
+            )
+            saved = json.loads(state.read_text(encoding="utf-8"))
+
+        self.assertEqual(result["action"], "advanced")
+        self.assertEqual(saved["current_stage_index"], 1)
+        self.assertEqual(saved["beaten_stages"][0]["stage"], "always-pass-random")
+
+    def test_failed_gate_trains_only_from_zero_self_play(self):
+        stages = [
+            self.climb.LadderStage(
+                name="impossible-random",
+                opponent="random",
+                games=1,
+                pass_score=1.1,
+                max_plies=2,
+            )
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            log = Path(tmp) / "log.jsonl"
+            with patch.object(self.climb, "train_after_failed_gate") as train:
+                train.return_value = {
+                    "self_play_games": 1,
+                    "training_sources": {source: False for source in self.climb.zero.FORBIDDEN_TRAINING_SOURCES},
+                    "promotion": {"promoted": False},
+                }
+                result = self.climb.run_climb_cycle(
+                    state_path=state,
+                    log_path=log,
+                    stages=stages,
+                    zero_visits=1,
+                    self_play_games=1,
+                )
+
+        self.assertEqual(result["action"], "trained_self_play_and_retried_later")
+        self.assertTrue(train.called)
+        self.assertFalse(any(result["training"]["training_sources"].values()))
+        self.assertFalse(result["evaluation"]["training_sources"]["opponent_labels_used"])
+
+    def test_training_diagnosis_flags_duplicate_stale_self_play(self):
+        game = {
+            "result": "1-0",
+            "plies": 2,
+            "replay_append": {"added": 0, "skipped_duplicates": 2},
+            "records": [
+                {"position_key": "start", "chosen_move": "e2e4", "selection": "greedy"},
+                {"position_key": "after", "chosen_move": "e7e5", "selection": "greedy"},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first.json"
+            second = root / "second.json"
+            first.write_text(json.dumps(game), encoding="utf-8")
+            second.write_text(json.dumps(game), encoding="utf-8")
+            candidate = type("Candidate", (), {"network_id": "candidate"})()
+
+            diagnosis = self.climb.summarize_training_feedback(
+                [first, second],
+                candidate,
+                {"promoted": False},
+            )
+
+        self.assertEqual(diagnosis["status"], "stalled_no_new_replay_signal")
+        self.assertTrue(diagnosis["duplicate_trajectories"])
+        self.assertEqual(diagnosis["replay_added"], 0)
+        self.assertIn("candidate failed promotion gate", diagnosis["reasons"])
+        self.assertFalse(any(diagnosis["training_sources"].values()))
+
+
+if __name__ == "__main__":
+    unittest.main()

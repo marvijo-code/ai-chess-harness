@@ -1,11 +1,14 @@
 param(
     [Nullable[int]]$Games = $null,
+    [Alias("p")]
     [Nullable[int]]$Concurrency = $null,
     [string]$Model = $null,
     [string]$Effort = $null,
     [string]$TimeControl = $null,
     [Nullable[int]]$MaxMoves = $null,
     [string]$FastChessVersion = $null,
+    [string]$Player1 = $null,
+    [string]$Player2 = $null,
     [ValidateSet("learner", "zero")]
     [string]$LearningEngine = $null,
     [Nullable[int]]$AnalysisMovetimeMs = $null,
@@ -90,35 +93,6 @@ function ConvertTo-AbsolutePath {
     return Join-Path $BasePath $PathText
 }
 
-function Get-LearningEngineSpec {
-    param(
-        [string]$Name,
-        [string]$RepoRoot
-    )
-
-    switch ($Name.ToLowerInvariant()) {
-        "learner" {
-            return [PSCustomObject]@{
-                Key        = "learner"
-                EngineName = "Codex-chess-learner"
-                Command    = Join-Path $RepoRoot "engines\codex-chess-learner\codex-chess-learner.cmd"
-                ContextDir = Join-Path $RepoRoot "engines\codex-chess-learner"
-            }
-        }
-        "zero" {
-            return [PSCustomObject]@{
-                Key        = "zero"
-                EngineName = "Codex-chess-zero"
-                Command    = Join-Path $RepoRoot "engines\codex-chess-zero\codex-chess-zero.cmd"
-                ContextDir = Join-Path $RepoRoot "engines\codex-chess-zero"
-            }
-        }
-        default {
-            throw "Unsupported learning engine: $Name"
-        }
-    }
-}
-
 function Get-RunningFastChessPgnPath {
     Get-CimInstance Win32_Process |
         Where-Object { $_.Name -ieq "fastchess.exe" -and $_.CommandLine -match "-pgnout" } |
@@ -153,8 +127,8 @@ $Effort = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -N
 $TimeControl = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "TimeControl" -CurrentValue $TimeControl -Config $config -Path "fastChess.timeControl" -Default "300+0")
 $MaxMoves = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "MaxMoves" -CurrentValue $MaxMoves -Config $config -Path "fastChess.maxMoves" -Default 0)
 $FastChessVersion = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "FastChessVersion" -CurrentValue $FastChessVersion -Config $config -Path "fastChess.version" -Default "latest")
-$LearningEngine = [string](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "LearningEngine" -CurrentValue $LearningEngine -Config $config -Path "fastChess.learningEngine" -Default "learner")
-$learningEngineSpec = Get-LearningEngineSpec -Name $LearningEngine -RepoRoot $repoRoot
+$players = Resolve-ChessHarnessPlayers -BoundParameters $PSBoundParameters -Player1 $Player1 -Player2 $Player2 -LearningEngine $LearningEngine -Config $config -RepoRoot $repoRoot
+$learningEngineSpec = $players.AutoLearnTarget
 $AnalysisMovetimeMs = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "AnalysisMovetimeMs" -CurrentValue $AnalysisMovetimeMs -Config $config -Path "viewer.analysisMovetimeMs" -Default 250)
 $AnalysisMultipv = [int](Resolve-HarnessSetting -BoundParameters $PSBoundParameters -Name "AnalysisMultipv" -CurrentValue $AnalysisMultipv -Config $config -Path "viewer.analysisMultipv" -Default 3)
 $forceInstallEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "ForceInstall" -CurrentValue $ForceInstall -Config $config -Path "fastChess.forceInstall" -Default $false
@@ -167,9 +141,7 @@ $skipModelPreflightEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundPara
 $noRepeatEnabled = Resolve-HarnessSwitch -BoundParameters $PSBoundParameters -Name "NoRepeat" -CurrentValue $NoRepeat -Config $config -Path "fastChess.noRepeat" -Default $false
 $viewerHost = [string](Get-HarnessConfigValue -Config $config -Path "viewer.host" -Default "127.0.0.1")
 $viewerPort = [int](Get-HarnessConfigValue -Config $config -Path "viewer.port" -Default 8766)
-$liveRunNamePath = if ($learningEngineSpec.Key -eq "zero") { "fastChess.zeroLiveRunName" } else { "fastChess.liveRunName" }
-$liveRunNameDefault = if ($learningEngineSpec.Key -eq "zero") { "codex-vs-codex-zero-live" } else { "codex-vs-codex-learner-live" }
-$runName = [string](Get-HarnessConfigValue -Config $config -Path $liveRunNamePath -Default $liveRunNameDefault)
+$runName = [string](Get-ChessHarnessRunName -Config $config -Players $players -Live)
 $autoLearnIntervalSeconds = [int](Get-HarnessConfigValue -Config $config -Path "learner.autoLearnIntervalSeconds" -Default 10)
 $conceptSynthesisDuringWatch = [bool](Get-HarnessConfigValue -Config $config -Path "learner.conceptSynthesisDuringWatch" -Default $false)
 $conceptSynthesisAfterRun = [bool](Get-HarnessConfigValue -Config $config -Path "learner.conceptSynthesisAfterRun" -Default $true)
@@ -197,8 +169,10 @@ if (-not (Test-Path $runnerScript)) {
 if (-not (Test-Path $autolearnScript)) {
     throw "Learner autolearn script was not found: $autolearnScript"
 }
-if (-not (Test-Path $learningEngineSpec.Command)) {
-    throw "$($learningEngineSpec.EngineName) engine command was not found: $($learningEngineSpec.Command)"
+foreach ($engineSpec in @($players.Player1, $players.Player2)) {
+    if (-not (Test-Path $engineSpec.Command)) {
+        throw "$($engineSpec.EngineName) engine command was not found: $($engineSpec.Command)"
+    }
 }
 if (-not (Test-Path $preflightScript)) {
     throw "Codex model preflight script was not found: $preflightScript"
@@ -314,7 +288,9 @@ if ($hotReloadEnabled) {
 }
 
 Write-Host "Starting local live viewer: $viewerUrl"
-Write-Host "Learning engine: $($learningEngineSpec.EngineName)"
+Write-Host "Player1: $($players.Player1.EngineName)"
+Write-Host "Player2: $($players.Player2.EngineName)"
+Write-Host "Autolearn target: $($learningEngineSpec.EngineName)"
 Write-Host "FastChess PGN output: $pgnPath"
 Write-Host "Viewer PGN: $viewerPgnPath"
 Write-Host "FastChess PGN output updates as FastChess writes it; use play_codex_vs_stockfish.py for ply-by-ply live PGN."
@@ -376,7 +352,8 @@ $runParams = @{
     Effort           = $Effort
     TimeControl      = $TimeControl
     FastChessVersion = $FastChessVersion
-    LearningEngine   = $LearningEngine
+    Player1          = $players.Player1.Key
+    Player2          = $players.Player2.Key
     RunName          = $runName
     Stamp            = $stamp
 }

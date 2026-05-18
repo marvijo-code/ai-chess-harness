@@ -138,8 +138,8 @@ class LiveViewerHashE2ETests(unittest.TestCase):
             try:
                 base_url = f"http://127.0.0.1:{port}"
                 wait_for_http(f"{base_url}/")
-                events = set(read_sse_event_names(f"{base_url}/api/events"))
-                self.assertTrue({"game", "stats", "learner", "viewer-version"}.issubset(events))
+                events = set(read_sse_event_names(f"{base_url}/api/events", expected_count=5))
+                self.assertTrue({"game", "stats", "learner", "research", "viewer-version"}.issubset(events))
 
                 with sync_playwright() as playwright:
                     browser = playwright.chromium.launch(headless=True)
@@ -368,6 +368,147 @@ class LiveViewerHashE2ETests(unittest.TestCase):
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait(timeout=5)
+
+    def test_viewer_explicit_live_game_hash_stays_pinned_after_completion_and_replay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            live_dir = out_dir / "live"
+            pinned_slug = "codex-vs-codex-learner-live-20260518-125000"
+            latest_slug = "codex-vs-codex-learner-live-20260518-125005"
+            pinned_pgn = live_dir / f"{pinned_slug}-game-8-live.pgn"
+            latest_pgn = live_dir / f"{latest_slug}-game-10-live.pgn"
+            write_pgn(
+                pinned_pgn,
+                pinned_slug,
+                "PinnedWhite",
+                "PinnedBlack",
+                "1/2-1/2",
+                "1. e4 e5 1/2-1/2",
+                live=False,
+                round_name="8",
+                total_games=100,
+            )
+            write_pgn(
+                latest_pgn,
+                latest_slug,
+                "LatestWhite",
+                "LatestBlack",
+                "*",
+                "1. d4 d5 *",
+                live=True,
+                round_name="10",
+                total_games=100,
+            )
+            (live_dir / "pinned-live.status.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-05-18 12:50:00",
+                        "generated_at_epoch": time.time(),
+                        "output_pgn": str(pinned_pgn),
+                        "control_pgn": str(live_dir / "run-live.pgn"),
+                        "locked_game": 8,
+                        "games": [
+                            {
+                                "game": 8,
+                                "total": 100,
+                                "white": "PinnedWhite",
+                                "black": "PinnedBlack",
+                                "result": "1/2-1/2",
+                                "reason": "Draw by 3-fold repetition",
+                                "finished": True,
+                            },
+                            {
+                                "game": 10,
+                                "total": 100,
+                                "white": "LatestWhite",
+                                "black": "LatestBlack",
+                                "result": "*",
+                                "reason": "",
+                                "finished": False,
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (live_dir / "latest-live.status.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-05-18 12:50:05",
+                        "generated_at_epoch": time.time() + 5,
+                        "output_pgn": str(latest_pgn),
+                        "control_pgn": str(live_dir / "run-live.pgn"),
+                        "locked_game": 10,
+                        "games": [
+                            {
+                                "game": 10,
+                                "total": 100,
+                                "white": "LatestWhite",
+                                "black": "LatestBlack",
+                                "result": "*",
+                                "reason": "",
+                                "finished": False,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            port = free_port()
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(ROOT / "tools" / "live_pgn_viewer.py"),
+                    "--pgn",
+                    str(latest_pgn),
+                    "--stats-dir",
+                    str(out_dir),
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(port),
+                    "--no-analysis",
+                ],
+                cwd=str(ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                wait_for_http(f"http://127.0.0.1:{port}/")
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1280, "height": 900})
+                    page.goto(f"http://127.0.0.1:{port}/#{pinned_slug}--live-game-8", wait_until="domcontentloaded")
+                    page.wait_for_function(
+                        "slug => window.location.hash === '#' + slug + '--live-game-8'",
+                        arg=pinned_slug,
+                        timeout=10000,
+                    )
+                    page.wait_for_function(
+                        "() => document.querySelector('#current-game-title')?.textContent === 'Game 8 / 100: PinnedWhite vs PinnedBlack'",
+                        timeout=10000,
+                    )
+                    self.assertIn(pinned_slug, page.locator("#tournament-chip").inner_text())
+                    page.keyboard.press("ArrowLeft")
+                    page.wait_for_function("() => !document.querySelector('#follow-toggle')?.checked", timeout=10000)
+                    page.wait_for_timeout(2500)
+                    self.assertEqual(page.evaluate("window.location.hash"), f"#{pinned_slug}--live-game-8")
+                    self.assertEqual(page.locator("#current-game-title").inner_text(), "Game 8 / 100: PinnedWhite vs PinnedBlack")
+                    self.assertIn(pinned_slug, page.locator("#pgn-path").inner_text())
+                    browser.close()
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                if proc.stdout:
+                    proc.stdout.close()
+                if proc.stderr:
+                    proc.stderr.close()
 
 
 if __name__ == "__main__":
