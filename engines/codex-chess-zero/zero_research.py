@@ -80,6 +80,8 @@ PIECE_VALUES = {
 SELF_PLAY_DRAW_PENALTY = -0.05
 SELF_PLAY_FAILED_CONVERSION_DRAW_PENALTY = -0.18
 SELF_PLAY_DEFENSIVE_DRAW_PENALTY = -0.02
+DEFAULT_TRAINING_REPLAY_LIMIT = 4096
+TRAINING_REPLAY_RECENT_FRACTION = 0.5
 DEFAULT_WEIGHTS = {
     "bias": 0.0,
     "capture_value": 1.0,
@@ -89,11 +91,28 @@ DEFAULT_WEIGHTS = {
     "center_to": 0.28,
     "development": 0.18,
     "castle": 0.32,
+    "conversion_stall": 0.0,
     "moved_piece_risk": -1.15,
     "king_move_early": -0.25,
     "value_material": 1.0,
     "value_mobility": 0.08,
     "value_king_safety": 0.10,
+}
+WEIGHT_BOUNDS = {
+    "bias": (-2.0, 2.0),
+    "capture_value": (-4.0, 4.0),
+    "material_delta": (-4.0, 4.0),
+    "gives_check": (-3.0, 4.0),
+    "promotion_value": (-4.0, 4.0),
+    "center_to": (-4.0, 4.0),
+    "development": (-4.0, 4.0),
+    "castle": (-4.0, 4.0),
+    "conversion_stall": (-6.0, 0.5),
+    "moved_piece_risk": (-8.0, 0.5),
+    "king_move_early": (-4.0, 1.0),
+    "value_material": (-12.0, 12.0),
+    "value_mobility": (-6.0, 6.0),
+    "value_king_safety": (-8.0, 8.0),
 }
 FORBIDDEN_TRAINING_SOURCES = ("stockfish", "lc0", "leela", "maia", "human_games", "opening_book", "tablebase")
 FEN_RE = re.compile(
@@ -101,6 +120,9 @@ FEN_RE = re.compile(
 )
 UCI_RE = re.compile(r"\b[a-h][1-8][a-h][1-8][qrbn]?\b")
 DELIBERATIVE_CONTROLLER = "deliberative-human-v1"
+DELIBERATIVE_REFUTATION_CANDIDATE_LIMIT = 12
+DELIBERATIVE_SAFE_CANDIDATE_LIMIT = 4
+DELIBERATIVE_RETURNED_CANDIDATE_LIMIT = 8
 
 
 def ensure_dirs() -> None:
@@ -192,6 +214,14 @@ def stable_id(payload: object, length: int = 12) -> str:
     return hashlib.sha256(raw).hexdigest()[:length]
 
 
+def clamp_learned_weights(weights: dict[str, float]) -> dict[str, float]:
+    clamped = dict(weights)
+    for name, (low, high) in WEIGHT_BOUNDS.items():
+        if name in clamped:
+            clamped[name] = max(low, min(high, float(clamped[name])))
+    return clamped
+
+
 def moved_piece_risk(board: chess.Board, move: chess.Move) -> float:
     mover = board.piece_at(move.from_square)
     if mover is None:
@@ -229,6 +259,21 @@ def move_features(board: chess.Board, move: chess.Move) -> dict[str, float]:
     development = 0.0
     if mover and mover.piece_type in {chess.KNIGHT, chess.BISHOP}:
         development = 1.0 if (color == chess.WHITE and from_rank == 0) or (color == chess.BLACK and from_rank == 7) else 0.0
+    pawn_progress = 0.0
+    if mover and mover.piece_type == chess.PAWN:
+        pawn_progress = 1.0 if (color == chess.WHITE and to_rank > from_rank) or (color == chess.BLACK and to_rank < from_rank) else 0.0
+    conversion_stall = 0.0
+    if before_balance >= 500:
+        progress = (
+            board.is_capture(move)
+            or bool(move.promotion)
+            or board.gives_check(move)
+            or board.is_castling(move)
+            or bool(pawn_progress)
+            or bool(development)
+            or bool(created_threats(board, move))
+        )
+        conversion_stall = 0.0 if progress else 1.0
     return {
         "bias": 1.0,
         "capture_value": (PIECE_VALUES.get(captured.piece_type, 0) / 900.0) if captured else 0.0,
@@ -238,6 +283,7 @@ def move_features(board: chess.Board, move: chess.Move) -> dict[str, float]:
         "center_to": 1.0 if to_file in {3, 4} and to_rank in {3, 4} else 0.0,
         "development": development,
         "castle": 1.0 if board.is_castling(move) else 0.0,
+        "conversion_stall": conversion_stall,
         "moved_piece_risk": moved_piece_risk(board, move),
         "king_move_early": 1.0 if mover and mover.piece_type == chess.KING and board.fullmove_number <= 12 and not board.is_castling(move) else 0.0,
     }
@@ -281,6 +327,7 @@ class PolicyValueNetwork:
         data = json.loads(path.read_text(encoding="utf-8"))
         weights = dict(DEFAULT_WEIGHTS)
         weights.update({key: float(value) for key, value in data.get("weights", {}).items()})
+        weights = clamp_learned_weights(weights)
         return cls(
             network_id=str(data.get("network_id") or "zero-bootstrap"),
             generation=int(data.get("generation") or 0),
@@ -515,31 +562,118 @@ def deliberative_score(
     threat_bonus = min(0.2, sum(item["value_cp"] for item in created_threats(board, child.move)) / 4500.0)
     refutation_penalty = min(1.0, max(0.0, float(refutation.get("reply", {}).get("material_swing_cp", 0)) / 900.0))
     forcing_reply_penalty = 1.0 if refutation.get("reply", {}).get("is_checkmate") else 0.25 if refutation.get("reply", {}).get("gives_check") else 0.0
+    refutation_status = str(refutation.get("status", "ok"))
+    forcing_multiplier = 0.0 if refutation_status == "unsafe" else 0.35 if refutation_status == "watch" else 1.0
+    refutation_status_penalty = 1.05 if refutation_status == "unsafe" else 0.30 if refutation_status == "watch" else 0.0
+    forcing_bonus = forcing_multiplier * (
+        0.16 * features["gives_check"]
+        + 0.12 * features["capture_value"]
+        + 0.26 * features["promotion_value"]
+        + threat_bonus
+    )
     score = (
         0.35 * visit_share
         + 0.25 * child.prior
         + 0.30 * value
-        + 0.16 * features["gives_check"]
-        + 0.12 * features["capture_value"]
-        + 0.26 * features["promotion_value"]
+        + forcing_bonus
         + 0.10 * features["castle"]
         + 0.08 * features["development"]
         + 0.07 * features["center_to"]
-        + threat_bonus
+        - 0.24 * features["conversion_stall"]
         - 0.62 * features["moved_piece_risk"]
         - 0.72 * refutation_penalty
         - 0.33 * forcing_reply_penalty
+        - refutation_status_penalty
         - 0.18 * features["king_move_early"]
     )
     return round(score, 6)
 
 
+def cheap_deliberative_child_score(board: chess.Board, child: PuctNode, root_visits: int) -> tuple[float, int, str]:
+    assert child.move is not None
+    features = move_features(board, child.move)
+    threat_bonus = min(0.2, sum(item["value_cp"] for item in created_threats(board, child.move)) / 4500.0)
+    score = (
+        0.35 * (child.visit_count / max(1, root_visits))
+        + 0.25 * child.prior
+        + 0.30 * (-child.value)
+        + 0.16 * features["gives_check"]
+        + 0.12 * features["capture_value"]
+        + 0.26 * features["promotion_value"]
+        + threat_bonus
+        + 0.10 * features["castle"]
+        + 0.08 * features["development"]
+        + 0.07 * features["center_to"]
+        - 0.24 * features["conversion_stall"]
+        - 0.62 * features["moved_piece_risk"]
+        - 0.18 * features["king_move_early"]
+    )
+    return (round(score, 6), child.visit_count, child.move.uci())
+
+
+def safe_deliberative_child_score(board: chess.Board, child: PuctNode) -> tuple[float, float, float, float, int, str]:
+    assert child.move is not None
+    features = move_features(board, child.move)
+    is_forcing = bool(features["gives_check"]) or board.is_capture(child.move) or bool(child.move.promotion)
+    quiet_or_safety = (not is_forcing) or bool(features["castle"])
+    return (
+        1.0 if quiet_or_safety else 0.0,
+        -features["moved_piece_risk"],
+        -features["conversion_stall"],
+        features["material_delta"],
+        child.visit_count,
+        child.move.uci(),
+    )
+
+
+def select_deliberative_candidate_children(
+    board: chess.Board,
+    root: PuctNode,
+    children: list[PuctNode],
+    limit: int,
+) -> list[PuctNode]:
+    root_visits = max(1, root.visit_count)
+    prelimit = max(limit, DELIBERATIVE_REFUTATION_CANDIDATE_LIMIT)
+    safety_slots = min(DELIBERATIVE_SAFE_CANDIDATE_LIMIT, max(0, prelimit - 1))
+    primary_limit = max(1, prelimit - safety_slots)
+    cheap_ranked = sorted(
+        children,
+        key=lambda child: cheap_deliberative_child_score(board, child, root_visits),
+        reverse=True,
+    )
+    selected: dict[str, PuctNode] = {}
+    for child in cheap_ranked[:primary_limit]:
+        assert child.move is not None
+        selected[child.move.uci()] = child
+    safe_ranked = sorted(
+        [child for child in children if child.move and child.move.uci() not in selected],
+        key=lambda child: safe_deliberative_child_score(board, child),
+        reverse=True,
+    )
+    for child in safe_ranked:
+        assert child.move is not None
+        features = move_features(board, child.move)
+        if features["moved_piece_risk"] >= 0.5 or features["king_move_early"]:
+            continue
+        selected[child.move.uci()] = child
+        if len(selected) >= prelimit:
+            break
+    for child in cheap_ranked:
+        assert child.move is not None
+        if len(selected) >= prelimit:
+            break
+        selected.setdefault(child.move.uci(), child)
+    return list(selected.values())
+
+
 def deliberative_candidate_rows(board: chess.Board, root: PuctNode, limit: int | None = 8) -> list[dict]:
     rows = []
     root_visits = max(1, root.visit_count)
-    for child in root.children.values():
-        if child.move is None:
-            continue
+    children = [child for child in root.children.values() if child.move is not None]
+    if limit is not None and len(children) > limit:
+        children = select_deliberative_candidate_children(board, root, children, limit)
+    for child in children:
+        assert child.move is not None
         features = move_features(board, child.move)
         refutation = refutation_check(board, child.move)
         rows.append(
@@ -565,14 +699,14 @@ def deliberative_candidate_rows(board: chess.Board, root: PuctNode, limit: int |
 
 
 def select_deliberative_child(board: chess.Board, root: PuctNode) -> tuple[PuctNode, list[dict]]:
-    candidates = deliberative_candidate_rows(board, root, limit=None)
+    candidates = deliberative_candidate_rows(board, root, limit=DELIBERATIVE_REFUTATION_CANDIDATE_LIMIT)
     if not candidates:
         raise ValueError("deliberative controller produced no candidates")
     best_uci = candidates[0]["uci"]
     child = root.children[best_uci]
     if child.move is None:
         raise ValueError("selected deliberative child has no move")
-    return child, candidates[:8]
+    return child, candidates[:DELIBERATIVE_RETURNED_CANDIDATE_LIMIT]
 
 
 def run_mcts(
@@ -811,10 +945,25 @@ def record_has_risky_forcing_non_win(record: dict, outcome: float) -> bool:
     return refutation_check(board, move).get("status") in {"watch", "unsafe"}
 
 
+def record_has_failed_conversion_stall(record: dict, outcome: float) -> bool:
+    if outcome >= 0.0:
+        return False
+    try:
+        board = chess.Board(record["fen"])
+        move = chess.Move.from_uci(record["chosen_move"])
+    except (KeyError, ValueError):
+        return False
+    if move not in board.legal_moves:
+        return False
+    return move_features(board, move).get("conversion_stall", 0.0) > 0.0
+
+
 def training_feature_scale(record: dict, feature_name: str, outcome: float) -> float:
     outcome_source = str(record.get("outcome_source", ""))
     if feature_name == "bias" and outcome < 0.0 and outcome_source == "terminal_draw_non_win_penalty":
         return 0.0
+    if feature_name == "conversion_stall":
+        return 2.2 if record_has_failed_conversion_stall(record, outcome) else 0.0
     if record_has_risky_forcing_non_win(record, outcome):
         if feature_name == "moved_piece_risk":
             return 2.0
@@ -938,9 +1087,7 @@ def append_replay_records(records: Iterable[dict], path: Path = REPLAY_BUFFER_PA
         key = position_key(record.get("fen", ""))
         if key in existing_index:
             existing = existing_records[existing_index[key]]
-            existing_signal = abs(float(existing.get("outcome", 0.0) or 0.0))
-            new_signal = abs(float(record.get("outcome", 0.0) or 0.0))
-            if existing_signal == 0.0 and new_signal > 0.0:
+            if should_update_replay_duplicate(existing, record):
                 existing_records[existing_index[key]] = record
                 updated += 1
             else:
@@ -976,6 +1123,65 @@ def load_replay_records(path: Path = REPLAY_BUFFER_PATH, max_records: int | None
             continue
         records.append(json.loads(line))
     return records[-max_records:] if max_records else records
+
+
+def outcome_signal(record: dict) -> float:
+    return abs(float(record.get("outcome", 0.0) or 0.0))
+
+
+def outcome_sign(record: dict) -> int:
+    outcome = float(record.get("outcome", 0.0) or 0.0)
+    if outcome > 0.0:
+        return 1
+    if outcome < 0.0:
+        return -1
+    return 0
+
+
+def has_forbidden_training_source(record: dict) -> bool:
+    sources = record.get("training_sources", {})
+    if not isinstance(sources, dict):
+        return False
+    return any(bool(sources.get(source)) for source in FORBIDDEN_TRAINING_SOURCES)
+
+
+def should_update_replay_duplicate(existing: dict, incoming: dict) -> bool:
+    if has_forbidden_training_source(incoming):
+        return False
+    existing_signal = outcome_signal(existing)
+    incoming_signal = outcome_signal(incoming)
+    if incoming_signal <= 0.0:
+        return False
+    if existing_signal == 0.0:
+        return True
+    return outcome_sign(existing) == outcome_sign(incoming) and incoming_signal > existing_signal + 1e-9
+
+
+def replay_training_signal(record: dict) -> float:
+    signal = outcome_signal(record)
+    if str(record.get("outcome_source", "")).endswith("draw_non_win_penalty"):
+        signal += 0.05
+    if record_has_failed_conversion_stall(record, float(record.get("outcome", 0.0) or 0.0)):
+        signal += 0.15
+    if record_has_risky_forcing_non_win(record, float(record.get("outcome", 0.0) or 0.0)):
+        signal += 0.10
+    if record.get("selection") == "exploratory":
+        signal += 0.02
+    return signal
+
+
+def select_training_records(records: list[dict], max_records: int | None = DEFAULT_TRAINING_REPLAY_LIMIT) -> list[dict]:
+    if max_records is None or max_records <= 0 or len(records) <= max_records:
+        return list(records)
+    recent_count = max(1, int(max_records * TRAINING_REPLAY_RECENT_FRACTION))
+    recent_start = max(0, len(records) - recent_count)
+    selected_indices = set(range(recent_start, len(records)))
+    remaining_slots = max_records - len(selected_indices)
+    if remaining_slots > 0:
+        older = list(enumerate(records[:recent_start]))
+        older.sort(key=lambda item: (replay_training_signal(item[1]), item[0]), reverse=True)
+        selected_indices.update(index for index, _ in older[:remaining_slots])
+    return [record for index, record in enumerate(records) if index in selected_indices]
 
 
 def _empty_lesson_counts() -> dict[str, int]:
@@ -1188,9 +1394,10 @@ def train_from_replay(
     records: list[dict] | None = None,
     learning_rate: float = 0.05,
     epochs: int = 1,
+    max_records: int | None = DEFAULT_TRAINING_REPLAY_LIMIT,
 ) -> PolicyValueNetwork:
     base = base or PolicyValueNetwork.load()
-    records = records if records is not None else load_replay_records()
+    records = records if records is not None else select_training_records(load_replay_records(), max_records=max_records)
     weights = dict(base.weights)
     used = 0
     for _ in range(max(1, epochs)):
@@ -1210,6 +1417,7 @@ def train_from_replay(
             for name, value in board_value_features(board).items():
                 weights[name] = weights.get(name, 0.0) + learning_rate * outcome * value
             used += 1
+    weights = clamp_learned_weights(weights)
     candidate = PolicyValueNetwork(
         network_id=f"zero-g{base.generation + 1}-{stable_id({'base': base.network_id, 'steps': base.training_steps, 'used': used, 'weights': weights})}",
         generation=base.generation + 1,

@@ -31,6 +31,7 @@ ZERO_RESEARCH_PATH = ZERO_DIR / "zero_research.py"
 ZERO_RESEARCH_DIR = ZERO_DIR / "research"
 ZERO_CLIMB_STATE_PATH = ZERO_RESEARCH_DIR / "climb" / "climb-state.json"
 ZERO_CLIMB_LOG_PATH = ZERO_RESEARCH_DIR / "climb" / "climb-log.jsonl"
+ZERO_DEPTH_MATCH_DIR = OUT_DIR / "zero-depth-matches"
 ZERO_MEMORY_PATH = ZERO_DIR / "MEMORY.md"
 ZERO_KNOWLEDGEBASE_DIR = ZERO_DIR / "knowledgebase"
 ENGINE_LOG_DIR = OUT_DIR / "codex-chess-logs"
@@ -298,6 +299,9 @@ INDEX_HTML = """<!doctype html>
     .research-item.ok { border-left: 4px solid var(--ok); }
     .research-item.warn { border-left: 4px solid var(--warn); }
     .research-item.err { border-left: 4px solid var(--danger); }
+    .research-action { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .research-action-status { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .research-action-status.err { color: var(--danger); }
     .summary-row {
       display: grid; grid-template-columns: 138px 1fr;
       gap: 12px; padding: 8px 0;
@@ -928,6 +932,19 @@ INDEX_HTML = """<!doctype html>
 
         <section class="card">
           <div class="card-hd">
+            <span class="card-title">Depth Match</span>
+            <span id="research-depth-match-meta" class="card-sub"></span>
+          </div>
+          <div class="card-body">
+            <div class="research-action">
+              <button id="research-depth-match-run" class="primary" type="button">Stockfish d1</button>
+              <span id="research-depth-match-status" class="research-action-status"></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
             <span class="card-title">Concepts</span>
             <span id="research-concepts-meta" class="card-sub"></span>
           </div>
@@ -965,6 +982,10 @@ INDEX_HTML = """<!doctype html>
     let engineConfigExpanded = localStorage.getItem("livePgnEngineConfigExpanded") === "on";
     let analysisEnabled = true;
     let analysisAvailable = true;
+    let analysisRequestSeq = 0;
+    let analysisAbort = null;
+    let requestedAnalysisKey = "";
+    let renderedAnalysisKey = "";
     let activeTheme = "light";
     let followLive = true;
     let latestGame = null;
@@ -1124,7 +1145,16 @@ INDEX_HTML = """<!doctype html>
       analysisEnabled = enabled;
       localStorage.setItem("livePgnAnalysis", analysisEnabled ? "on" : "off");
       updateAnalysisControls();
-      refresh();
+      if (!analysisEnabled) {
+        cancelAnalysisRequest();
+        renderAnalysis({ enabled: false });
+        return;
+      }
+      analysisAvailable = true;
+      updateAnalysisControls();
+      requestedAnalysisKey = "";
+      renderedAnalysisKey = "";
+      requestAnalysisForGame(latestGame, true);
     }
 
     function setActiveView(view) {
@@ -1651,7 +1681,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("next-move").disabled = ply >= data.moves.length;
       renderBoard(position.fen, position.last_move);
       renderMoves(data.moves, white, black);
-      renderAnalysis(analysisEnabled ? data.analysis : { enabled: false }, analysisEnabled);
+      requestAnalysisForGame(data);
       renderBoardThinking();
     }
 
@@ -1683,6 +1713,77 @@ INDEX_HTML = """<!doctype html>
       if (selectedMatch || followLive) return "";
       if (latestGame && latestGame.path) return latestGame.path;
       return activeLivePgnPath || activePgnPath || "";
+    }
+
+    function analysisKeyForData(data, ply = null) {
+      if (!data || !data.has_game) return "";
+      const selected = ply === null ? selectedPly(data) : ply;
+      const positions = data.positions || [];
+      const position = positions.find(item => item.ply === selected) || {};
+      return `${data.path || ""}|${data.game_index || 1}|${selected}|${position.fen || data.fen || ""}`;
+    }
+
+    function cancelAnalysisRequest() {
+      analysisRequestSeq += 1;
+      if (analysisAbort) analysisAbort.abort();
+      analysisAbort = null;
+      requestedAnalysisKey = "";
+    }
+
+    function renderAnalysisPending() {
+      const container = document.getElementById("analysis");
+      const meta = document.getElementById("analysis-meta");
+      const title = document.getElementById("analysis-title");
+      title.textContent = "Engine Analysis";
+      meta.textContent = "Loading";
+      container.innerHTML = '<div class="empty">Engine analysis is loading.</div>';
+      analysisAvailable = true;
+      updateAnalysisControls();
+    }
+
+    async function requestAnalysisForGame(data, force = false) {
+      if (!analysisEnabled) {
+        cancelAnalysisRequest();
+        renderAnalysis({ enabled: false });
+        return;
+      }
+      if (!data || !data.has_game) {
+        cancelAnalysisRequest();
+        renderedAnalysisKey = "";
+        renderAnalysis({ enabled: true, message: "No board to analyze." });
+        return;
+      }
+      const ply = selectedPly(data);
+      const key = analysisKeyForData(data, ply);
+      if (!key) return;
+      if (!force && (renderedAnalysisKey === key || requestedAnalysisKey === key)) return;
+      requestedAnalysisKey = key;
+      renderAnalysisPending();
+      if (analysisAbort) analysisAbort.abort();
+      const controller = new AbortController();
+      analysisAbort = controller;
+      const seq = ++analysisRequestSeq;
+      const params = new URLSearchParams({ analysis: "1", logs: "0" });
+      params.set("path", data.path || activePgnPath || "");
+      params.set("game", String(data.game_index || 1));
+      params.set("ply", String(ply));
+      try {
+        const resp = await fetch(`/api/game?${params}`, { cache: "no-store", signal: controller.signal });
+        const analyzed = await resp.json();
+        if (seq !== analysisRequestSeq) return;
+        if (analysisKeyForData(latestGame) !== key) return;
+        requestedAnalysisKey = "";
+        renderedAnalysisKey = key;
+        renderAnalysis(analyzed.analysis || { enabled: true, message: "No analysis available." });
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+        if (seq !== analysisRequestSeq || analysisKeyForData(latestGame) !== key) return;
+        requestedAnalysisKey = "";
+        renderedAnalysisKey = key;
+        renderAnalysis({ enabled: true, error: err && err.message ? err.message : "Analysis request failed." });
+      } finally {
+        if (analysisAbort === controller) analysisAbort = null;
+      }
     }
 
     function renderAnalysis(analysis) {
@@ -1740,10 +1841,16 @@ INDEX_HTML = """<!doctype html>
       const container = document.getElementById("stats");
       document.getElementById("stats-meta").textContent = `${data.games} games`;
       previousMatches = data.matches || [];
-      if (!selectPreviousMatchFromHash() && !maybeFollowLatestLiveForBareHash()) {
+      const hashMatched = selectPreviousMatchFromHash();
+      if (!hashMatched && !maybeFollowLatestLiveForBareHash()) {
         maybeFollowCurrentLiveBoard();
       }
       renderPreviousMatches();
+      if (hashMatched && selectedMatch && !followLive && !selectedMatchIsLoaded(selectedMatch, latestGame)) {
+        window.setTimeout(() => {
+          if (selectedMatch && !followLive && !selectedMatchIsLoaded(selectedMatch, latestGame)) refresh(true);
+        }, 150);
+      }
       if (data.error) {
         container.innerHTML = `<div class="empty err">${escapeHtml(data.error)}</div>`;
         return;
@@ -2112,6 +2219,13 @@ INDEX_HTML = """<!doctype html>
       }
       document.getElementById("research-climb").innerHTML = researchListHtml(climbRows, "No climb cycle has been run yet.");
 
+      const depthMatch = data.depth_match || {};
+      document.getElementById("research-depth-match-meta").textContent = depthMatch.exists ? "latest ready" : "isolated";
+      document.getElementById("research-depth-match-status").textContent = depthMatch.exists
+        ? `${depthMatch.result || "*"} · ${depthMatch.updated_at || ""}`
+        : "";
+      document.getElementById("research-depth-match-status").classList.remove("err");
+
       const concepts = data.concepts || [];
       document.getElementById("research-concepts-meta").textContent = `${concepts.length} rows`;
       document.getElementById("research-concepts").innerHTML = researchListHtml(
@@ -2125,6 +2239,53 @@ INDEX_HTML = """<!doctype html>
       renderResearch(await resp.json());
     }
 
+    function setDepthMatchStatus(text, isError = false) {
+      const status = document.getElementById("research-depth-match-status");
+      status.textContent = text || "";
+      status.classList.toggle("err", !!isError);
+    }
+
+    async function runDepthOneMatch() {
+      const button = document.getElementById("research-depth-match-run");
+      button.disabled = true;
+      setDepthMatchStatus("Running isolated match...");
+      try {
+        const resp = await fetch("/api/research/depth-match", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ depth: 1 }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || data.error || data.ok === false) throw new Error(data.error || "Match failed");
+        selectedMatch = {
+          kind: "archive",
+          path: data.pgn_path,
+          file: data.pgn_path,
+          game_index: 1,
+          tournament_slug: data.tournament_slug,
+          white: data.white,
+          black: data.black,
+        };
+        followLive = false;
+        requestedLiveGame = null;
+        viewedPly = null;
+        replayThinkingKey = "";
+        localStorage.setItem("livePgnFollow", "off");
+        document.getElementById("follow-toggle").checked = false;
+        setBoardOrientation("white");
+        setActivePgnPath(data.pgn_path);
+        setMatchHash(data.tournament_slug || "", 1, "archive");
+        setActiveMatchUrl(matchUrlFor(data.tournament_slug || "", 1, "archive"));
+        setActiveView("board");
+        await refresh(true);
+        setDepthMatchStatus(`${data.result || "*"} · ${data.moves || 0} plies`);
+      } catch (err) {
+        setDepthMatchStatus(err && err.message ? err.message : String(err), true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
     function setStatus(ok, text) {
       document.getElementById("status-dot").className = "pulse" + (ok ? " ok" : "");
       document.getElementById("status-text").textContent = text;
@@ -2133,14 +2294,15 @@ INDEX_HTML = """<!doctype html>
     async function refresh(force = false) {
       if (!force && selectedMatch && !followLive && selectedMatchIsLoaded(selectedMatch, latestGame)) return;
       try {
-        const params = new URLSearchParams({ analysis: analysisEnabled ? "1" : "0" });
+        const params = new URLSearchParams({ analysis: "0" });
         const expectedSelection = selectedMatch && !followLive ? selectedGameKey(selectedMatch) : "";
         const expectedMode = followLive ? "live" : (selectedMatch ? "selected" : "replay");
         const expectedReplayPath = expectedMode === "replay" ? replayLivePgnPath() : "";
         if (selectedMatch && !followLive) {
           params.set("path", selectedMatch.path || selectedMatch.file || "");
           params.set("game", String(selectedMatch.game_index || 1));
-          params.set("logs", "1");
+          const selectedPath = selectedMatch.path || selectedMatch.file || "";
+          if (!selectedPath.includes("zero-depth-matches")) params.set("logs", "1");
         } else if (!followLive) {
           const replayPath = expectedReplayPath;
           if (replayPath) params.set("path", replayPath);
@@ -2160,7 +2322,8 @@ INDEX_HTML = """<!doctype html>
         if (data.error) {
           setStatus(false, "Error");
           document.getElementById("moves").innerHTML = `<div class="card-body"><div class="empty err">${escapeHtml(data.error)}</div></div>`;
-          renderAnalysis(analysisEnabled ? data.analysis : { enabled: false });
+          if (analysisEnabled) renderAnalysis({ enabled: true, message: "No board to analyze." });
+          else renderAnalysis({ enabled: false });
           return;
         }
         if (!data.exists || !data.has_game) {
@@ -2179,7 +2342,8 @@ INDEX_HTML = """<!doctype html>
           document.getElementById("meta").textContent = "";
           renderBoard("8/8/8/8/8/8/8/8 w - - 0 1", null);
           renderMoves([]);
-          renderAnalysis(analysisEnabled ? data.analysis : { enabled: false });
+          if (analysisEnabled) renderAnalysis({ enabled: true, message: "No board to analyze." });
+          else renderAnalysis({ enabled: false });
           return;
         }
         if (followLive || viewedPly === null) viewedPly = data.moves.length;
@@ -2404,6 +2568,7 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("board-view-tab").addEventListener("click", () => setActiveView("board"));
     document.getElementById("learner-view-tab").addEventListener("click", () => setActiveView("learner"));
     document.getElementById("research-view-tab").addEventListener("click", () => setActiveView("research"));
+    document.getElementById("research-depth-match-run").addEventListener("click", runDepthOneMatch);
     document.getElementById("follow-toggle").addEventListener("change", e => setFollowLive(e.target.checked));
     document.getElementById("prev-move").addEventListener("click", () => navigateMove(-1));
     document.getElementById("next-move").addEventListener("click", () => navigateMove(1));
@@ -2451,8 +2616,18 @@ INDEX_HTML = """<!doctype html>
 
     loadPreferences();
     setActiveView(localStorage.getItem("livePgnView") || "board");
-    refresh();
-    loadStats();
+    const startupHash = parseMatchHash();
+    if (startupHash.slug && (startupHash.gameIndex || startupHash.liveGameIndex)) {
+      if (startupHash.liveGameIndex) refresh();
+      loadStats()
+        .then(() => window.setTimeout(() => refresh(true), 150))
+        .catch(() => {
+          if (!latestGame || !latestGame.has_game) refresh(true);
+        });
+    } else {
+      refresh();
+      loadStats();
+    }
     loadConfig();
     loadLearner();
     loadResearch();
@@ -3075,21 +3250,21 @@ def collect_stats(out_dir: Path, date_from: date | None, date_to: date | None, l
             with pgn_path.open("r", encoding="utf-8", errors="replace") as handle:
                 game_index = 0
                 while True:
-                    game = chess.pgn.read_game(handle)
-                    if game is None:
+                    headers = chess.pgn.read_headers(handle)
+                    if headers is None:
                         break
                     game_index += 1
-                    result = game.headers.get("Result", "*")
+                    result = headers.get("Result", "*")
                     if result not in {"1-0", "0-1", "1/2-1/2"}:
                         continue
-                    game_date = parse_pgn_date(game.headers.get("Date"), mtime)
+                    game_date = parse_pgn_date(headers.get("Date"), mtime)
                     if date_from and game_date < date_from:
                         continue
                     if date_to and game_date > date_to:
                         continue
-                    white = game.headers.get("White", "White")
-                    black = game.headers.get("Black", "Black")
-                    round_name = game.headers.get("Round", "")
+                    white = headers.get("White", "White")
+                    black = headers.get("Black", "Black")
+                    round_name = headers.get("Round", "")
                     completed_games += 1
                     matches.append(
                         {
@@ -3529,6 +3704,7 @@ def collect_zero_research_data() -> dict:
     module = load_zero_research_module()
     data = module.research_summary(write_summary=False)
     data["climb"] = collect_zero_climb_data()
+    data["depth_match"] = collect_zero_depth_match_data()
     return data
 
 
@@ -3583,6 +3759,203 @@ def collect_zero_climb_data() -> dict:
         "attempt_count": len(state.get("attempts", [])) if isinstance(state, dict) else 0,
         "log_tail": log_tail,
         "policy": "Climb opponents and Stockfish stages are evaluation gates only; Zero training remains self-play only.",
+    }
+
+
+def collect_zero_depth_match_data(match_dir: Path = ZERO_DEPTH_MATCH_DIR) -> dict:
+    matches = sorted(match_dir.glob("zero-vs-stockfish-depth-*.pgn"), key=lambda path: path.stat().st_mtime, reverse=True) if match_dir.exists() else []
+    if not matches:
+        return {"exists": False, "match_dir": str(match_dir)}
+    latest = matches[0]
+    game = read_game(latest, analyzer=None, include_analysis=False)
+    headers = game.get("headers", {}) if isinstance(game, dict) else {}
+    return {
+        "exists": True,
+        "match_dir": str(match_dir),
+        "path": str(latest),
+        "tournament_slug": tournament_slug(latest),
+        "updated_at": game.get("updated_at", "") if isinstance(game, dict) else "",
+        "result": headers.get("Result", "*") if isinstance(headers, dict) else "*",
+        "white": headers.get("White", "") if isinstance(headers, dict) else "",
+        "black": headers.get("Black", "") if isinstance(headers, dict) else "",
+        "moves": len(game.get("moves", [])) if isinstance(game, dict) else 0,
+    }
+
+
+def write_depth_match_live_state(live_pgn_path: Path | None, game: chess.pgn.Game, completed: bool) -> None:
+    if live_pgn_path is None:
+        return
+    live_pgn_path.parent.mkdir(parents=True, exist_ok=True)
+    live_pgn_path.write_text(str(game) + "\n\n", encoding="utf-8")
+    result = game.headers.get("Result", "*")
+    termination = game.headers.get("Termination", "")
+    status_path = live_status_path_for(live_pgn_path)
+    status_payload = {
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_at_epoch": time.time(),
+        "output_pgn": str(live_pgn_path),
+        "control_pgn": str(live_pgn_path),
+        "locked_game": 1,
+        "games": [
+            {
+                "game": 1,
+                "total": 1,
+                "white": game.headers.get("White", "White"),
+                "black": game.headers.get("Black", "Black"),
+                "result": result,
+                "reason": termination if completed else "",
+                "finished": completed,
+            }
+        ],
+    }
+    status_path.write_text(json.dumps(status_payload, indent=2), encoding="utf-8")
+
+
+class StockfishDepthMatchPlayer:
+    def __init__(self, config_path: Path, depth: int):
+        self.config_path = config_path
+        self.depth = max(1, int(depth))
+        self.proc: subprocess.Popen[str] | None = None
+        self.exe: Path | None = None
+
+    def __enter__(self) -> "StockfishDepthMatchPlayer":
+        self.exe = load_stockfish_path(self.config_path)
+        self.proc = subprocess.Popen(
+            [str(self.exe)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        self._send("uci")
+        self._read_until("uciok")
+        self._send("setoption name Threads value 1")
+        self._send("setoption name Hash value 32")
+        self._send("isready")
+        self._read_until("readyok")
+        return self
+
+    def __exit__(self, *args) -> None:
+        if self.proc and self.proc.poll() is None:
+            try:
+                self._send("quit")
+                self.proc.wait(timeout=2)
+            except Exception:
+                self.proc.kill()
+
+    def _send(self, text: str) -> None:
+        if self.proc is None or self.proc.stdin is None:
+            raise RuntimeError("Stockfish stdin is closed")
+        self.proc.stdin.write(text + "\n")
+        self.proc.stdin.flush()
+
+    def _read_until(self, marker: str) -> list[str]:
+        if self.proc is None or self.proc.stdout is None:
+            raise RuntimeError("Stockfish stdout is closed")
+        lines = []
+        while True:
+            line = self.proc.stdout.readline()
+            if line == "":
+                raise RuntimeError("Stockfish exited unexpectedly")
+            line = line.strip()
+            lines.append(line)
+            if line == marker or line.startswith(marker + " "):
+                return lines
+
+    def choose(self, board: chess.Board) -> chess.Move:
+        self._send("position fen " + board.fen())
+        self._send(f"go depth {self.depth}")
+        for line in self._read_until("bestmove"):
+            if line.startswith("bestmove "):
+                move = chess.Move.from_uci(line.split()[1])
+                if move in board.legal_moves:
+                    return move
+        raise RuntimeError("Stockfish did not return a legal move")
+
+
+def write_isolated_zero_stockfish_depth_match(
+    config_path: Path,
+    depth: int = 1,
+    zero_visits: int = 16,
+    max_plies: int = 120,
+    match_dir: Path = ZERO_DEPTH_MATCH_DIR,
+    stamp: str | None = None,
+    live_pgn_path: Path | None = None,
+) -> dict:
+    zero = load_zero_research_module()
+    network = zero.PolicyValueNetwork.load()
+    depth = max(1, int(depth))
+    match_dir.mkdir(parents=True, exist_ok=True)
+    if stamp is None:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+    if not re.match(r"^\d{8}-\d{6}$", stamp):
+        raise ValueError("stamp must use yyyyMMdd-HHmmss")
+    pgn_path = match_dir / f"zero-vs-stockfish-depth-{depth}-{stamp}.pgn"
+
+    game = chess.pgn.Game()
+    game.headers["Event"] = f"Isolated Zero vs Stockfish depth {depth}"
+    game.headers["Site"] = "Local viewer"
+    game.headers["Date"] = time.strftime("%Y.%m.%d")
+    game.headers["Round"] = "1"
+    game.headers["White"] = "Codex-chess-zero"
+    game.headers["Black"] = f"Stockfish depth {depth}"
+    game.headers["Result"] = "*"
+    game.headers["ZeroNetwork"] = getattr(network, "network_id", "")
+    game.headers["TrainingAllowed"] = "false"
+    game.headers["StockfishLabelsUsed"] = "false"
+    game.headers["LiveMirror"] = "false"
+    game.headers["TotalGames"] = "1"
+
+    write_depth_match_live_state(live_pgn_path, game, completed=False)
+
+    board = game.board()
+    node = game
+    with StockfishDepthMatchPlayer(config_path, depth) as stockfish:
+        for _ in range(max_plies):
+            if board.is_game_over(claim_draw=True):
+                break
+            if board.turn == chess.WHITE:
+                search = zero.run_mcts(board, network, visits=zero_visits)
+                move = search.move
+                comment = getattr(search, "comment", "")
+            else:
+                move = stockfish.choose(board)
+                comment = f"Stockfish depth {depth}"
+            if move not in board.legal_moves:
+                raise RuntimeError(f"illegal match move: {move.uci()}")
+            board.push(move)
+            node = node.add_variation(move)
+            if comment:
+                node.comment = str(comment)[:240]
+            write_depth_match_live_state(live_pgn_path, game, completed=False)
+
+    outcome = board.outcome(claim_draw=True)
+    if outcome:
+        result = board.result(claim_draw=True)
+        termination = str(outcome.termination.name).replace("_", " ").lower()
+    else:
+        result = "1/2-1/2"
+        termination = f"max plies {max_plies}"
+    game.headers["Result"] = result
+    game.headers["Termination"] = termination
+    pgn_path.write_text(str(game) + "\n\n", encoding="utf-8")
+    write_depth_match_live_state(live_pgn_path, game, completed=True)
+    return {
+        "ok": True,
+        "pgn_path": str(pgn_path),
+        "live_pgn_path": str(live_pgn_path) if live_pgn_path else None,
+        "tournament_slug": tournament_slug(pgn_path),
+        "live_tournament_slug": tournament_slug(live_pgn_path) if live_pgn_path else None,
+        "result": result,
+        "moves": board.ply(),
+        "white": game.headers["White"],
+        "black": game.headers["Black"],
+        "depth": depth,
+        "zero_visits": zero_visits,
+        "training_sources": {"stockfish_labels_used": False, "opponent_labels_used": False},
     }
 
 
@@ -3738,6 +4111,30 @@ class LivePgnHandler(BaseHTTPRequestHandler):
                 if not pgn_path.is_absolute():
                     pgn_path = self.stats_dir / pgn_path
                 result = write_live_selection(pgn_path, int(payload.get("game") or 1))
+                self.send_json(result)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        if parsed.path == "/api/research/depth-match":
+            try:
+                payload = self.read_json_body()
+                depth = int(payload.get("depth") or 1)
+                stamp = payload.get("stamp") or None
+                raw_live_pgn_path = payload.get("live_pgn_path") or None
+                live_pgn_path = None
+                if raw_live_pgn_path:
+                    live_pgn_path = Path(str(raw_live_pgn_path))
+                    if not live_pgn_path.is_absolute():
+                        live_pgn_path = self.stats_dir / live_pgn_path
+                    live_pgn_path = live_pgn_path.resolve()
+                    if not live_pgn_path.is_relative_to(self.stats_dir.resolve()):
+                        raise ValueError("live_pgn_path must stay under the stats directory")
+                result = write_isolated_zero_stockfish_depth_match(
+                    self.config_path,
+                    depth=depth,
+                    stamp=stamp,
+                    live_pgn_path=live_pgn_path,
+                )
                 self.send_json(result)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)

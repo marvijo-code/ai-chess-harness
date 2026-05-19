@@ -3,23 +3,28 @@ id = "zero-stockfish-climb"
 kind = "cron"
 name = "zero-stockfish-climb"
 prompt = '''
-Run one time-boxed GM-track Codex-chess-zero research sprint from the existing repo state. First inspect PRD.md, PRD_CHECKLIST.md, AGENTS.md, README.md, chess-harness.config.json, tools/run_zero_climb.py, engines/codex-chess-zero/zero_research.py, the automation memory, and current artifacts under engines/codex-chess-zero/research/{climb,wisdom,networks}. Treat the goal as maximum honest progress toward Grandmaster/Stockfish strength, not a tiny smoke test.
+Run as a fast reporter/watchdog for the repo-local Codex-chess-zero climb loop, then exit. Do not run a climb sprint directly, do not edit research code, and do not wait for a full training round to finish.
 
-Start with the strongest bounded local climb profile the machine can handle, defaulting to:
-python .\tools\run_zero_climb.py --profile gm-sprint
-If the machine is overloaded, reduce only enough to finish; if it is clearly idle, prefer increasing visits/self-play/promotion within the same bounded run before adding unrelated work. Keep the total automation turn time bounded and stop before runaway execution.
+First read `C:\Users\marvi\.codex\automations\zero-stockfish-climb\memory.md` so the report builds on the previous automation state.
 
-Focus on the current failed gate first. If the same gate/promotion keeps failing or the latest wisdom delta exposes a clear weakness, implement exactly one small safe research/evaluator/training improvement that attacks that weakness, then rerun the focused climb or validation. Good targets include better self-play diversity, conversion/draw avoidance, tactical safety, replay weighting, promotion/curriculum diagnostics, or compiling readable wisdom into fast local evaluator features. Do not churn broad refactors.
+From `C:\dev\chess-harness-codex`, run:
+python .\tools\ensure_zero_climb_loop.py --profile gm-sprint --wait-seconds 20
 
-Keep weak engines, Stockfish, Lc0, Maia, human games, opening books, and tablebases evaluation-only. Papers and engine concepts may inspire architecture, tests, or evaluator features, but never use external moves, PVs, exact positions, labels, opening lines, tablebase answers, or human-game imitation as Zero training targets or prompt-readable move rules.
+The helper should detect an existing `tools/run_zero_climb_loop.py` process, or start it detached if absent. It may repair a stale loop lock only after confirming no loop process is alive. It writes `engines/codex-chess-zero/research/climb/zero-climb-loop-ensure-log.jsonl` and the loop writes its own state/log/lock artifacts.
 
-Every run should persist climb state/logs, candidate/current network state, promotion results, replay diagnostics, and a human-readable wisdom delta. Report current stage, latest score, promotion result, artifact paths, what changed in the learner/research loop, and whether any external-label guard failed. Do not claim GM strength or Stockfish parity unless promoted generations and ladder results prove it.
+After the helper returns, inspect the current local artifacts if present:
+- `engines/codex-chess-zero/research/climb/zero-climb-loop-state.json`
+- `engines/codex-chess-zero/research/climb/zero-climb-loop-log.jsonl`
+- `engines/codex-chess-zero/research/climb/climb-state.json`
+- `engines/codex-chess-zero/research/climb/climb-log.jsonl`
+- `engines/codex-chess-zero/research/wisdom/latest-wisdom-delta.md`
+- `engines/codex-chess-zero/research/networks`
 
-Run focused validation for changed code or artifacts, especially tests.test_zero_climb, tests.test_zero_research, and tests.test_live_pgn_viewer_stats, plus py_compile for touched Python files. Update PRD_CHECKLIST.md, README/skills/automation export, and C:/dev/memories.md only when the workflow or durable state changes.
+Append a concise memory entry with the current run time, loop status/PID, current stage, latest score, promotion result, artifact paths, and whether any external-label guard failed. If a field is not available yet because the loop is still mid-round, say so honestly. Report the same concise status to the user. If the helper fails, report the failure, append that failure to memory, and do not attempt manual training in this automation.
 '''
 status = "ACTIVE"
-rrule = "FREQ=HOURLY;INTERVAL=1"
+rrule = "FREQ=MINUTELY;INTERVAL=15"
 model = "gpt-5.5"
-reasoning_effort = "high"
+reasoning_effort = "low"
 execution_environment = "local"
 cwds = ["C:/dev/chess-harness-codex"]

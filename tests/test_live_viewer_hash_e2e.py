@@ -108,6 +108,155 @@ def completed_game_text(slug: str, round_name: str, white: str, black: str, resu
 
 
 class LiveViewerHashE2ETests(unittest.TestCase):
+    def test_zero_depth_live_hash_loads_active_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            slug = "zero-vs-stockfish-depth-1-20260519-101500"
+            live_pgn = out_dir / "live" / f"{slug}-live.pgn"
+            write_pgn(
+                live_pgn,
+                slug,
+                "Codex-chess-zero",
+                "Stockfish depth 1",
+                "*",
+                "1. d4 *",
+                live=True,
+                round_name="1",
+                total_games=1,
+            )
+            live_pgn.with_suffix(".status.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-05-19 10:15:00",
+                        "generated_at_epoch": time.time(),
+                        "output_pgn": str(live_pgn),
+                        "control_pgn": str(live_pgn),
+                        "locked_game": 1,
+                        "games": [
+                            {
+                                "game": 1,
+                                "total": 1,
+                                "white": "Codex-chess-zero",
+                                "black": "Stockfish depth 1",
+                                "result": "*",
+                                "reason": "",
+                                "finished": False,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            port = free_port()
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(ROOT / "tools" / "live_pgn_viewer.py"),
+                    "--pgn",
+                    str(live_pgn),
+                    "--stats-dir",
+                    str(out_dir),
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(port),
+                    "--no-analysis",
+                ],
+                cwd=str(ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                wait_for_http(f"http://127.0.0.1:{port}/")
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1280, "height": 900})
+                    page.route("**/api/stats?**", lambda route: route.abort())
+                    page.goto(f"http://127.0.0.1:{port}/#{slug}--live-game-1", wait_until="domcontentloaded")
+                    page.wait_for_function(
+                        "() => document.querySelector('#current-game-title')?.textContent === 'Game 1 / 1: Codex-chess-zero vs Stockfish depth 1'",
+                        timeout=10000,
+                    )
+                    self.assertEqual(page.evaluate("window.location.hash"), f"#{slug}--live-game-1")
+                    self.assertTrue(page.locator("#follow-toggle").is_checked())
+                    self.assertIn(page.locator("#status-text").inner_text(), {"Updated", "Watching"})
+                    self.assertIn(slug, page.locator("#tournament-chip").inner_text())
+                    self.assertEqual(page.locator(".sq").count(), 64)
+                    browser.close()
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+
+    def test_archive_hash_loads_game_when_default_pgn_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            slug = "zero-vs-stockfish-depth-1-20260519-archive"
+            archive_pgn = out_dir / "zero-depth-matches" / f"{slug}.pgn"
+            write_pgn(
+                archive_pgn,
+                slug,
+                "Codex-chess-zero",
+                "Stockfish depth 1",
+                "0-1",
+                "1. d4 d5 0-1",
+                live=False,
+            )
+            missing_default = out_dir / "live" / "missing-default-live.pgn"
+
+            port = free_port()
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(ROOT / "tools" / "live_pgn_viewer.py"),
+                    "--pgn",
+                    str(missing_default),
+                    "--stats-dir",
+                    str(out_dir),
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(port),
+                    "--no-analysis",
+                ],
+                cwd=str(ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                wait_for_http(f"http://127.0.0.1:{port}/")
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1280, "height": 900})
+                    page.goto(f"http://127.0.0.1:{port}/#{slug}--game-1", wait_until="domcontentloaded")
+                    page.wait_for_function(
+                        "() => document.querySelector('#current-game-title')?.textContent === 'Game 1: Codex-chess-zero vs Stockfish depth 1'",
+                        timeout=10000,
+                    )
+                    self.assertEqual(page.locator("#status-text").inner_text(), "Archive")
+                    self.assertIn(slug, page.locator("#tournament-chip").inner_text())
+                    self.assertIn("White: Codex-chess-zero", page.locator("#white-player").inner_text())
+                    self.assertIn("Black: Stockfish depth 1", page.locator("#black-player").inner_text())
+                    self.assertEqual(page.locator(".sq").count(), 64)
+                    browser.close()
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                if proc.stdout:
+                    proc.stdout.close()
+                if proc.stderr:
+                    proc.stderr.close()
+
     def test_push_stream_replaces_fixed_game_stats_and_learner_polling(self):
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp)

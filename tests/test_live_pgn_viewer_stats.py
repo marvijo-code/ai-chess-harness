@@ -2,7 +2,9 @@ import tempfile
 import unittest
 import json
 from pathlib import Path
+from unittest import mock
 
+import chess
 import chess.pgn
 
 import tools.live_pgn_viewer as viewer
@@ -31,6 +33,53 @@ class LivePgnViewerStatsTests(unittest.TestCase):
 
         self.assertEqual(stats["games"], 1)
         self.assertEqual([match["file"] for match in stats["matches"]], ["active.pgn"])
+
+    def test_collect_stats_uses_headers_without_parsing_movetext(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            out_dir = Path(temp_dir)
+            pgn_path = out_dir / "fastchess" / "headers-only.pgn"
+            pgn_path.parent.mkdir(parents=True, exist_ok=True)
+            pgn_path.write_text("placeholder", encoding="utf-8")
+            returned = False
+
+            def fake_read_headers(handle):
+                nonlocal returned
+                if returned:
+                    return None
+                returned = True
+                return {
+                    "Date": "2026.05.19",
+                    "Round": "1",
+                    "White": "HeaderWhite",
+                    "Black": "HeaderBlack",
+                    "Result": "1-0",
+                }
+
+            with (
+                mock.patch("tools.live_pgn_viewer.chess.pgn.read_headers", side_effect=fake_read_headers),
+                mock.patch("tools.live_pgn_viewer.chess.pgn.read_game", side_effect=AssertionError("movetext parsed")),
+            ):
+                stats = collect_stats(out_dir, None, None)
+
+        self.assertEqual(stats["games"], 1)
+        self.assertEqual(stats["matches"][0]["white"], "HeaderWhite")
+        self.assertEqual(stats["matches"][0]["winner_label"], "HeaderWhite (White) won")
+
+    def test_read_game_without_analysis_does_not_call_analyzer(self):
+        class ExplodingAnalyzer:
+            enabled = True
+
+            def analyze(self, board):
+                raise AssertionError("analysis blocked board load")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pgn_path = Path(temp_dir) / "live.pgn"
+            write_finished_game(pgn_path, "Board only")
+
+            data = viewer.read_game(pgn_path, ExplodingAnalyzer(), include_analysis=False)
+
+        self.assertTrue(data["has_game"])
+        self.assertNotIn("analysis", data)
 
     def test_missing_control_pgn_resolves_to_status_output_pgn(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -107,6 +156,78 @@ class LivePgnViewerStatsTests(unittest.TestCase):
 
         self.assertIn("research", signatures)
         self.assertIn("learner", signatures)
+
+    def test_isolated_zero_stockfish_depth_match_writes_outside_live_matches(self):
+        class FakeNetwork:
+            network_id = "fake-zero"
+
+        class FakeZero:
+            class PolicyValueNetwork:
+                @staticmethod
+                def load():
+                    return FakeNetwork()
+
+            @staticmethod
+            def run_mcts(board, network, visits=1):
+                class Result:
+                    pass
+
+                result = Result()
+                result.move = next(iter(board.legal_moves))
+                result.comment = "zero local move"
+                return result
+
+        class FakeStockfish:
+            def __init__(self, config_path, depth):
+                self.depth = depth
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def choose(self, board):
+                return next(iter(board.legal_moves))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            match_dir = Path(temp_dir) / "zero-depth-matches"
+            live_pgn_path = Path(temp_dir) / "live" / "zero-vs-stockfish-depth-1-20260519-101010-live.pgn"
+            original_loader = viewer.load_zero_research_module
+            original_player = viewer.StockfishDepthMatchPlayer
+            try:
+                viewer.load_zero_research_module = lambda: FakeZero
+                viewer.StockfishDepthMatchPlayer = FakeStockfish
+                result = viewer.write_isolated_zero_stockfish_depth_match(
+                    Path("unused.json"),
+                    depth=1,
+                    zero_visits=1,
+                    max_plies=4,
+                    match_dir=match_dir,
+                    stamp="20260519-101010",
+                    live_pgn_path=live_pgn_path,
+                )
+            finally:
+                viewer.load_zero_research_module = original_loader
+                viewer.StockfishDepthMatchPlayer = original_player
+
+            pgn_path = Path(result["pgn_path"])
+            metadata = viewer.collect_zero_depth_match_data(match_dir)
+            live_exists = live_pgn_path.exists()
+            live_status = json.loads(live_pgn_path.with_suffix(".status.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(result["ok"])
+        self.assertIn("zero-depth-matches", str(pgn_path))
+        self.assertNotIn("\\live\\", str(pgn_path).lower())
+        self.assertTrue(live_exists)
+        self.assertEqual(result["live_pgn_path"], str(live_pgn_path))
+        self.assertEqual(result["live_tournament_slug"], "zero-vs-stockfish-depth-1-20260519-101010")
+        self.assertEqual(live_status["locked_game"], 1)
+        self.assertTrue(live_status["games"][0]["finished"])
+        self.assertEqual(result["depth"], 1)
+        self.assertEqual(result["training_sources"]["stockfish_labels_used"], False)
+        self.assertTrue(metadata["exists"])
+        self.assertEqual(metadata["result"], "1/2-1/2")
 
 
 if __name__ == "__main__":

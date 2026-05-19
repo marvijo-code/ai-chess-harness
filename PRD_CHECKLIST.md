@@ -156,3 +156,20 @@
 - [x] Add local opponent-checking-reply refutation risk to Zero's deliberative evaluator without external labels.
 - [x] Keep Zero draw/failure training penalties from globally depressing network bias.
 - [x] Strengthen self-play-only training penalties for risky forcing non-wins exposed by the current Stockfish-depth-1 climb gate.
+- [x] Suppress risky forcing-move bonuses in Zero's deliberative evaluator when local reply scans mark them watch/unsafe.
+- [x] Bound Zero replay training to a deterministic recent-plus-outcome-signal sample for sprint runtime.
+- [x] Bound Zero's expensive current-position refutation scan to the strongest local candidate shortlist for sprint runtime.
+- [x] Add a current-position conversion-stall feature for material-up drawn self-play and validate it.
+- [x] Downgrade quiet material-up conversion stalls directly in Zero's deliberative evaluator and validate it.
+- [x] Clamp Zero replay-training feature weights to bounded sprint-safe ranges and validate it.
+- [x] Prioritize failed-conversion and risky-forcing self-play records in bounded Zero replay sampling and validate it.
+- [x] Fix isolated Zero depth-match deep links so `#slug--game-1` opens the archived PGN on first load.
+- [x] Make isolated Zero depth-match launcher open a live `#slug--live-game-1` URL first, write a live PGN/status sidecar during play, and keep the board loading even when `/api/stats` is slow.
+- [x] Reserve low-risk quiet/safety candidates in Zero's bounded deliberative root shortlist and validate it.
+- [x] Refresh duplicate replay positions when later Zero-only self-play gives a stronger same-direction outcome signal and validate it.
+- [x] Add a repo-local continuous Zero climb loop that immediately starts the next bounded round and prevents overlapping instances.
+- [x] Convert `zero-stockfish-climb` automation into a quick watchdog that only ensures the repo-local loop is running.
+- [x] Keep `zero-stockfish-climb` as a sub-30-minute reporting automation that updates automation memory from loop/climb artifacts.
+- [x] Speed `/api/stats` by collecting completed PGN rows from headers only instead of parsing full game movetext.
+- [x] Decouple live board refresh from Engine Analysis so board positions update before Stockfish work finishes.
+- [x] Validate fast stats, live board updates for the isolated depth runner, and visible Engine Analysis.
