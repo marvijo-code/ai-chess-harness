@@ -269,6 +269,41 @@ def material_safety_summary(board: chess.Board, legal_moves: list[str], max_item
     }
 
 
+def learner_advisory_motif_warnings(board: chess.Board, legal_moves: list[str], history: list[str] | None = None) -> list[dict]:
+    legal = set(legal_moves)
+    history = history or []
+    warnings = []
+    for move_text in sorted(legal):
+        try:
+            move = chess.Move.from_uci(move_text)
+        except ValueError:
+            continue
+        if move not in board.legal_moves:
+            continue
+        piece = board.piece_at(move.from_square)
+        if piece is None:
+            continue
+        reason = ""
+        if piece.piece_type == chess.KNIGHT and chess.square_file(move.to_square) in {0, 7} and board.fullmove_number <= 8:
+            reason = "early edge-knight move"
+        elif piece.piece_type in {chess.BISHOP, chess.KNIGHT} and board.fullmove_number <= 12:
+            home_squares = {chess.B1, chess.G1, chess.C1, chess.F1, chess.B8, chess.G8, chess.C8, chess.F8}
+            if move.to_square in home_squares and move.from_square not in home_squares:
+                reason = "minor-piece home retreat"
+        elif piece.piece_type == chess.ROOK and board.fullmove_number <= 12 and not board.is_capture(move):
+            reason = "early rook drift"
+        elif history:
+            last = history[-1]
+            try:
+                if len(last) >= 4 and move.from_square == chess.parse_square(last[2:4]) and move.to_square == chess.parse_square(last[:2]):
+                    reason = "direct move reversal"
+            except ValueError:
+                pass
+        if reason:
+            warnings.append({"uci": move_text, "san": board.san(move), "reason": reason, "policy": "learner_advisory_only"})
+    return warnings[:8]
+
+
 def log(message: str) -> None:
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     with LOG_PATH.open("a", encoding="utf-8") as handle:
@@ -847,6 +882,13 @@ class CodexAppServer:
                 "You may learn only from compact post-game feedback already present in this engine's memory/knowledgebase. "
                 "During a move, do not edit files or call tools; infer from FEN, legal_moves, material_safety, and the current clock."
             )
+        elif self.learning_mode:
+            warnings = learner_advisory_motif_warnings(board, legal_moves, history)
+            if warnings:
+                prompt["learner_advisory_motif_warnings"] = {
+                    "policy": "Advisory learner-only pattern warnings. These are not Zero policy/value features and do not choose a move.",
+                    "warnings": warnings,
+                }
         context_profile = "none"
         context = {}
         if not critical_clock:

@@ -20,6 +20,7 @@ ZERO_RESEARCH_PATH = ROOT / "engines" / "codex-chess-zero" / "zero_research.py"
 CLIMB_DIR = ROOT / "engines" / "codex-chess-zero" / "research" / "climb"
 CLIMB_STATE_PATH = CLIMB_DIR / "climb-state.json"
 CLIMB_LOG_PATH = CLIMB_DIR / "climb-log.jsonl"
+CLIMB_METRICS_PATH = CLIMB_DIR / "climb-metrics.jsonl"
 ENGINE_CONFIG_PATH = Path.home() / "AppData/Roaming/org.encroissant.app/engines/engines.json"
 PROFILE_DEFAULTS = {
     "quick": {
@@ -88,6 +89,11 @@ def resolve_profile_settings(args: argparse.Namespace) -> dict[str, int]:
     return settings
 
 
+def failed_gate_seed_base(seed: int, attempt_index: int, self_play_games: int) -> int:
+    stride = max(1, int(self_play_games))
+    return int(seed) + (max(0, int(attempt_index)) * stride)
+
+
 def material_balance(board: chess.Board, color: bool) -> int:
     return zero.material_balance(board, color)
 
@@ -148,6 +154,12 @@ def save_state(state: dict, path: Path = CLIMB_STATE_PATH) -> None:
 
 
 def append_log(row: dict, path: Path = CLIMB_LOG_PATH) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+
+
+def append_metrics(row: dict, path: Path = CLIMB_METRICS_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
@@ -352,14 +364,25 @@ def read_self_play_feedback(path: Path) -> dict:
     moves = [str(record.get("chosen_move", "")) for record in records]
     replay_append = game.get("replay_append", {}) if isinstance(game.get("replay_append", {}), dict) else {}
     outcome_signal = sum(1 for record in records if abs(float(record.get("outcome", 0.0) or 0.0)) > 0)
+    terminal_counts: dict[str, int] = {}
+    opening_signatures = set()
+    for record in records:
+        terminal = str(record.get("terminal_kind") or game.get("terminal_kind") or "")
+        if terminal:
+            terminal_counts[terminal] = terminal_counts.get(terminal, 0) + 1
+        if record.get("opening_signature"):
+            opening_signatures.add(str(record["opening_signature"]))
     return {
         "path": str(path),
         "readable": True,
         "result": game.get("result"),
         "outcome_source": game.get("outcome_source", ""),
+        "terminal_kind": game.get("terminal_kind", ""),
         "plies": game.get("plies", len(records)),
         "position_count": len(records),
         "unique_positions": len({str(record.get("position_key", "")) for record in records if record.get("position_key")}),
+        "unique_opening_signatures": len(opening_signatures),
+        "terminal_counts": terminal_counts,
         "outcome_signal_positions": outcome_signal,
         "exploratory_moves": sum(1 for record in records if record.get("selection") == "exploratory"),
         "trajectory_signature": zero.stable_id(moves),
@@ -376,6 +399,17 @@ def summarize_training_feedback(paths: list[Path], candidate: object, promotion:
     replay_updated = sum(int(row.get("replay_updated_duplicates", 0) or 0) for row in readable)
     replay_skipped = sum(int(row.get("replay_skipped_duplicates", 0) or 0) for row in readable)
     outcome_signal = sum(int(row.get("outcome_signal_positions", 0) or 0) for row in readable)
+    unique_opening_signatures = len(
+        {
+            str(row.get("trajectory_signature", ""))
+            for row in readable
+            if row.get("trajectory_signature")
+        }
+    )
+    terminal_counts: dict[str, int] = {}
+    for row in readable:
+        for key, value in dict(row.get("terminal_counts", {})).items():
+            terminal_counts[key] = terminal_counts.get(key, 0) + int(value or 0)
     signatures = [str(row.get("trajectory_signature", "")) for row in readable if row.get("trajectory_signature")]
     duplicate_trajectories = len(signatures) > 1 and len(set(signatures)) < len(signatures)
     promoted = bool(promotion.get("promoted"))
@@ -401,6 +435,12 @@ def summarize_training_feedback(paths: list[Path], candidate: object, promotion:
         "replay_updated_duplicates": replay_updated,
         "replay_skipped_duplicates": replay_skipped,
         "outcome_signal_positions": outcome_signal,
+        "terminal_counts": terminal_counts,
+        "true_draw_positions": sum(value for key, value in terminal_counts.items() if key != "capped_draw" and key.endswith("_draw")),
+        "capped_draw_positions": int(terminal_counts.get("capped_draw", 0) or 0),
+        "repetition_draw_positions": int(terminal_counts.get("repetition_draw", 0) or 0),
+        "unique_opening_signatures": unique_opening_signatures,
+        "training_metrics": getattr(candidate, "training_metrics", {}),
         "duplicate_trajectories": duplicate_trajectories,
         "candidate": getattr(candidate, "network_id", ""),
         "promoted": promoted,
@@ -422,16 +462,30 @@ def train_after_failed_gate(
         if self_play_games > 0
         else []
     )
+    reanalysis = zero.reanalyze_replay_records(limit=max(1, self_play_games * 4), visits=max(1, min(self_play_visits, 16)))
     candidate = zero.train_from_replay(epochs=epochs)
     promotion = zero.promotion_gate(games=promotion_games, visits=promotion_visits, threshold=0.55)
+    promotion["gate_order"] = "internal_champion_gate_before_external_ladder_retry"
     diagnosis = summarize_training_feedback(paths, candidate, promotion)
     wisdom = zero.write_wisdom_delta(paths, diagnosis, candidate.to_dict(), promotion) if paths else {}
     zero.research_summary()
+    seed_window = (
+        {
+            "first": seed,
+            "last": seed + max(0, len(paths) - 1),
+            "games_requested": self_play_games,
+            "games_written": len(paths),
+        }
+        if seed is not None
+        else None
+    )
     return {
         "self_play_games": len(paths),
         "self_play_paths": [str(path) for path in paths],
+        "self_play_seed_window": seed_window,
         "candidate": candidate.to_dict(),
         "promotion": promotion,
+        "reanalysis": reanalysis,
         "diagnosis": diagnosis,
         "wisdom": wisdom,
         "training_sources": {source: False for source in zero.FORBIDDEN_TRAINING_SOURCES},
@@ -450,6 +504,7 @@ def run_climb_cycle(
     train_epochs: int = 1,
     promotion_games: int = 2,
     promotion_visits: int = 8,
+    metrics_path: Path = CLIMB_METRICS_PATH,
 ) -> dict:
     stages = stages or stage_catalog()
     state = load_state(state_path)
@@ -467,7 +522,8 @@ def run_climb_cycle(
         return result
 
     stage = stages[index]
-    evaluation = evaluate_stage(stage, zero_visits=zero_visits, seed=seed + len(state.get("attempts", [])))
+    attempt_index = len(state.get("attempts", []))
+    evaluation = evaluate_stage(stage, zero_visits=zero_visits, seed=seed + attempt_index)
     row = {
         "generated_at": now_stamp(),
         "complete": False,
@@ -496,13 +552,56 @@ def run_climb_cycle(
             epochs=train_epochs,
             promotion_games=promotion_games,
             promotion_visits=promotion_visits,
-            seed=seed + len(state.get("attempts", [])),
+            seed=failed_gate_seed_base(seed, attempt_index, self_play_games),
         )
     state.setdefault("attempts", []).append(row)
     state["last_result"] = row
     save_state(state, state_path)
     append_log(row, log_path)
+    append_metrics(build_round_metrics(row), metrics_path)
     return row
+
+
+def build_round_metrics(row: dict) -> dict:
+    evaluation = dict(row.get("evaluation") or {})
+    training = dict(row.get("training") or {})
+    diagnosis = dict(training.get("diagnosis") or {})
+    promotion = dict(training.get("promotion") or {})
+    match = dict(promotion.get("match") or {})
+    result_rows = list(evaluation.get("rows") or [])
+    wdl = {"wins": 0, "draws": 0, "losses": 0}
+    for game in result_rows:
+        score = float(game.get("zero_score", 0.5))
+        if score >= 1.0:
+            wdl["wins"] += 1
+        elif score <= 0.0:
+            wdl["losses"] += 1
+        else:
+            wdl["draws"] += 1
+    training_metrics = dict(diagnosis.get("training_metrics") or training.get("candidate", {}).get("training_metrics", {}) or {})
+    return {
+        "generated_at": row.get("generated_at"),
+        "stage": (row.get("stage") or {}).get("name"),
+        "action": row.get("action"),
+        "external_ladder_score": evaluation.get("score"),
+        "external_ladder_games": evaluation.get("games"),
+        "external_wins": wdl["wins"],
+        "external_draws": wdl["draws"],
+        "external_losses": wdl["losses"],
+        "internal_gate_score": match.get("score"),
+        "internal_gate_games": match.get("games"),
+        "internal_gate_promoted": promotion.get("promoted"),
+        "true_draw_positions": diagnosis.get("true_draw_positions", 0),
+        "capped_draw_positions": diagnosis.get("capped_draw_positions", 0),
+        "repetition_draw_positions": diagnosis.get("repetition_draw_positions", 0),
+        "unique_opening_signatures": diagnosis.get("unique_opening_signatures", 0),
+        "replay_added": diagnosis.get("replay_added", 0),
+        "replay_updated_duplicates": diagnosis.get("replay_updated_duplicates", 0),
+        "replay_skipped_duplicates": diagnosis.get("replay_skipped_duplicates", 0),
+        "policy_loss": training_metrics.get("policy_loss"),
+        "value_loss": training_metrics.get("value_loss"),
+        "training_sources": training.get("training_sources") or diagnosis.get("training_sources") or {},
+    }
 
 
 def main() -> None:
@@ -519,6 +618,7 @@ def main() -> None:
     parser.add_argument("--promotion-visits", type=int)
     parser.add_argument("--state", type=Path, default=CLIMB_STATE_PATH)
     parser.add_argument("--log", type=Path, default=CLIMB_LOG_PATH)
+    parser.add_argument("--metrics", type=Path, default=CLIMB_METRICS_PATH)
     args = parser.parse_args()
     settings = resolve_profile_settings(args)
 
@@ -536,13 +636,22 @@ def main() -> None:
                 train_epochs=settings["train_epochs"],
                 promotion_games=settings["promotion_games"],
                 promotion_visits=settings["promotion_visits"],
+                metrics_path=args.metrics,
             )
         )
         if results[-1].get("complete"):
             break
     print(
         json.dumps(
-            {"ok": True, "profile": args.profile, "settings": settings, "results": results, "state": str(args.state), "log": str(args.log)},
+            {
+                "ok": True,
+                "profile": args.profile,
+                "settings": settings,
+                "results": results,
+                "state": str(args.state),
+                "log": str(args.log),
+                "metrics": str(args.metrics),
+            },
             indent=2,
         )
     )

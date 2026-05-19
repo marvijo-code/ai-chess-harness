@@ -82,6 +82,8 @@ SELF_PLAY_FAILED_CONVERSION_DRAW_PENALTY = -0.18
 SELF_PLAY_DEFENSIVE_DRAW_PENALTY = -0.02
 DEFAULT_TRAINING_REPLAY_LIMIT = 4096
 TRAINING_REPLAY_RECENT_FRACTION = 0.5
+REPLAY_SCHEMA_VERSION = 2
+MAX_TRAINING_RECORDS_PER_OPENING_SIGNATURE = 64
 DEFAULT_WEIGHTS = {
     "bias": 0.0,
     "capture_value": 1.0,
@@ -93,7 +95,6 @@ DEFAULT_WEIGHTS = {
     "castle": 0.32,
     "conversion_stall": 0.0,
     "moved_piece_risk": -1.15,
-    "king_move_early": -0.25,
     "value_material": 1.0,
     "value_mobility": 0.08,
     "value_king_safety": 0.10,
@@ -109,7 +110,6 @@ WEIGHT_BOUNDS = {
     "castle": (-4.0, 4.0),
     "conversion_stall": (-6.0, 0.5),
     "moved_piece_risk": (-8.0, 0.5),
-    "king_move_early": (-4.0, 1.0),
     "value_material": (-12.0, 12.0),
     "value_mobility": (-6.0, 6.0),
     "value_king_safety": (-8.0, 8.0),
@@ -205,8 +205,38 @@ def legal_move_mask(board: chess.Board) -> dict:
     }
 
 
-def position_key(fen: str) -> str:
-    return " ".join(str(fen).split()[:4])
+def repetition_bucket(board: chess.Board) -> str:
+    if board.can_claim_threefold_repetition():
+        return "threefold_claimable"
+    if board.is_repetition(2):
+        return "repeated"
+    return "none"
+
+
+def position_key(fen: str, repetition: str = "none") -> str:
+    fields = str(fen).split()
+    if len(fields) < 5:
+        return " ".join(fields)
+    return " ".join([*fields[:5], f"rep:{repetition or 'none'}"])
+
+
+def replay_identity(board: chess.Board) -> dict:
+    return {
+        "schema_version": REPLAY_SCHEMA_VERSION,
+        "fen_key": position_key(board.fen(), repetition_bucket(board)),
+        "side_to_move": "white" if board.turn == chess.WHITE else "black",
+        "castling": board.castling_xfen(),
+        "en_passant": chess.square_name(board.ep_square) if board.ep_square is not None else "-",
+        "halfmove_clock": board.halfmove_clock,
+        "repetition_bucket": repetition_bucket(board),
+    }
+
+
+def replay_record_key(record: dict) -> str:
+    identity = record.get("state_identity")
+    if isinstance(identity, dict) and identity.get("fen_key"):
+        return str(identity["fen_key"])
+    return position_key(str(record.get("fen", "")), str(record.get("repetition_bucket", "none")))
 
 
 def stable_id(payload: object, length: int = 12) -> str:
@@ -285,7 +315,6 @@ def move_features(board: chess.Board, move: chess.Move) -> dict[str, float]:
         "castle": 1.0 if board.is_castling(move) else 0.0,
         "conversion_stall": conversion_stall,
         "moved_piece_risk": moved_piece_risk(board, move),
-        "king_move_early": 1.0 if mover and mover.piece_type == chess.KING and board.fullmove_number <= 12 and not board.is_castling(move) else 0.0,
     }
 
 
@@ -316,6 +345,7 @@ class PolicyValueNetwork:
     training_steps: int = 0
     source_positions: int = 0
     weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
+    training_metrics: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path = CURRENT_NETWORK_PATH) -> "PolicyValueNetwork":
@@ -335,6 +365,7 @@ class PolicyValueNetwork:
             training_steps=int(data.get("training_steps") or 0),
             source_positions=int(data.get("source_positions") or 0),
             weights=weights,
+            training_metrics=dict(data.get("training_metrics", {})) if isinstance(data.get("training_metrics"), dict) else {},
         )
 
     def to_dict(self) -> dict:
@@ -346,6 +377,7 @@ class PolicyValueNetwork:
             "training_steps": self.training_steps,
             "source_positions": self.source_positions,
             "weights": self.weights,
+            "training_metrics": self.training_metrics,
             "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
         }
 
@@ -398,6 +430,8 @@ class ZeroSearchResult:
     visits: int
     nodes: int
     candidates: list[dict]
+    root_visit_counts: dict[str, int]
+    root_visit_policy: dict[str, float]
     explanation: dict
     comment: str
 
@@ -409,6 +443,8 @@ class ZeroSearchResult:
             "visits": self.visits,
             "nodes": self.nodes,
             "candidates": self.candidates,
+            "root_visit_counts": self.root_visit_counts,
+            "root_visit_policy": self.root_visit_policy,
             "explanation": self.explanation,
             "comment": self.comment,
         }
@@ -433,6 +469,17 @@ def expand(node: PuctNode, network: PolicyValueNetwork) -> float:
         node.children[move.uci()] = PuctNode(child_board, prior=evaluation.priors.get(move.uci(), 0.0), move=move)
     node.expanded = True
     return evaluation.value
+
+
+def apply_root_noise(root: PuctNode, rng: random.Random, alpha: float = 0.3, fraction: float = 0.25) -> None:
+    children = list(root.children.values())
+    if len(children) <= 1 or fraction <= 0.0:
+        return
+    alpha = max(0.01, float(alpha))
+    noise = [rng.gammavariate(alpha, 1.0) for _ in children]
+    total = sum(noise) or 1.0
+    for child, raw in zip(children, noise):
+        child.prior = ((1.0 - fraction) * child.prior) + (fraction * (raw / total))
 
 
 def puct_score(parent: PuctNode, child: PuctNode, c_puct: float) -> float:
@@ -584,7 +631,6 @@ def deliberative_score(
         - 0.72 * refutation_penalty
         - 0.33 * forcing_reply_penalty
         - refutation_status_penalty
-        - 0.18 * features["king_move_early"]
     )
     return round(score, 6)
 
@@ -606,7 +652,6 @@ def cheap_deliberative_child_score(board: chess.Board, child: PuctNode, root_vis
         + 0.07 * features["center_to"]
         - 0.24 * features["conversion_stall"]
         - 0.62 * features["moved_piece_risk"]
-        - 0.18 * features["king_move_early"]
     )
     return (round(score, 6), child.visit_count, child.move.uci())
 
@@ -653,7 +698,7 @@ def select_deliberative_candidate_children(
     for child in safe_ranked:
         assert child.move is not None
         features = move_features(board, child.move)
-        if features["moved_piece_risk"] >= 0.5 or features["king_move_early"]:
+        if features["moved_piece_risk"] >= 0.5:
             continue
         selected[child.move.uci()] = child
         if len(selected) >= prelimit:
@@ -715,6 +760,10 @@ def run_mcts(
     visits: int = 32,
     c_puct: float = 1.5,
     time_limit_ms: int | None = None,
+    root_noise: bool = False,
+    root_noise_alpha: float = 0.3,
+    root_noise_fraction: float = 0.25,
+    rng: random.Random | None = None,
 ) -> ZeroSearchResult:
     if not any(board.legal_moves):
         raise ValueError("no legal moves available")
@@ -723,6 +772,8 @@ def run_mcts(
     network = network or PolicyValueNetwork.load()
     root = PuctNode(board.copy(stack=False))
     root_value = expand(root, network)
+    if root_noise:
+        apply_root_noise(root, rng or random.Random(), root_noise_alpha, root_noise_fraction)
     deadline = time.monotonic() + (time_limit_ms / 1000.0) if time_limit_ms else None
     completed_visits = 0
     for _ in range(visits):
@@ -738,6 +789,9 @@ def run_mcts(
         completed_visits += 1
     if not root.children:
         raise ValueError("search produced no children")
+    root_visit_counts = {uci: child.visit_count for uci, child in root.children.items()}
+    visit_total = sum(root_visit_counts.values()) or 1
+    root_visit_policy = {uci: count / visit_total for uci, count in root_visit_counts.items()}
     best, candidates = select_deliberative_child(board, root)
     assert best.move is not None
     explanation = explain_choice(board, best.move, candidates)
@@ -749,6 +803,8 @@ def run_mcts(
         visits=completed_visits,
         nodes=count_nodes(root),
         candidates=candidates,
+        root_visit_counts=root_visit_counts,
+        root_visit_policy=root_visit_policy,
         explanation=explanation,
         comment=comment,
     )
@@ -929,6 +985,33 @@ def self_play_material_outcome(board: chess.Board, color: bool) -> float:
     return max(-1.0, min(1.0, balance / 900.0))
 
 
+def classify_terminal_kind(board: chess.Board, capped: bool = False) -> str:
+    if capped:
+        return "capped_draw"
+    outcome = board.outcome(claim_draw=True)
+    if outcome is None:
+        return "in_progress"
+    if outcome.winner is not None:
+        return "checkmate" if board.is_checkmate() else "decisive"
+    if board.can_claim_threefold_repetition() or board.is_repetition(3):
+        return "repetition_draw"
+    if board.can_claim_fifty_moves() or board.is_fifty_moves():
+        return "fifty_move_draw"
+    if board.is_stalemate():
+        return "stalemate_draw"
+    if board.is_insufficient_material():
+        return "insufficient_material_draw"
+    return "true_draw"
+
+
+def wdl_target(outcome: float) -> dict[str, float]:
+    if outcome > 0.0:
+        return {"win": 1.0, "draw": 0.0, "loss": 0.0}
+    if outcome < 0.0:
+        return {"win": 0.0, "draw": 0.0, "loss": 1.0}
+    return {"win": 0.0, "draw": 1.0, "loss": 0.0}
+
+
 def record_has_risky_forcing_non_win(record: dict, outcome: float) -> bool:
     if outcome >= 0.0:
         return False
@@ -979,15 +1062,31 @@ def self_play_game(
     seed: int | None = None,
     exploration_plies: int = 10,
     temperature: float = 1.15,
+    root_noise_alpha: float = 0.3,
+    root_noise_fraction: float = 0.25,
+    visit_jitter_fraction: float = 0.25,
 ) -> dict:
     rng = random.Random(seed)
     board = chess.Board()
     records = []
+    chosen_moves = []
     for ply in range(1, max_plies + 1):
         if board.is_game_over(claim_draw=True):
             break
-        result = run_mcts(board, network, visits=visits, c_puct=1.5)
-        visit_total = sum(max(0, item["visits"]) for item in result.candidates) or 1
+        state_identity = replay_identity(board)
+        low_visits = max(1, int(visits * (1.0 - max(0.0, visit_jitter_fraction))))
+        high_visits = max(low_visits, int(math.ceil(visits * (1.0 + max(0.0, visit_jitter_fraction)))))
+        search_visits = rng.randint(low_visits, high_visits)
+        result = run_mcts(
+            board,
+            network,
+            visits=search_visits,
+            c_puct=1.5,
+            root_noise=True,
+            root_noise_alpha=root_noise_alpha,
+            root_noise_fraction=root_noise_fraction,
+            rng=rng,
+        )
         legal_mask = legal_move_mask(board)
         move, selection = select_self_play_move(
             board,
@@ -997,21 +1096,27 @@ def self_play_game(
             exploration_plies=exploration_plies,
             temperature=temperature,
         )
+        chosen_moves.append(move.uci())
         records.append(
             {
-                "schema": "zero-selfplay-position-v1",
+                "schema": "zero-selfplay-position-v2",
+                "replay_schema_version": REPLAY_SCHEMA_VERSION,
                 "source": "zero_self_play",
                 "fen": board.fen(),
-                "position_key": position_key(board.fen()),
+                "position_key": state_identity["fen_key"],
+                "state_identity": state_identity,
+                "repetition_bucket": state_identity["repetition_bucket"],
                 "side_to_move": "white" if board.turn == chess.WHITE else "black",
                 "legal_move_indices": legal_mask["indices"],
-                "visit_policy": {item["uci"]: item["visits"] / visit_total for item in result.candidates},
+                "root_visit_counts": result.root_visit_counts,
+                "visit_policy": result.root_visit_policy,
                 "chosen_move": move.uci(),
                 "chosen_move_index": move_to_index(move),
                 "selection": selection["selection"],
                 "greedy_move": selection["greedy_move"],
                 "exploration_temperature": selection["temperature"],
                 "network_id": network.network_id,
+                "search_visits_requested": search_visits,
                 "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
             }
         )
@@ -1020,7 +1125,9 @@ def self_play_game(
             break
     outcome = board.outcome(claim_draw=True)
     result_text = board.result(claim_draw=True) if outcome else "*"
+    terminal_kind = classify_terminal_kind(board, capped=outcome is None)
     outcome_source = "terminal_draw_non_win_penalty" if result_text == "1/2-1/2" else "terminal" if outcome else "self_material_adjudication"
+    opening_signature = stable_id(chosen_moves[:8])
     for record in records:
         color = chess.WHITE if record["side_to_move"] == "white" else chess.BLACK
         if result_text == "1/2-1/2":
@@ -1030,8 +1137,12 @@ def self_play_game(
         else:
             record["outcome"] = self_play_material_outcome(board, color)
         record["outcome_source"] = outcome_source
+        record["terminal_kind"] = terminal_kind
+        record["wdl_target"] = {"win": 0.0, "draw": 1.0, "loss": 0.0} if terminal_kind.endswith("_draw") else wdl_target(record["outcome"])
+        record["opening_signature"] = opening_signature
     return {
-        "schema": "zero-selfplay-game-v1",
+        "schema": "zero-selfplay-game-v2",
+        "replay_schema_version": REPLAY_SCHEMA_VERSION,
         "generated_at": now_stamp(),
         "network_id": network.network_id,
         "self_play_policy": {
@@ -1039,10 +1150,15 @@ def self_play_game(
             "seed": seed,
             "exploration_plies": exploration_plies,
             "temperature": temperature,
+            "root_noise_alpha": root_noise_alpha,
+            "root_noise_fraction": root_noise_fraction,
+            "visit_jitter_fraction": visit_jitter_fraction,
             "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
         },
         "result": result_text,
         "outcome_source": outcome_source,
+        "terminal_kind": terminal_kind,
+        "opening_signature": opening_signature,
         "plies": len(records),
         "records": records,
     }
@@ -1051,7 +1167,7 @@ def self_play_game(
 def dedupe_records(records: Iterable[dict]) -> list[dict]:
     merged: dict[str, dict] = {}
     for record in records:
-        key = position_key(record.get("fen", ""))
+        key = replay_record_key(record)
         if not key:
             continue
         if key not in merged:
@@ -1075,7 +1191,7 @@ def append_replay_records(records: Iterable[dict], path: Path = REPLAY_BUFFER_PA
                 existing = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            key = position_key(existing.get("fen", ""))
+            key = replay_record_key(existing)
             if not key:
                 continue
             existing_index[key] = len(existing_records)
@@ -1084,7 +1200,7 @@ def append_replay_records(records: Iterable[dict], path: Path = REPLAY_BUFFER_PA
     skipped = 0
     updated = 0
     for record in dedupe_records(records):
-        key = position_key(record.get("fen", ""))
+        key = replay_record_key(record)
         if key in existing_index:
             existing = existing_records[existing_index[key]]
             if should_update_replay_duplicate(existing, record):
@@ -1171,17 +1287,40 @@ def replay_training_signal(record: dict) -> float:
 
 
 def select_training_records(records: list[dict], max_records: int | None = DEFAULT_TRAINING_REPLAY_LIMIT) -> list[dict]:
-    if max_records is None or max_records <= 0 or len(records) <= max_records:
+    if max_records is None or max_records <= 0:
+        base = list(records)
+    elif len(records) <= max_records:
+        base = list(records)
+    else:
+        recent_count = max(1, int(max_records * TRAINING_REPLAY_RECENT_FRACTION))
+        recent_start = max(0, len(records) - recent_count)
+        selected_indices = set(range(recent_start, len(records)))
+        remaining_slots = max_records - len(selected_indices)
+        if remaining_slots > 0:
+            older = list(enumerate(records[:recent_start]))
+            older.sort(key=lambda item: (replay_training_signal(item[1]), item[0]), reverse=True)
+            selected_indices.update(index for index, _ in older[:remaining_slots])
+        base = [record for index, record in enumerate(records) if index in selected_indices]
+    return cap_duplicate_opening_signatures(base)
+
+
+def cap_duplicate_opening_signatures(
+    records: list[dict],
+    limit: int = MAX_TRAINING_RECORDS_PER_OPENING_SIGNATURE,
+) -> list[dict]:
+    if limit <= 0:
         return list(records)
-    recent_count = max(1, int(max_records * TRAINING_REPLAY_RECENT_FRACTION))
-    recent_start = max(0, len(records) - recent_count)
-    selected_indices = set(range(recent_start, len(records)))
-    remaining_slots = max_records - len(selected_indices)
-    if remaining_slots > 0:
-        older = list(enumerate(records[:recent_start]))
-        older.sort(key=lambda item: (replay_training_signal(item[1]), item[0]), reverse=True)
-        selected_indices.update(index for index, _ in older[:remaining_slots])
-    return [record for index, record in enumerate(records) if index in selected_indices]
+    counts: dict[str, int] = {}
+    selected = []
+    for record in records:
+        signature = str(record.get("opening_signature") or "")
+        if signature:
+            current = counts.get(signature, 0)
+            if current >= limit:
+                continue
+            counts[signature] = current + 1
+        selected.append(record)
+    return selected
 
 
 def _empty_lesson_counts() -> dict[str, int]:
@@ -1400,6 +1539,8 @@ def train_from_replay(
     records = records if records is not None else select_training_records(load_replay_records(), max_records=max_records)
     weights = dict(base.weights)
     used = 0
+    policy_loss = 0.0
+    value_loss = 0.0
     for _ in range(max(1, epochs)):
         for record in records:
             try:
@@ -1410,12 +1551,31 @@ def train_from_replay(
             if move not in board.legal_moves:
                 continue
             outcome = float(record.get("outcome", 0.0))
+            value_scale = 0.25 if str(record.get("terminal_kind", "")) == "capped_draw" else 1.0
             features = move_features(board, move)
             for name, value in features.items():
                 scale = training_feature_scale(record, name, outcome)
-                weights[name] = weights.get(name, 0.0) + learning_rate * outcome * value * scale
+                weights[name] = weights.get(name, 0.0) + learning_rate * outcome * value * scale * value_scale
+            visit_policy = record.get("visit_policy", {})
+            if isinstance(visit_policy, dict) and visit_policy:
+                evaluation = base.evaluate(board)
+                for uci, target_raw in visit_policy.items():
+                    try:
+                        policy_move = chess.Move.from_uci(str(uci))
+                        target = float(target_raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if policy_move not in board.legal_moves:
+                        continue
+                    prior = float(evaluation.priors.get(policy_move.uci(), 0.0))
+                    error = target - prior
+                    policy_loss += error * error
+                    for name, value in move_features(board, policy_move).items():
+                        weights[name] = weights.get(name, 0.0) + (learning_rate * 0.35 * error * value)
             for name, value in board_value_features(board).items():
-                weights[name] = weights.get(name, 0.0) + learning_rate * outcome * value
+                weights[name] = weights.get(name, 0.0) + learning_rate * outcome * value * value_scale
+            value_estimate = base.value(board)
+            value_loss += ((outcome - value_estimate) ** 2) * value_scale
             used += 1
     weights = clamp_learned_weights(weights)
     candidate = PolicyValueNetwork(
@@ -1425,6 +1585,12 @@ def train_from_replay(
         training_steps=base.training_steps + max(1, epochs),
         source_positions=base.source_positions + used,
         weights=weights,
+        training_metrics={
+            "records_used": float(used),
+            "policy_loss": round(policy_loss / max(1, used), 6),
+            "value_loss": round(value_loss / max(1, used), 6),
+            "opening_signature_limit": float(MAX_TRAINING_RECORDS_PER_OPENING_SIGNATURE),
+        },
     )
     candidate.save(CANDIDATE_NETWORK_PATH)
     return candidate
@@ -1631,6 +1797,52 @@ def research_summary(write_summary: bool = True) -> dict:
     return summary
 
 
+def reanalyze_replay_records(
+    limit: int = 64,
+    visits: int = 16,
+    path: Path = REPLAY_BUFFER_PATH,
+) -> dict:
+    records = load_replay_records(path)
+    if not records:
+        return {"updated": 0, "path": str(path), "records": 0}
+    network = PolicyValueNetwork.load()
+    updated_keys: set[str] = set()
+    refreshed = 0
+    for record in reversed(records):
+        if refreshed >= limit:
+            break
+        key = replay_record_key(record)
+        if not key or key in updated_keys:
+            continue
+        try:
+            board = chess.Board(record["fen"])
+        except (KeyError, ValueError):
+            continue
+        if board.is_game_over(claim_draw=True):
+            continue
+        result = run_mcts(board, network, visits=visits)
+        record["visit_policy"] = result.root_visit_policy
+        record["root_visit_counts"] = result.root_visit_counts
+        record["reanalyzed_at"] = now_stamp()
+        record["reanalyzed_with_network"] = network.network_id
+        record["reanalysis_training_sources"] = {source: False for source in FORBIDDEN_TRAINING_SOURCES}
+        updated_keys.add(key)
+        refreshed += 1
+    if refreshed:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+    return {
+        "updated": refreshed,
+        "records": len(records),
+        "visits": visits,
+        "network_id": network.network_id,
+        "path": str(path),
+        "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
+    }
+
+
 def run_self_play(
     games: int,
     visits: int,
@@ -1664,10 +1876,17 @@ def main() -> None:
     selfplay.add_argument("--visits", type=int, default=8)
     selfplay.add_argument("--max-plies", type=int, default=80)
     selfplay.add_argument("--seed", type=int)
+    selfplay.add_argument("--exploration-plies", type=int, default=10)
+    selfplay.add_argument("--temperature", type=float, default=1.15)
 
     train = sub.add_parser("train")
     train.add_argument("--epochs", type=int, default=1)
     train.add_argument("--learning-rate", type=float, default=0.05)
+
+    reanalyze = sub.add_parser("reanalyze")
+    reanalyze.add_argument("--limit", type=int, default=64)
+    reanalyze.add_argument("--visits", type=int, default=16)
+    reanalyze.add_argument("--path", type=Path, default=REPLAY_BUFFER_PATH)
 
     promote = sub.add_parser("promote")
     promote.add_argument("--games", type=int, default=2)
@@ -1679,7 +1898,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "self-play":
-        paths = run_self_play(args.games, args.visits, args.max_plies, args.seed)
+        paths = run_self_play(args.games, args.visits, args.max_plies, args.seed, args.exploration_plies, args.temperature)
         print(json.dumps({"ok": True, "paths": [str(path) for path in paths]}, indent=2))
     elif args.command == "train":
         network = train_from_replay(learning_rate=args.learning_rate, epochs=args.epochs)
@@ -1689,6 +1908,10 @@ def main() -> None:
         result = promotion_gate(games=args.games, visits=args.visits, threshold=args.threshold, force=args.force)
         research_summary()
         print(json.dumps({"ok": True, "promotion": result}, indent=2))
+    elif args.command == "reanalyze":
+        result = reanalyze_replay_records(limit=args.limit, visits=args.visits, path=args.path)
+        research_summary()
+        print(json.dumps({"ok": True, "reanalysis": result}, indent=2))
     elif args.command == "summary":
         print(json.dumps(research_summary(), indent=2))
 

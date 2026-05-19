@@ -112,6 +112,13 @@
 - [x] Validate unchanged autolearn memory content preserves the existing `Last updated` line.
 - [x] Add a lightweight push-update stream to reduce fixed viewer API polling without introducing a SignalR/.NET service.
 - [x] Validate the push stream server behavior and browser behavior, including fallback polling when the stream is unavailable.
+- [x] Fix Zero climb seed reuse so adjacent failed-gate attempts do not replay the same self-play games.
+- [x] Add focused Zero climb regression coverage for non-overlapping failed-gate self-play seed windows.
+- [x] Remove hand-authored motif penalties from Zero local policy/value code while preserving the seed-window fix.
+- [x] Add learner-only advisory motif guidance for edge-knight, home-retreat, early-rook, and direct-reversal patterns.
+- [x] Add focused tests proving the motif guidance lives in the learner path and not Zero research features.
+- [x] Add terminal-kind, WDL, full replay identity, root visit policy targets, self-play root noise, duplicate signature caps, reanalysis, internal-gate ordering, and climb metrics JSONL for the Zero first-principles climb plan.
+- [x] Validate focused Zero climb/research tests plus learner motif coverage after moving the heuristic boundary.
 - [x] Cap learner training prompt payloads and use configured faster per-turn effort for learner, critical-clock, and Zero turns.
 - [x] Defer live-watch concept synthesis until after FastChess exits while preserving pending evidence.
 - [x] Validate focused engine/autolearn behavior and parser/compile checks.

@@ -124,6 +124,65 @@ class ZeroClimbTests(unittest.TestCase):
         self.assertFalse(any(result["training"]["training_sources"].values()))
         self.assertFalse(result["evaluation"]["training_sources"]["opponent_labels_used"])
 
+    def test_failed_gate_seed_windows_do_not_overlap_between_attempts(self):
+        stages = [
+            self.climb.LadderStage(
+                name="impossible-random",
+                opponent="random",
+                games=1,
+                pass_score=1.1,
+                max_plies=2,
+            )
+        ]
+
+        def training_result(**kwargs):
+            first = kwargs["seed"]
+            games = kwargs["self_play_games"]
+            return {
+                "self_play_games": games,
+                "self_play_seed_window": {
+                    "first": first,
+                    "last": first + games - 1,
+                    "games_requested": games,
+                    "games_written": games,
+                },
+                "training_sources": {source: False for source in self.climb.zero.FORBIDDEN_TRAINING_SOURCES},
+                "promotion": {"promoted": False},
+                "diagnosis": {"training_sources": {source: False for source in self.climb.zero.FORBIDDEN_TRAINING_SOURCES}},
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            log = Path(tmp) / "log.jsonl"
+            with patch.object(self.climb, "evaluate_stage") as evaluate, patch.object(self.climb, "train_after_failed_gate") as train:
+                evaluate.return_value = {
+                    "stage": "impossible-random",
+                    "available": True,
+                    "passed": False,
+                    "score": 0.0,
+                    "training_sources": {"opponent_labels_used": False, "stockfish_labels_used": False},
+                }
+                train.side_effect = training_result
+                first = self.climb.run_climb_cycle(
+                    state_path=state,
+                    log_path=log,
+                    stages=stages,
+                    seed=10,
+                    self_play_games=6,
+                )
+                second = self.climb.run_climb_cycle(
+                    state_path=state,
+                    log_path=log,
+                    stages=stages,
+                    seed=10,
+                    self_play_games=6,
+                )
+
+        seeds = [call.kwargs["seed"] for call in train.call_args_list]
+        self.assertEqual(seeds, [10, 16])
+        self.assertLess(first["training"]["self_play_seed_window"]["last"], second["training"]["self_play_seed_window"]["first"])
+        self.assertFalse(any(first["training"]["training_sources"].values()))
+
     def test_training_diagnosis_flags_duplicate_stale_self_play(self):
         game = {
             "result": "1-0",
@@ -154,6 +213,44 @@ class ZeroClimbTests(unittest.TestCase):
         self.assertEqual(diagnosis["replay_added"], 0)
         self.assertIn("candidate failed promotion gate", diagnosis["reasons"])
         self.assertFalse(any(diagnosis["training_sources"].values()))
+
+    def test_round_metrics_report_external_internal_and_replay_fields(self):
+        row = {
+            "generated_at": "now",
+            "action": "trained_self_play_and_retried_later",
+            "stage": {"name": "stockfish-depth-2"},
+            "evaluation": {
+                "score": 0.25,
+                "games": 4,
+                "rows": [
+                    {"zero_score": 1.0},
+                    {"zero_score": 0.5},
+                    {"zero_score": 0.0},
+                    {"zero_score": 0.0},
+                ],
+            },
+            "training": {
+                "promotion": {"promoted": False, "match": {"score": 0.5, "games": 2}},
+                "diagnosis": {
+                    "true_draw_positions": 3,
+                    "capped_draw_positions": 2,
+                    "repetition_draw_positions": 1,
+                    "unique_opening_signatures": 2,
+                    "replay_added": 5,
+                    "replay_updated_duplicates": 1,
+                    "replay_skipped_duplicates": 7,
+                    "training_metrics": {"policy_loss": 0.12, "value_loss": 0.34},
+                },
+            },
+        }
+
+        metrics = self.climb.build_round_metrics(row)
+
+        self.assertEqual(metrics["external_wins"], 1)
+        self.assertEqual(metrics["external_draws"], 1)
+        self.assertEqual(metrics["external_losses"], 2)
+        self.assertEqual(metrics["internal_gate_score"], 0.5)
+        self.assertEqual(metrics["policy_loss"], 0.12)
 
 
 if __name__ == "__main__":

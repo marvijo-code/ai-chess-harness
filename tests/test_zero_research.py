@@ -145,6 +145,8 @@ class ZeroResearchTests(unittest.TestCase):
                 {"uci": greedy.uci(), "human_score": 0.0},
                 {"uci": exploratory.uci(), "human_score": 10.0},
             ],
+            root_visit_counts={greedy.uci(): 1, exploratory.uci(): 1},
+            root_visit_policy={greedy.uci(): 0.5, exploratory.uci(): 0.5},
             explanation={},
             comment="",
         )
@@ -236,6 +238,22 @@ class ZeroResearchTests(unittest.TestCase):
         self.assertEqual(first["added"], 1)
         self.assertEqual(second["added"], 0)
         self.assertEqual(len(lines), 1)
+
+    def test_replay_identity_includes_full_state_and_repetition_bucket(self):
+        board = chess.Board()
+        identity = self.zero.replay_identity(board)
+
+        self.assertEqual(identity["schema_version"], self.zero.REPLAY_SCHEMA_VERSION)
+        self.assertIn("rep:none", identity["fen_key"])
+        self.assertEqual(identity["castling"], "KQkq")
+        self.assertEqual(identity["halfmove_clock"], 0)
+
+    def test_mcts_exposes_root_visit_policy_for_training_targets(self):
+        board = chess.Board()
+        result = self.zero.run_mcts(board, self.zero.PolicyValueNetwork(network_id="test-net"), visits=4)
+
+        self.assertTrue(result.root_visit_counts)
+        self.assertAlmostEqual(sum(result.root_visit_policy.values()), 1.0)
 
     def test_replay_buffer_updates_stale_duplicate_outcome_signal(self):
         board = chess.Board()
@@ -335,6 +353,12 @@ class ZeroResearchTests(unittest.TestCase):
         self.assertLess(white, self.zero.SELF_PLAY_DRAW_PENALTY)
         self.assertLess(black, 0)
         self.assertGreater(black, white)
+
+    def test_terminal_kind_separates_true_and_capped_draws(self):
+        self.assertEqual(self.zero.classify_terminal_kind(chess.Board(), capped=True), "capped_draw")
+
+        board = chess.Board("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3")
+        self.assertEqual(self.zero.classify_terminal_kind(board), "checkmate")
 
     def test_draw_penalty_does_not_globally_depress_bias(self):
         board = chess.Board()
@@ -497,6 +521,37 @@ class ZeroResearchTests(unittest.TestCase):
         self.assertEqual(candidate.weights["value_material"], self.zero.WEIGHT_BOUNDS["value_material"][1])
         self.assertEqual(candidate.weights["conversion_stall"], self.zero.WEIGHT_BOUNDS["conversion_stall"][0])
         self.assertEqual(saved["weights"], candidate.weights)
+
+    def test_duplicate_opening_signatures_are_capped_in_training_sample(self):
+        records = [{"id": index, "opening_signature": "same", "outcome": 1.0} for index in range(6)]
+        selected = self.zero.cap_duplicate_opening_signatures(records, limit=2)
+
+        self.assertEqual([record["id"] for record in selected], [0, 1])
+
+    def test_reanalysis_refreshes_visit_policy_without_external_labels(self):
+        board = chess.Board()
+        record = {
+            "fen": board.fen(),
+            "chosen_move": "e2e4",
+            "outcome": 1.0,
+            "training_sources": {source: False for source in self.zero.FORBIDDEN_TRAINING_SOURCES},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_path = Path(tmp) / "replay.jsonl"
+            self.zero.append_replay_records([record], replay_path)
+            result = self.zero.reanalyze_replay_records(limit=1, visits=2, path=replay_path)
+            saved = json.loads(replay_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result["updated"], 1)
+        self.assertTrue(saved["visit_policy"])
+        self.assertFalse(any(saved["reanalysis_training_sources"].values()))
+
+    def test_zero_weights_do_not_include_hand_authored_motif_penalties(self):
+        forbidden = {"knight_on_rim", "rook_shuffle", "home_retreat", "king_move_early"}
+
+        self.assertTrue(forbidden.isdisjoint(self.zero.DEFAULT_WEIGHTS))
+        self.assertTrue(forbidden.isdisjoint(self.zero.WEIGHT_BOUNDS))
 
     def test_wisdom_delta_is_readable_and_external_label_safe(self):
         board = chess.Board()
