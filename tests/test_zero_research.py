@@ -164,6 +164,66 @@ class ZeroResearchTests(unittest.TestCase):
         self.assertEqual(metadata["selection"], "exploratory")
         self.assertEqual(metadata["greedy_move"], greedy.uci())
 
+    def test_human_novelty_profile_is_inspectable_and_external_label_safe(self):
+        board = chess.Board()
+        move = chess.Move.from_uci("e2e4")
+
+        profile = self.zero.novelty_profile(board, move)
+        archive = self.zero.build_novelty_archive(
+            [
+                {
+                    "fen": board.fen(),
+                    "chosen_move": move.uci(),
+                    "training_sources": {source: False for source in self.zero.FORBIDDEN_TRAINING_SOURCES},
+                }
+            ]
+        )
+        repeated = self.zero.novelty_profile(board, move, archive, {profile["key"]: 1})
+
+        self.assertEqual(profile["schema"], "zero-human-novelty-v1")
+        self.assertIn("archive_new", profile["tags"])
+        self.assertIn("safe_refutation", profile["tags"])
+        self.assertTrue(all(value is False for value in profile["training_sources"].values()))
+        self.assertEqual(archive[profile["key"]], 1)
+        self.assertLess(repeated["score"], profile["score"])
+
+    def test_self_play_exploration_prefers_safe_human_readable_novelty(self):
+        board = chess.Board()
+        greedy = chess.Move.from_uci("e2e4")
+        novel = chess.Move.from_uci("g1f3")
+        greedy_key = self.zero.human_novelty_key(board, greedy)
+        result = self.zero.ZeroSearchResult(
+            move=greedy,
+            network_id="test-net",
+            root_value=0.0,
+            visits=2,
+            nodes=3,
+            candidates=[
+                {"uci": greedy.uci(), "human_score": 0.0},
+                {"uci": novel.uci(), "human_score": 0.0},
+            ],
+            root_visit_counts={greedy.uci(): 1, novel.uci(): 1},
+            root_visit_policy={greedy.uci(): 0.5, novel.uci(): 0.5},
+            explanation={},
+            comment="",
+        )
+
+        move, metadata = self.zero.select_self_play_move(
+            board,
+            result,
+            random.Random(1),
+            ply=1,
+            exploration_plies=8,
+            temperature=0.01,
+            novelty_archive={greedy_key: 8},
+            game_novelty_counts={greedy_key: 1},
+        )
+
+        self.assertEqual(move, novel)
+        self.assertEqual(metadata["selection"], "exploratory")
+        self.assertEqual(metadata["novelty_policy"], "human_readable_novelty_pressure")
+        self.assertIn("archive_new", metadata["novelty"]["tags"])
+
     def test_deliberative_controller_rejects_major_material_refutations(self):
         board = chess.Board("rnbqkbnr/pppp1ppp/8/8/8/6P1/PPPPPP1P/RNBQKBNR b KQkq - 0 1")
         risky = chess.Move.from_uci("d8h4")
@@ -360,7 +420,7 @@ class ZeroResearchTests(unittest.TestCase):
         board = chess.Board("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3")
         self.assertEqual(self.zero.classify_terminal_kind(board), "checkmate")
 
-    def test_draw_penalty_does_not_globally_depress_bias(self):
+    def test_draw_penalty_does_not_globally_depress_bias_or_progress_priors(self):
         board = chess.Board()
         record = {
             "fen": board.fen(),
@@ -379,7 +439,8 @@ class ZeroResearchTests(unittest.TestCase):
                 self.zero.CANDIDATE_NETWORK_PATH = original_candidate
 
         self.assertEqual(candidate.weights["bias"], base.weights["bias"])
-        self.assertLess(candidate.weights["center_to"], base.weights["center_to"])
+        self.assertEqual(candidate.weights["center_to"], base.weights["center_to"])
+        self.assertEqual(candidate.weights["material_delta"], base.weights["material_delta"])
 
     def test_risky_forcing_non_wins_get_stronger_feature_penalty(self):
         board = chess.Board("4k3/3r4/8/8/8/8/8/3QK3 w - - 0 1")
@@ -391,7 +452,8 @@ class ZeroResearchTests(unittest.TestCase):
         }
 
         self.assertTrue(self.zero.record_has_risky_forcing_non_win(record, -0.05))
-        self.assertEqual(self.zero.training_feature_scale(record, "capture_value", -0.05), 1.6)
+        self.assertEqual(self.zero.training_feature_scale(record, "capture_value", -0.05), 0.35)
+        self.assertEqual(self.zero.training_feature_scale(record, "material_delta", -0.05), 0.0)
         self.assertEqual(self.zero.training_feature_scale(record, "moved_piece_risk", -0.05), 2.0)
         self.assertEqual(self.zero.training_feature_scale(record, "bias", -0.05), 0.0)
 
@@ -502,9 +564,13 @@ class ZeroResearchTests(unittest.TestCase):
             generation=3,
             weights={
                 **self.zero.DEFAULT_WEIGHTS,
+                "capture_value": -100.0,
+                "material_delta": -100.0,
+                "development": -100.0,
                 "gives_check": 100.0,
-                "value_material": 100.0,
+                "value_material": -100.0,
                 "conversion_stall": -100.0,
+                "king_move_early": -100.0,
             },
         )
 
@@ -517,9 +583,13 @@ class ZeroResearchTests(unittest.TestCase):
             finally:
                 self.zero.CANDIDATE_NETWORK_PATH = original_candidate
 
+        self.assertEqual(candidate.weights["capture_value"], self.zero.WEIGHT_BOUNDS["capture_value"][0])
+        self.assertEqual(candidate.weights["material_delta"], self.zero.WEIGHT_BOUNDS["material_delta"][0])
+        self.assertEqual(candidate.weights["development"], self.zero.WEIGHT_BOUNDS["development"][0])
         self.assertEqual(candidate.weights["gives_check"], self.zero.WEIGHT_BOUNDS["gives_check"][1])
-        self.assertEqual(candidate.weights["value_material"], self.zero.WEIGHT_BOUNDS["value_material"][1])
+        self.assertEqual(candidate.weights["value_material"], self.zero.WEIGHT_BOUNDS["value_material"][0])
         self.assertEqual(candidate.weights["conversion_stall"], self.zero.WEIGHT_BOUNDS["conversion_stall"][0])
+        self.assertNotIn("king_move_early", candidate.weights)
         self.assertEqual(saved["weights"], candidate.weights)
 
     def test_duplicate_opening_signatures_are_capped_in_training_sample(self):
@@ -564,6 +634,7 @@ class ZeroResearchTests(unittest.TestCase):
                     "chosen_move": "e2e4",
                     "selection": "exploratory",
                     "outcome": -0.05,
+                    "novelty": self.zero.novelty_profile(board, chess.Move.from_uci("e2e4")),
                     "training_sources": {source: False for source in self.zero.FORBIDDEN_TRAINING_SOURCES},
                 }
             ],
@@ -591,6 +662,7 @@ class ZeroResearchTests(unittest.TestCase):
         self.assertGreaterEqual(result["lesson_count"], 1)
         self.assertIn("Human-Readable Zero Wisdom Delta", markdown)
         self.assertIn("Treat repeated drawn self-play", markdown)
+        self.assertIn("Search for safe novelty", markdown)
         self.assertNotIn(board.fen(), markdown)
         self.assertTrue(all(value is False for value in saved["training_sources"].values()))
 

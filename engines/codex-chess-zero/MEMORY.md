@@ -4,9 +4,9 @@ Codex-chess-zero is a separate fast self-learning engine. It should use compact 
 
 <!-- learner-autolearn:start -->
 ## Autolearn Summary
-- Last updated: 2026-05-19 21:06:23
-- Current match score: 71.0 / 102 (71.0%).
-- Result reasons: illegal move=8, normal=92, unknown=2.
+- Last updated: 2026-05-20 02:47:07
+- Current match score: 26.0 / 36 (74.29%).
+- Result reasons: illegal move=1, mate=20, normal=1, threefold repetition=14.
 - Apply `knowledgebase/live-match-lessons.md` before choosing moves.
 - Apply model-discovered concepts from `knowledgebase/strategy-lessons.md` as generic value adjustments, not as memorized move answers.
 - Use engine-local `skills/self-play-concepts/SKILL.md` and `tools/self_play_concepts.json` only as generalized self-play concept aids, never as exact move memory.

@@ -131,6 +131,12 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 122. Zero training samples should cap repeated first-8-ply self-generated signatures and may reanalyze stale replay positions with the current champion to refresh policy targets while keeping terminal outcomes unchanged.
 123. Zero promotion remains an internal champion-vs-candidate gate before external Stockfish ladder retry; external ladder games are report/progression gates and must stay quarantined from replay/training data.
 124. Each Zero climb round should write a metrics JSONL row with external WDL, true/capped/repetition draw counts, signature diversity, replay add/update/skip counts, policy/value loss, internal gate score, and external ladder score.
+125. Zero failed-gate learning should add human-readable novelty pressure before chasing larger opaque weight changes: self-play records must report novelty keys, safe/unsafe novelty tags, archive/game repetition counts, and distinct novelty coverage so repeated `stockfish-depth-2` failures can be diagnosed as stale plans versus weak calculation.
+126. Zero novelty generation must remain self-play-only and human-inspectable. LLM or research output may propose concepts, candidate buckets, failure clusters, or curricula, but generated training signal must come from current legal moves, Zero self-play outcomes, and local deterministic refutation checks; Stockfish, Lc0, Maia, human games, opening books, and tablebases remain evaluation/reference only.
+127. The GM-track climb loop should prefer explicit novelty curricula such as safe new candidate buckets, progressive deepening refutation loops, conversion plans, and plan-diversity metrics before increasing traditional policy/value weight pressure.
+128. Zero self-play training must not invert first-principles chess priors: material-gain, capture, promotion, development, castling, and value-material weights may be softened by self-play evidence but must not be learned into values that reward material loss or punish all basic progress.
+129. A candidate that passes the internal champion gate during a failed external stage must also pass an evaluation-only regression guard against that same failed stage before it is committed as the current network; the guard must not add Stockfish/opponent labels to replay or training data.
+130. Zero climb diagnostics must report whether an internal promotion was blocked by the external regression guard so repeated `stockfish-depth-2` failures distinguish weak candidate generation from unsafe champion replacement.
 
 ## Validation Requirements
 
@@ -227,3 +233,4 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 50. Focused learner-path tests verify any hand-authored motif warnings are advisory, legal-move bounded, and excluded from Zero local PUCT/evaluator behavior.
 51. Focused Zero research tests verify replay identity schema fields, root visit policy targets, duplicate self-play signature caps, terminal-kind separation, reanalysis refreshes, and no external-label training sources.
 52. Focused Zero climb tests verify the round metrics row includes WDL, draw, replay, policy/value loss, and internal/external gate fields.
+53. Focused Zero research tests verify human-readable novelty profiles are recorded in self-play, influence bounded exploration, remain external-label safe, and appear in wisdom deltas without exact FEN-to-move rules.

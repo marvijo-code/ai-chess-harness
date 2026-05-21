@@ -303,9 +303,9 @@ def play_game(
     }
 
 
-def evaluate_stage(stage: LadderStage, zero_visits: int, seed: int) -> dict:
+def evaluate_stage(stage: LadderStage, zero_visits: int, seed: int, network: object | None = None) -> dict:
     rng = random.Random(seed)
-    network = zero.PolicyValueNetwork.load()
+    network = network or zero.PolicyValueNetwork.load()
     games = []
     stockfish_path = locate_stockfish() if stage.opponent == "stockfish" else None
     if stage.opponent == "stockfish" and stockfish_path is None:
@@ -407,9 +407,28 @@ def summarize_training_feedback(paths: list[Path], candidate: object, promotion:
         }
     )
     terminal_counts: dict[str, int] = {}
+    novelty_records = 0
+    novelty_keys: set[str] = set()
+    safe_novelty = 0
+    risky_novelty_non_wins = 0
     for row in readable:
         for key, value in dict(row.get("terminal_counts", {})).items():
             terminal_counts[key] = terminal_counts.get(key, 0) + int(value or 0)
+        try:
+            game = json.loads(Path(str(row.get("path", ""))).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            game = {}
+        for record in list(game.get("records", [])) if isinstance(game, dict) else []:
+            novelty = record.get("novelty", {})
+            if not isinstance(novelty, dict) or not novelty.get("key"):
+                continue
+            novelty_records += 1
+            novelty_keys.add(str(novelty.get("key")))
+            tags = set(str(tag) for tag in novelty.get("tags", []))
+            if "archive_new" in tags and "safe_refutation" in tags:
+                safe_novelty += 1
+            if float(record.get("outcome", 0.0) or 0.0) <= 0.0 and novelty.get("refutation_status") in {"watch", "unsafe"}:
+                risky_novelty_non_wins += 1
     signatures = [str(row.get("trajectory_signature", "")) for row in readable if row.get("trajectory_signature")]
     duplicate_trajectories = len(signatures) > 1 and len(set(signatures)) < len(signatures)
     promoted = bool(promotion.get("promoted"))
@@ -420,10 +439,15 @@ def summarize_training_feedback(paths: list[Path], candidate: object, promotion:
         reasons.append("self-play produced no decisive or adjudicated outcome signal")
     if duplicate_trajectories:
         reasons.append("self-play repeated at least one full trajectory")
+    guard = promotion.get("external_regression_guard") or {}
+    if guard and guard.get("passed") is False:
+        reasons.append("candidate regressed on external evaluation guard")
     if not promoted:
         reasons.append("candidate failed promotion gate")
     status = "promoted"
-    if not promoted and readable and replay_added == 0 and replay_updated == 0:
+    if not promoted and guard and guard.get("passed") is False:
+        status = "external_regression_blocked"
+    elif not promoted and readable and replay_added == 0 and replay_updated == 0:
         status = "stalled_no_new_replay_signal"
     elif not promoted:
         status = "candidate_not_stronger_yet"
@@ -440,12 +464,97 @@ def summarize_training_feedback(paths: list[Path], candidate: object, promotion:
         "capped_draw_positions": int(terminal_counts.get("capped_draw", 0) or 0),
         "repetition_draw_positions": int(terminal_counts.get("repetition_draw", 0) or 0),
         "unique_opening_signatures": unique_opening_signatures,
+        "novelty": {
+            "records": novelty_records,
+            "distinct_keys": len(novelty_keys),
+            "safe_archive_new": safe_novelty,
+            "risky_non_wins": risky_novelty_non_wins,
+        },
         "training_metrics": getattr(candidate, "training_metrics", {}),
         "duplicate_trajectories": duplicate_trajectories,
         "candidate": getattr(candidate, "network_id", ""),
         "promoted": promoted,
         "training_sources": {source: False for source in zero.FORBIDDEN_TRAINING_SOURCES},
     }
+
+
+def external_regression_guard(
+    stage: LadderStage | None,
+    baseline_evaluation: dict | None,
+    candidate: object,
+    zero_visits: int,
+    seed: int,
+) -> dict:
+    guard = {
+        "available": False,
+        "passed": None,
+        "reason": "current failed stage or baseline evaluation unavailable",
+        "training_sources": {"opponent_labels_used": False, "stockfish_labels_used": False},
+    }
+    if stage is None or not baseline_evaluation or "score" not in baseline_evaluation:
+        return guard
+    baseline_score = float(baseline_evaluation.get("score") or 0.0)
+    candidate_evaluation = evaluate_stage(stage, zero_visits=zero_visits, seed=seed, network=candidate)
+    guard.update(
+        {
+            "available": bool(candidate_evaluation.get("available", True)),
+            "stage": stage.name,
+            "baseline_network_id": baseline_evaluation.get("network_id"),
+            "candidate_network_id": getattr(candidate, "network_id", ""),
+            "baseline_score": baseline_score,
+            "candidate_score": candidate_evaluation.get("score"),
+            "evaluation": candidate_evaluation,
+            "reason": "candidate evaluation completed",
+            "training_sources": candidate_evaluation.get(
+                "training_sources",
+                {"opponent_labels_used": False, "stockfish_labels_used": False},
+            ),
+        }
+    )
+    if not guard["available"] or candidate_evaluation.get("score") is None:
+        guard["passed"] = None
+        guard["reason"] = candidate_evaluation.get("reason", "candidate evaluation unavailable")
+        return guard
+    candidate_score = float(candidate_evaluation.get("score") or 0.0)
+    guard["passed"] = candidate_score + 1e-9 >= baseline_score
+    guard["reason"] = "candidate did not regress" if guard["passed"] else "candidate regressed against current failed stage"
+    return guard
+
+
+def finalize_candidate_promotion(
+    candidate: object,
+    promotion: dict,
+    stage: LadderStage | None = None,
+    baseline_evaluation: dict | None = None,
+    zero_visits: int = 8,
+    seed: int = 1,
+) -> dict:
+    promotion = dict(promotion)
+    internal_promoted = bool(promotion.get("promoted"))
+    promotion["internal_promoted"] = internal_promoted
+    promotion.setdefault("committed", False)
+    if not internal_promoted:
+        return promotion
+    guard = external_regression_guard(stage, baseline_evaluation, candidate, zero_visits=zero_visits, seed=seed)
+    promotion["external_regression_guard"] = guard
+    if guard.get("passed") is False:
+        promotion["promoted"] = False
+        promotion["committed"] = False
+        promotion["reason"] = "candidate passed internal gate but failed external regression guard"
+        return promotion
+    candidate.save(zero.CURRENT_NETWORK_PATH)
+    promotion["committed"] = True
+    promotion["reason"] = (
+        "candidate met internal gate and external regression guard"
+        if guard.get("passed") is True
+        else "candidate met internal gate; external regression guard unavailable"
+    )
+    return promotion
+
+
+def append_promotion_log(promotion: dict) -> None:
+    with zero.PROMOTION_LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(promotion, sort_keys=True, separators=(",", ":")) + "\n")
 
 
 def train_after_failed_gate(
@@ -456,6 +565,10 @@ def train_after_failed_gate(
     promotion_games: int,
     promotion_visits: int,
     seed: int | None = None,
+    stage: LadderStage | None = None,
+    baseline_evaluation: dict | None = None,
+    external_zero_visits: int = 8,
+    external_seed: int | None = None,
 ) -> dict:
     paths = (
         zero.run_self_play(games=self_play_games, visits=self_play_visits, max_plies=max_plies, seed=seed)
@@ -464,8 +577,17 @@ def train_after_failed_gate(
     )
     reanalysis = zero.reanalyze_replay_records(limit=max(1, self_play_games * 4), visits=max(1, min(self_play_visits, 16)))
     candidate = zero.train_from_replay(epochs=epochs)
-    promotion = zero.promotion_gate(games=promotion_games, visits=promotion_visits, threshold=0.55)
+    promotion = zero.promotion_gate(games=promotion_games, visits=promotion_visits, threshold=0.55, commit=False, log=False)
     promotion["gate_order"] = "internal_champion_gate_before_external_ladder_retry"
+    promotion = finalize_candidate_promotion(
+        candidate,
+        promotion,
+        stage=stage,
+        baseline_evaluation=baseline_evaluation,
+        zero_visits=external_zero_visits,
+        seed=external_seed if external_seed is not None else (seed or 1),
+    )
+    append_promotion_log(promotion)
     diagnosis = summarize_training_feedback(paths, candidate, promotion)
     wisdom = zero.write_wisdom_delta(paths, diagnosis, candidate.to_dict(), promotion) if paths else {}
     zero.research_summary()
@@ -553,6 +675,10 @@ def run_climb_cycle(
             promotion_games=promotion_games,
             promotion_visits=promotion_visits,
             seed=failed_gate_seed_base(seed, attempt_index, self_play_games),
+            stage=stage,
+            baseline_evaluation=evaluation,
+            external_zero_visits=zero_visits,
+            external_seed=seed + attempt_index + 100_000,
         )
     state.setdefault("attempts", []).append(row)
     state["last_result"] = row
@@ -591,6 +717,11 @@ def build_round_metrics(row: dict) -> dict:
         "internal_gate_score": match.get("score"),
         "internal_gate_games": match.get("games"),
         "internal_gate_promoted": promotion.get("promoted"),
+        "internal_gate_passed": promotion.get("internal_promoted"),
+        "internal_gate_committed": promotion.get("committed"),
+        "external_regression_guard_passed": (promotion.get("external_regression_guard") or {}).get("passed"),
+        "external_regression_guard_baseline_score": (promotion.get("external_regression_guard") or {}).get("baseline_score"),
+        "external_regression_guard_candidate_score": (promotion.get("external_regression_guard") or {}).get("candidate_score"),
         "true_draw_positions": diagnosis.get("true_draw_positions", 0),
         "capped_draw_positions": diagnosis.get("capped_draw_positions", 0),
         "repetition_draw_positions": diagnosis.get("repetition_draw_positions", 0),

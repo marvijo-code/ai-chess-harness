@@ -101,18 +101,26 @@ DEFAULT_WEIGHTS = {
 }
 WEIGHT_BOUNDS = {
     "bias": (-2.0, 2.0),
-    "capture_value": (-4.0, 4.0),
-    "material_delta": (-4.0, 4.0),
+    "capture_value": (0.15, 4.0),
+    "material_delta": (0.35, 4.0),
     "gives_check": (-3.0, 4.0),
-    "promotion_value": (-4.0, 4.0),
-    "center_to": (-4.0, 4.0),
-    "development": (-4.0, 4.0),
-    "castle": (-4.0, 4.0),
+    "promotion_value": (0.5, 4.0),
+    "center_to": (0.0, 4.0),
+    "development": (0.0, 4.0),
+    "castle": (0.0, 4.0),
     "conversion_stall": (-6.0, 0.5),
     "moved_piece_risk": (-8.0, 0.5),
-    "value_material": (-12.0, 12.0),
+    "value_material": (0.25, 12.0),
     "value_mobility": (-6.0, 6.0),
     "value_king_safety": (-8.0, 8.0),
+}
+FOUNDATIONAL_PROGRESS_FEATURES = {
+    "capture_value",
+    "material_delta",
+    "promotion_value",
+    "center_to",
+    "development",
+    "castle",
 }
 FORBIDDEN_TRAINING_SOURCES = ("stockfish", "lc0", "leela", "maia", "human_games", "opening_book", "tablebase")
 FEN_RE = re.compile(
@@ -123,6 +131,8 @@ DELIBERATIVE_CONTROLLER = "deliberative-human-v1"
 DELIBERATIVE_REFUTATION_CANDIDATE_LIMIT = 12
 DELIBERATIVE_SAFE_CANDIDATE_LIMIT = 4
 DELIBERATIVE_RETURNED_CANDIDATE_LIMIT = 8
+NOVELTY_REPLAY_LOOKBACK = 8192
+SELF_PLAY_NOVELTY_WEIGHT = 0.55
 
 
 def ensure_dirs() -> None:
@@ -245,7 +255,7 @@ def stable_id(payload: object, length: int = 12) -> str:
 
 
 def clamp_learned_weights(weights: dict[str, float]) -> dict[str, float]:
-    clamped = dict(weights)
+    clamped = {name: float(weights.get(name, default)) for name, default in DEFAULT_WEIGHTS.items()}
     for name, (low, high) in WEIGHT_BOUNDS.items():
         if name in clamped:
             clamped[name] = max(low, min(high, float(clamped[name])))
@@ -596,6 +606,126 @@ def refutation_check(board: chess.Board, move: chess.Move) -> dict:
     }
 
 
+def square_zone(square: chess.Square, color: bool) -> str:
+    file_index = chess.square_file(square)
+    rank_index = chess.square_rank(square)
+    file_zone = "center" if file_index in {2, 3, 4, 5} else "edge"
+    if file_index <= 2:
+        wing = "queenside"
+    elif file_index >= 5:
+        wing = "kingside"
+    else:
+        wing = "center"
+    relative_rank = rank_index if color == chess.WHITE else 7 - rank_index
+    if relative_rank <= 1:
+        rank_zone = "home"
+    elif relative_rank <= 3:
+        rank_zone = "near"
+    elif relative_rank <= 5:
+        rank_zone = "far"
+    else:
+        rank_zone = "back"
+    return f"{wing}:{file_zone}:{rank_zone}"
+
+
+def material_delta_bucket(value: float) -> str:
+    if value >= 0.5:
+        return "wins_material"
+    if value > 0.05:
+        return "small_gain"
+    if value <= -0.5:
+        return "sacrifices_material"
+    if value < -0.05:
+        return "small_loss"
+    return "material_hold"
+
+
+def human_novelty_key(board: chess.Board, move: chess.Move) -> str:
+    mover = board.piece_at(move.from_square)
+    features = move_features(board, move)
+    role_tags = sorted(move_role_tags(board, move, features))
+    refutation_status = str(refutation_check(board, move).get("status", "ok"))
+    payload = {
+        "piece": mover.symbol().lower() if mover else "unknown",
+        "roles": role_tags,
+        "plan": plan_intent_for_move(board, move, features),
+        "from_zone": square_zone(move.from_square, board.turn),
+        "to_zone": square_zone(move.to_square, board.turn),
+        "material": material_delta_bucket(features["material_delta"]),
+        "risk": "risky" if refutation_status in {"watch", "unsafe"} or features["moved_piece_risk"] >= 0.5 else "safe",
+    }
+    return stable_id(payload, length=16)
+
+
+def build_novelty_archive(records: Iterable[dict]) -> dict[str, int]:
+    archive: dict[str, int] = {}
+    for record in records:
+        novelty = record.get("novelty", {})
+        key = str(novelty.get("key") or record.get("novelty_key") or "")
+        if not key:
+            try:
+                board = chess.Board(str(record["fen"]))
+                move = chess.Move.from_uci(str(record["chosen_move"]))
+            except (KeyError, ValueError):
+                continue
+            if move not in board.legal_moves:
+                continue
+            key = human_novelty_key(board, move)
+        archive[key] = archive.get(key, 0) + int(record.get("repeat_count", 1) or 1)
+    return archive
+
+
+def novelty_profile(
+    board: chess.Board,
+    move: chess.Move,
+    archive_counts: dict[str, int] | None = None,
+    game_counts: dict[str, int] | None = None,
+) -> dict:
+    archive_counts = archive_counts or {}
+    game_counts = game_counts or {}
+    features = move_features(board, move)
+    refutation = refutation_check(board, move)
+    key = human_novelty_key(board, move)
+    archive_count = int(archive_counts.get(key, 0) or 0)
+    game_count = int(game_counts.get(key, 0) or 0)
+    role_tags = sorted(move_role_tags(board, move, features))
+    tags = []
+    if archive_count == 0:
+        tags.append("archive_new")
+    elif archive_count <= 2:
+        tags.append("archive_rare")
+    else:
+        tags.append("archive_familiar")
+    tags.append("line_new" if game_count == 0 else "line_repeated")
+    refutation_status = str(refutation.get("status", "ok"))
+    tags.append("safe_refutation" if refutation_status in {"ok", "terminal"} else "needs_refutation")
+    if "creates_threat" in role_tags:
+        tags.append("creates_new_problem")
+    if "pawn_break" in role_tags:
+        tags.append("structure_change")
+    if features["conversion_stall"] <= 0.0:
+        tags.append("conversion_progress")
+    score = 0.0
+    score += 0.45 if archive_count == 0 else 0.22 if archive_count <= 2 else 0.0
+    score += 0.25 if game_count == 0 else -0.10
+    score += 0.12 if "creates_threat" in role_tags or "pawn_break" in role_tags else 0.0
+    score += 0.08 if features["conversion_stall"] <= 0.0 else -0.12
+    score -= 0.25 if refutation_status == "unsafe" else 0.10 if refutation_status == "watch" else 0.0
+    score -= 0.15 if features["moved_piece_risk"] >= 0.5 else 0.0
+    return {
+        "schema": "zero-human-novelty-v1",
+        "key": key,
+        "score": round(max(-0.5, min(1.0, score)), 6),
+        "tags": tags,
+        "archive_count": archive_count,
+        "game_count": game_count,
+        "role_tags": role_tags,
+        "plan_intent": plan_intent_for_move(board, move, features),
+        "refutation_status": refutation_status,
+        "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
+    }
+
+
 def deliberative_score(
     board: chess.Board,
     child: PuctNode,
@@ -817,14 +947,19 @@ def select_self_play_move(
     ply: int,
     exploration_plies: int = 10,
     temperature: float = 1.15,
+    novelty_archive: dict[str, int] | None = None,
+    game_novelty_counts: dict[str, int] | None = None,
 ) -> tuple[chess.Move, dict]:
     greedy_move = result.move
+    greedy_novelty = novelty_profile(board, greedy_move, novelty_archive, game_novelty_counts)
     if ply > exploration_plies or temperature <= 0 or len(result.candidates) <= 1:
         return greedy_move, {
             "selection": "greedy",
             "greedy_move": greedy_move.uci(),
             "temperature": temperature,
             "exploration_plies": exploration_plies,
+            "novelty": greedy_novelty,
+            "novelty_policy": "human_readable_novelty_pressure",
         }
     legal = {move.uci(): move for move in board.legal_moves}
     candidates = [row for row in result.candidates if row.get("uci") in legal]
@@ -834,10 +969,18 @@ def select_self_play_move(
             "greedy_move": greedy_move.uci(),
             "temperature": temperature,
             "exploration_plies": exploration_plies,
+            "novelty": greedy_novelty,
+            "novelty_policy": "human_readable_novelty_pressure",
         }
-    max_score = max(float(row.get("human_score", 0.0)) for row in candidates)
-    weights = [math.exp((float(row.get("human_score", 0.0)) - max_score) / max(0.01, temperature)) for row in candidates]
-    chosen = rng.choices(candidates, weights=weights, k=1)[0]
+    scored = []
+    for row in candidates:
+        move = legal[str(row["uci"])]
+        novelty = novelty_profile(board, move, novelty_archive, game_novelty_counts)
+        score = float(row.get("human_score", 0.0)) + (SELF_PLAY_NOVELTY_WEIGHT * float(novelty["score"]))
+        scored.append((row, novelty, score))
+    max_score = max(score for _, _, score in scored)
+    weights = [math.exp((score - max_score) / max(0.01, temperature)) for _, _, score in scored]
+    chosen, chosen_novelty, chosen_score = rng.choices(scored, weights=weights, k=1)[0]
     move = legal[str(chosen["uci"])]
     return move, {
         "selection": "exploratory" if move != greedy_move else "greedy",
@@ -845,6 +988,9 @@ def select_self_play_move(
         "temperature": temperature,
         "exploration_plies": exploration_plies,
         "candidate_count": len(candidates),
+        "novelty": chosen_novelty,
+        "novelty_adjusted_score": round(chosen_score, 6),
+        "novelty_policy": "human_readable_novelty_pressure",
     }
 
 
@@ -1050,8 +1196,12 @@ def training_feature_scale(record: dict, feature_name: str, outcome: float) -> f
     if record_has_risky_forcing_non_win(record, outcome):
         if feature_name == "moved_piece_risk":
             return 2.0
-        if feature_name in {"gives_check", "capture_value", "promotion_value", "material_delta"}:
+        if feature_name == "gives_check":
             return 1.6
+        if feature_name in {"capture_value", "promotion_value"}:
+            return 0.35
+    if outcome < 0.0 and feature_name in FOUNDATIONAL_PROGRESS_FEATURES:
+        return 0.0
     return 1.0
 
 
@@ -1070,6 +1220,8 @@ def self_play_game(
     board = chess.Board()
     records = []
     chosen_moves = []
+    novelty_archive = build_novelty_archive(load_replay_records(max_records=NOVELTY_REPLAY_LOOKBACK))
+    game_novelty_counts: dict[str, int] = {}
     for ply in range(1, max_plies + 1):
         if board.is_game_over(claim_draw=True):
             break
@@ -1095,7 +1247,11 @@ def self_play_game(
             ply=ply,
             exploration_plies=exploration_plies,
             temperature=temperature,
+            novelty_archive=novelty_archive,
+            game_novelty_counts=game_novelty_counts,
         )
+        novelty = dict(selection.get("novelty") or novelty_profile(board, move, novelty_archive, game_novelty_counts))
+        novelty_key = str(novelty.get("key", ""))
         chosen_moves.append(move.uci())
         records.append(
             {
@@ -1115,11 +1271,16 @@ def self_play_game(
                 "selection": selection["selection"],
                 "greedy_move": selection["greedy_move"],
                 "exploration_temperature": selection["temperature"],
+                "novelty": novelty,
+                "novelty_key": novelty_key,
+                "novelty_score": novelty.get("score", 0.0),
                 "network_id": network.network_id,
                 "search_visits_requested": search_visits,
                 "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
             }
         )
+        if novelty_key:
+            game_novelty_counts[novelty_key] = game_novelty_counts.get(novelty_key, 0) + 1
         board.push(move)
         if board.can_claim_draw() and rng.random() < 0.02:
             break
@@ -1153,6 +1314,12 @@ def self_play_game(
             "root_noise_alpha": root_noise_alpha,
             "root_noise_fraction": root_noise_fraction,
             "visit_jitter_fraction": visit_jitter_fraction,
+            "novelty": {
+                "selection": "human_readable_novelty_pressure",
+                "archive_lookback": NOVELTY_REPLAY_LOOKBACK,
+                "weight": SELF_PLAY_NOVELTY_WEIGHT,
+                "distinct_keys": len(game_novelty_counts),
+            },
             "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
         },
         "result": result_text,
@@ -1283,6 +1450,13 @@ def replay_training_signal(record: dict) -> float:
         signal += 0.10
     if record.get("selection") == "exploratory":
         signal += 0.02
+    novelty = record.get("novelty", {})
+    if isinstance(novelty, dict):
+        tags = set(str(tag) for tag in novelty.get("tags", []))
+        if "archive_new" in tags and "safe_refutation" in tags:
+            signal += 0.05
+        elif "archive_rare" in tags and "safe_refutation" in tags:
+            signal += 0.03
     return signal
 
 
@@ -1330,6 +1504,8 @@ def _empty_lesson_counts() -> dict[str, int]:
         "draw_non_wins": 0,
         "failed_conversion_non_wins": 0,
         "exploration_examples": 0,
+        "safe_novelty_examples": 0,
+        "risky_novelty_non_wins": 0,
     }
 
 
@@ -1338,6 +1514,8 @@ def analyze_self_play_records_for_wisdom(paths: Iterable[Path]) -> dict:
     games = []
     total_records = 0
     outcome_signal = 0
+    novelty_keys: set[str] = set()
+    novelty_records = 0
     for path in paths:
         try:
             game = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -1361,6 +1539,15 @@ def analyze_self_play_records_for_wisdom(paths: Iterable[Path]) -> dict:
                 outcome_signal += 1
             if record.get("selection") == "exploratory":
                 counts["exploration_examples"] += 1
+            novelty = record.get("novelty", {})
+            if isinstance(novelty, dict) and novelty.get("key"):
+                novelty_records += 1
+                novelty_keys.add(str(novelty.get("key")))
+                tags = set(str(tag) for tag in novelty.get("tags", []))
+                if "archive_new" in tags and "safe_refutation" in tags:
+                    counts["safe_novelty_examples"] += 1
+                if outcome <= 0.0 and novelty.get("refutation_status") in {"watch", "unsafe"}:
+                    counts["risky_novelty_non_wins"] += 1
             try:
                 board = chess.Board(str(record["fen"]))
                 move = chess.Move.from_uci(str(record["chosen_move"]))
@@ -1385,6 +1572,10 @@ def analyze_self_play_records_for_wisdom(paths: Iterable[Path]) -> dict:
         "games": games,
         "total_records": total_records,
         "outcome_signal_positions": outcome_signal,
+        "novelty": {
+            "records": novelty_records,
+            "distinct_keys": len(novelty_keys),
+        },
         "counts": counts,
     }
 
@@ -1438,6 +1629,24 @@ def build_wisdom_lessons(analysis: dict, promoted: bool) -> list[dict]:
                 "status": status,
             }
         )
+    if counts.get("safe_novelty_examples", 0):
+        lessons.append(
+            {
+                "title": "Search for safe novelty before repeating known plans",
+                "evidence_count": counts["safe_novelty_examples"],
+                "guidance": "Prefer candidate plans that are rare in Zero's own archive while still passing local refutation checks.",
+                "status": status,
+            }
+        )
+    if counts.get("risky_novelty_non_wins", 0):
+        lessons.append(
+            {
+                "title": "Novel ideas still need tactical proof",
+                "evidence_count": counts["risky_novelty_non_wins"],
+                "guidance": "Novel candidate classes should be kept only when current-position reply scans do not mark them watch or unsafe.",
+                "status": status,
+            }
+        )
     if not lessons:
         lessons.append(
             {
@@ -1473,6 +1682,8 @@ def render_wisdom_delta_markdown(delta: dict) -> str:
             "## Cycle Signal",
             f"- Self-play records scanned: {delta.get('analysis', {}).get('total_records', 0)}",
             f"- Outcome-signal positions: {delta.get('analysis', {}).get('outcome_signal_positions', 0)}",
+            f"- Novelty records: {delta.get('analysis', {}).get('novelty', {}).get('records', 0)}",
+            f"- Distinct novelty keys: {delta.get('analysis', {}).get('novelty', {}).get('distinct_keys', 0)}",
             f"- Replay added: {delta.get('diagnosis', {}).get('replay_added', 0)}",
             f"- Replay updated: {delta.get('diagnosis', {}).get('replay_updated_duplicates', 0)}",
             f"- Duplicate trajectories: {delta.get('diagnosis', {}).get('duplicate_trajectories', False)}",
@@ -1636,6 +1847,8 @@ def promotion_gate(
     visits: int = 8,
     threshold: float = 0.55,
     force: bool = False,
+    commit: bool = True,
+    log: bool = True,
 ) -> dict:
     ensure_dirs()
     incumbent = PolicyValueNetwork.load(current_path)
@@ -1647,18 +1860,22 @@ def promotion_gate(
     result = {
         "generated_at": now_stamp(),
         "promoted": promoted,
+        "committed": bool(promoted and commit),
         "threshold": threshold,
         "current": incumbent.network_id,
         "candidate": challenger.network_id,
         "match": match,
     }
-    if promoted:
+    if promoted and commit:
         shutil.copyfile(candidate_path, current_path)
         result["reason"] = "candidate met promotion gate" if not force else "forced promotion"
+    elif promoted:
+        result["reason"] = "candidate met promotion gate pending regression guard" if not force else "forced promotion pending commit"
     else:
         result["reason"] = "candidate did not meet promotion gate"
-    with PROMOTION_LOG_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")
+    if log:
+        with PROMOTION_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")
     return result
 
 

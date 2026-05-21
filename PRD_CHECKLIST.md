@@ -180,3 +180,10 @@
 - [x] Speed `/api/stats` by collecting completed PGN rows from headers only instead of parsing full game movetext.
 - [x] Decouple live board refresh from Engine Analysis so board positions update before Stockfish work finishes.
 - [x] Validate fast stats, live board updates for the isolated depth runner, and visible Engine Analysis.
+- [x] Add human-readable novelty search pressure to Zero self-play and diagnostics.
+- [x] Record safe/unsafe novelty coverage in Zero wisdom deltas without external labels.
+- [x] Validate focused Zero novelty tests.
+- [x] Trigger the repo-local Zero climb training loop after the novelty update.
+- [x] Prevent Zero replay training from inverting first-principles material/capture/progress priors.
+- [x] Block internally promoted Zero candidates that regress on the current failed external stage.
+- [x] Validate the protected-prior and external regression-guard behavior with focused Zero tests.
