@@ -37,14 +37,12 @@ State ledger: `out/twic-manual-wisdom/state.json`
 
 ## Current step
 
-**Batch mode** — `python tools/run_twic_wisdom_batch.py` processes all decisive games per TWIC (1647→1573), appends to [manual-wisdom-twic-ledger.md](manual-wisdom-twic-ledger.md), commits/pushes after each issue.
-
-Manual step-by-step (Steps 1–2) remains in [manual-wisdom-master-games.md](manual-wisdom-master-games.md) as reference samples.
+**Batch mode** — complete. 75 TWIC issues (1647→1573), **434,021** decisive games in [manual-wisdom-twic-ledger.md](manual-wisdom-twic-ledger.md). Re-run: `python tools/run_twic_wisdom_batch.py`.
 - [x] **2.1** Continue TWIC **1647** (step 2 — next 10 games)
 - [x] **2.2** Hypothesis stated from prior principles
 - [x] **2.3** Studied 10 games; noted new vs duplicate
 - [x] **2.4** Appended step 2 + updated coverage ledger
-- [ ] **2.5** Stop when stop rule triggers OR you say "plateau"
+- [x] **2.5** Batch complete — 75 issues, 434,021 decisive games (1573–1647)
 
 ### Phase 3 — Corpus cross-check (Layer B, optional)
 - [ ] **3.1** Run or refresh `manual_twic_wisdom.py` for coverage stats
