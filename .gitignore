@@ -8,3 +8,5 @@ out/
 *.log
 tools/.fastchess/
 engines/codex-chess-zero/research/
+_temp_*
+_tmp_*
