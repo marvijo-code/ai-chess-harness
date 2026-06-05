@@ -1,0 +1,3 @@
+There are pgns in [https://theweekinchess.com/twic](https://theweekinchess.com/twic)
+
+learn from each and every game, and produce a [chess-wisdom.md](http://chess-wisdom.md) file with the name of the latest pgn you used (from the last update you made). the [chess-wisdom.md](http://chess-wisdom.md) file should be learnt from first principles on winning chess games. avoid drawing lines, but don't learn losing lines, learn and extract a new science of winning lines. learn from pgns from the latest and go back, download, unzip, learn, until you see that you're not learning any new thing, and think you can beat stockfish 18
