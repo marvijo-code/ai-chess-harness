@@ -24,14 +24,14 @@ Helper: `python tools/twic_game_board.py <pgn> --phases`
 
 ## Batch mode (active)
 
-Updated: 2026-06-05T12:11:53Z
+Updated: 2026-06-05T12:13:10Z
 
 | Field | Value |
 |---|---|
 | Mode | Automated — all decisive games, board-verified heuristics |
-| TWIC issues done | 50 / 75 |
-| Decisive games analyzed | 269,324 |
-| Issue range (in progress) | 1647 → 1598 |
+| TWIC issues done | 51 / 75 |
+| Decisive games analyzed | 278,594 |
+| Issue range (in progress) | 1647 → 1597 |
 | Per-issue log | [manual-wisdom-twic-ledger.md](manual-wisdom-twic-ledger.md) |
 | Target cutoff | 2025-01-01 |
 
