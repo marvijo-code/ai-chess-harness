@@ -59,13 +59,30 @@ class ZeroResearchTests(unittest.TestCase):
         self.assertEqual(result.explanation["reasoning_controller"], "deliberative-human-v1")
         self.assertIn("candidate_generation", result.explanation)
         self.assertIn("calculation_verifier", result.explanation)
+        self.assertIn("selected_local_tactical_score_cp", result.explanation["calculation_verifier"])
         self.assertIn("calculation support", result.explanation["puct_role"])
         self.assertIn("candidate_moves", result.explanation)
         self.assertIn("tactical_blunder_check", result.explanation)
+        self.assertTrue(all("local_tactical_score_cp" in candidate for candidate in result.candidates))
         self.assertTrue(all("role_tags" in candidate for candidate in result.candidates))
         self.assertTrue(all("plan_intent" in candidate for candidate in result.candidates))
         self.assertTrue(all("refutation" in candidate for candidate in result.candidates))
         self.assertNotIn("chain", result.comment.lower())
+
+    def test_local_tactical_search_finds_immediate_mate(self):
+        board = chess.Board("7k/5Q2/7K/8/8/8/8/8 w - - 0 1")
+        mate = chess.Move.from_uci("f7f8")
+        quiet = chess.Move.from_uci("f7a7")
+
+        mate_score = self.zero.local_tactical_score(board, mate)
+        quiet_score = self.zero.local_tactical_score(board, quiet, plies=1)
+        result = self.zero.run_mcts(board, self.zero.PolicyValueNetwork(network_id="test-net"), visits=1)
+        after = board.copy()
+        after.push(result.move)
+
+        self.assertGreater(mate_score, 50000)
+        self.assertGreater(mate_score, quiet_score)
+        self.assertTrue(after.is_checkmate())
 
     def test_deliberative_selection_bounds_expensive_refutation_scan(self):
         board = chess.Board()
@@ -83,8 +100,180 @@ class ZeroResearchTests(unittest.TestCase):
         finally:
             self.zero.refutation_check = original
 
-        self.assertLessEqual(len(calls), self.zero.DELIBERATIVE_REFUTATION_CANDIDATE_LIMIT)
+        self.assertLessEqual(len(calls), self.zero.DELIBERATIVE_REFUTATION_CANDIDATE_LIMIT + 1)
         self.assertGreater(len(calls), 0)
+
+    def test_alpha_beta_final_arbiter_overrides_puct_choice(self):
+        board = chess.Board()
+        network = self.zero.PolicyValueNetwork(network_id="test-net")
+        chosen = chess.Move.from_uci("g1f3")
+        original = self.zero.alpha_beta_root_search
+
+        def fake_alpha_beta(board_arg, max_depth, time_limit_ms=None):
+            return {
+                "move": chosen,
+                "score_cp": 12,
+                "depth": 3,
+                "target_depth": max_depth,
+                "nodes": 42,
+                "time_limit_ms": time_limit_ms or 0,
+                "time_up": False,
+                "training_sources": {source: False for source in self.zero.FORBIDDEN_TRAINING_SOURCES},
+            }
+
+        self.zero.alpha_beta_root_search = fake_alpha_beta
+        try:
+            result = self.zero.run_mcts(board, network, visits=1, time_limit_ms=50)
+        finally:
+            self.zero.alpha_beta_root_search = original
+
+        self.assertEqual(result.move, chosen)
+        verifier = result.explanation["calculation_verifier"]
+        self.assertEqual(verifier["alpha_beta"]["depth"], 3)
+        self.assertFalse(any(verifier["alpha_beta"]["training_sources"].values()))
+        self.assertTrue(result.candidates[0]["alpha_beta_selected"])
+
+    def test_alpha_beta_root_search_finds_immediate_mate(self):
+        board = chess.Board("7k/5Q2/7K/8/8/8/8/8 w - - 0 1")
+
+        result = self.zero.alpha_beta_root_search(board, max_depth=2, time_limit_ms=500)
+        after = board.copy()
+        after.push(result["move"])
+
+        self.assertTrue(after.is_checkmate())
+        self.assertFalse(any(result["training_sources"].values()))
+
+    def test_static_eval_rejects_early_queen_before_development(self):
+        board = chess.Board()
+        disciplined = board.copy()
+        disciplined.push(chess.Move.from_uci("g1f3"))
+        queen_walk = board.copy()
+        queen_walk.push(chess.Move.from_uci("d1b3"))
+
+        disciplined_score = self.zero.static_zero_evaluation(disciplined, chess.WHITE)
+        queen_walk_score = self.zero.static_zero_evaluation(queen_walk, chess.WHITE)
+
+        self.assertGreater(disciplined_score, queen_walk_score)
+
+    def test_static_eval_rejects_uncastled_king_walk(self):
+        board = chess.Board()
+        for uci in ["e2e4", "e7e5", "e1e2"]:
+            board.push(chess.Move.from_uci(uci))
+        king_walk = self.zero.static_zero_evaluation(board, chess.WHITE)
+        normal = chess.Board()
+        for uci in ["e2e4", "e7e5", "g1f3"]:
+            normal.push(chess.Move.from_uci(uci))
+
+        self.assertGreater(self.zero.static_zero_evaluation(normal, chess.WHITE), king_walk)
+
+    def test_fast_leaf_eval_preserves_basic_chess_priorities(self):
+        material_up = chess.Board("8/8/8/8/8/8/4k3/Q6K w - - 0 1")
+        queen_walk = chess.Board()
+        queen_walk.push(chess.Move.from_uci("d1b3"))
+        developed = chess.Board()
+        developed.push(chess.Move.from_uci("g1f3"))
+        king_walk = chess.Board()
+        for uci in ["e2e4", "e7e5", "e1e2"]:
+            king_walk.push(chess.Move.from_uci(uci))
+        normal = chess.Board()
+        for uci in ["e2e4", "e7e5", "g1f3"]:
+            normal.push(chess.Move.from_uci(uci))
+
+        self.assertGreater(self.zero.fast_zero_leaf_evaluation(material_up, chess.WHITE), 600)
+        self.assertGreater(
+            self.zero.fast_zero_leaf_evaluation(developed, chess.WHITE),
+            self.zero.fast_zero_leaf_evaluation(queen_walk, chess.WHITE),
+        )
+        self.assertGreater(
+            self.zero.fast_zero_leaf_evaluation(normal, chess.WHITE),
+            self.zero.fast_zero_leaf_evaluation(king_walk, chess.WHITE),
+        )
+
+    def test_fast_leaf_eval_penalizes_enemy_advanced_passers(self):
+        black_against_sixth = chess.Board("7k/8/5P2/8/8/8/8/6K1 b - - 0 1")
+        black_against_seventh = chess.Board("7k/5P2/8/8/8/8/8/6K1 b - - 0 1")
+        white_sixth = chess.Board("7k/8/5P2/8/8/8/8/6K1 w - - 0 1")
+        white_seventh = chess.Board("7k/5P2/8/8/8/8/8/6K1 w - - 0 1")
+
+        self.assertLess(
+            self.zero.fast_zero_leaf_evaluation(black_against_seventh, chess.BLACK),
+            self.zero.fast_zero_leaf_evaluation(black_against_sixth, chess.BLACK) - 100,
+        )
+        self.assertGreater(
+            self.zero.fast_zero_leaf_evaluation(white_seventh, chess.WHITE),
+            self.zero.fast_zero_leaf_evaluation(white_sixth, chess.WHITE) + 100,
+        )
+
+    def test_alpha_beta_uses_fast_leaf_not_explanation_eval(self):
+        board = chess.Board()
+        original = self.zero.static_zero_evaluation
+
+        def forbidden_static_eval(board_arg, color_arg):
+            raise AssertionError("alpha-beta should use fast_zero_leaf_evaluation")
+
+        self.zero.static_zero_evaluation = forbidden_static_eval
+        try:
+            result = self.zero.alpha_beta_root_search(board, max_depth=2, time_limit_ms=250)
+        finally:
+            self.zero.static_zero_evaluation = original
+
+        self.assertIn(result["move"], board.legal_moves)
+        self.assertFalse(any(result["training_sources"].values()))
+
+    def test_adaptive_depth_alerts_only_for_tactical_danger(self):
+        quiet = chess.Board()
+        advanced_passer = chess.Board("7k/5P2/8/8/8/8/8/6K1 b - - 0 1")
+        king_pressure = chess.Board("6k1/8/8/8/8/6q1/6P1/6K1 w - - 0 1")
+        sparse_endgame = chess.Board("8/8/7k/8/7p/7P/1p1K4/1B4R1 b - - 2 69")
+
+        self.assertFalse(self.zero.tactical_alert_for_deeper_search(quiet))
+        self.assertTrue(self.zero.tactical_alert_for_deeper_search(advanced_passer))
+        self.assertTrue(self.zero.tactical_alert_for_deeper_search(king_pressure))
+        self.assertTrue(self.zero.tactical_alert_for_deeper_search(sparse_endgame))
+
+    def test_run_mcts_uses_adaptive_depth_for_dangerous_positions(self):
+        board = chess.Board("7k/5P2/8/8/8/8/8/6K1 b - - 0 1")
+
+        result = self.zero.run_mcts(board, self.zero.PolicyValueNetwork(network_id="test-net"), visits=1)
+        alpha_beta = result.explanation["calculation_verifier"]["alpha_beta"]
+
+        self.assertTrue(alpha_beta["adaptive_depth"])
+        self.assertGreaterEqual(alpha_beta["target_depth"], 3)
+
+    def test_run_mcts_uses_depth_four_for_sparse_endgames(self):
+        board = chess.Board("8/8/7k/8/7p/7P/1p1K4/1B4R1 b - - 2 69")
+
+        result = self.zero.run_mcts(board, self.zero.PolicyValueNetwork(network_id="test-net"), visits=1)
+        alpha_beta = result.explanation["calculation_verifier"]["alpha_beta"]
+
+        self.assertTrue(alpha_beta["adaptive_depth"])
+        self.assertEqual(alpha_beta["target_depth"], 4)
+
+    def test_material_safety_override_rejects_knight_for_pawn_sacrifice(self):
+        board = chess.Board()
+        for uci in ["e2e4", "g8f6", "e4e5", "f6e4", "d2d4"]:
+            board.push(chess.Move.from_uci(uci))
+        proposed = chess.Move.from_uci("e4f2")
+
+        result = self.zero.material_safety_override(board, proposed)
+
+        self.assertTrue(result["overridden"])
+        self.assertNotEqual(result["selected"], proposed.uci())
+        self.assertFalse(any(result["training_sources"].values()))
+
+    def test_material_safety_override_rejects_replay_knight_sacrifice_after_f3(self):
+        board = chess.Board()
+        for uci in ["e2e4", "g8f6", "e4e5", "f6e4", "d2d4", "b8c6", "f2f3"]:
+            board.push(chess.Move.from_uci(uci))
+        proposed = chess.Move.from_uci("e4f2")
+
+        result = self.zero.material_safety_override(board, proposed)
+
+        self.assertTrue(result["overridden"])
+        self.assertTrue(result["sacrifice_guard"])
+        self.assertNotEqual(result["selected"], proposed.uci())
+        self.assertGreater(result["selected_material_floor_cp"], result["proposed_material_floor_cp"])
+        self.assertFalse(any(result["training_sources"].values()))
 
     def test_deliberative_shortlist_reserves_safe_quiet_candidates(self):
         board = chess.Board()
@@ -569,6 +758,7 @@ class ZeroResearchTests(unittest.TestCase):
                 "development": -100.0,
                 "gives_check": 100.0,
                 "value_material": -100.0,
+                "value_mobility": -100.0,
                 "conversion_stall": -100.0,
                 "king_move_early": -100.0,
             },
@@ -588,9 +778,15 @@ class ZeroResearchTests(unittest.TestCase):
         self.assertEqual(candidate.weights["development"], self.zero.WEIGHT_BOUNDS["development"][0])
         self.assertEqual(candidate.weights["gives_check"], self.zero.WEIGHT_BOUNDS["gives_check"][1])
         self.assertEqual(candidate.weights["value_material"], self.zero.WEIGHT_BOUNDS["value_material"][0])
+        self.assertEqual(candidate.weights["value_mobility"], self.zero.WEIGHT_BOUNDS["value_mobility"][0])
         self.assertEqual(candidate.weights["conversion_stall"], self.zero.WEIGHT_BOUNDS["conversion_stall"][0])
         self.assertNotIn("king_move_early", candidate.weights)
         self.assertEqual(saved["weights"], candidate.weights)
+
+    def test_value_mobility_cannot_invert_into_opponent_freedom_reward(self):
+        weights = self.zero.clamp_learned_weights({**self.zero.DEFAULT_WEIGHTS, "value_mobility": -6.0})
+
+        self.assertEqual(weights["value_mobility"], 0.0)
 
     def test_duplicate_opening_signatures_are_capped_in_training_sample(self):
         records = [{"id": index, "opening_signature": "same", "outcome": 1.0} for index in range(6)]

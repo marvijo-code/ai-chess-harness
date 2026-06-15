@@ -2,6 +2,7 @@
 
 Prompt: [manual-wisdom-prompt.md](manual-wisdom-prompt.md)  
 Output: [manual-wisdom-master-games.md](manual-wisdom-master-games.md)  
+Sources: [manual-wisdom-sources.md](manual-wisdom-sources.md) · [manual-wisdom-sources.json](manual-wisdom-sources.json)  
 Bulk helper (optional): `tools/manual_twic_wisdom.py`  
 State ledger: `out/twic-manual-wisdom/state.json`
 
@@ -14,7 +15,11 @@ State ledger: `out/twic-manual-wisdom/state.json`
 | **A — Human/LLM study** | Board-verified move-by-move study (`python-chess` + FEN at phase boundaries); ask concession-pressure / conversion-delta questions; write portable principles | Memorize opening lines or FEN→move rules; infer structure from PGN text alone |
 | **B — Bulk parser** (`manual_twic_wisdom.py`) | Download TWIC zips; count corpus signals (castling, checks, phase); track coverage | Replace Layer A; does not "learn" each game |
 
-**Current repo state (2026-06-04):** Layer B ran ~75 issues (TWIC 1647→1573, ~537k games). Layer A completed Step 1 (10 games from TWIC 1647) in `manual-wisdom-master-games.md`.
+**Current repo state (2026-06-05):** Layer B extending — **1572 → 1401** (~172 older TWIC issues, back to ~2021). Prior batch: 1647→1573, **434,021** decisive games. Wisdom: `manual-wisdom-master-games.md`.
+
+**Active run:** `python tools/run_twic_wisdom_batch.py --extend --no-stop-at-cutoff --until-date 1990-01-01`  
+**Live status:** [manual-wisdom-batch-status.md](manual-wisdom-batch-status.md) · `python tools/twic_batch_status.py`  
+Log: `out/twic-manual-wisdom/extend-batch.log`
 
 ---
 
@@ -37,7 +42,7 @@ State ledger: `out/twic-manual-wisdom/state.json`
 
 ## Current step
 
-**Batch mode** — complete. 75 TWIC issues (1647→1573), **434,021** decisive games in [manual-wisdom-twic-ledger.md](manual-wisdom-twic-ledger.md). Re-run: `python tools/run_twic_wisdom_batch.py`.
+**Batch mode** — extending. Prior: 75 issues (1647→1573). Now scanning **1572→1401** and aggregating into [manual-wisdom-master-games.md](manual-wisdom-master-games.md).
 - [x] **2.1** Continue TWIC **1647** (step 2 — next 10 games)
 - [x] **2.2** Hypothesis stated from prior principles
 - [x] **2.3** Studied 10 games; noted new vs duplicate
@@ -88,25 +93,8 @@ Example: `python tools/twic_game_board.py out/twic-manual-wisdom/step3-top-game.
 
 ---
 
-## Entry template (append to wisdom doc)
+## Layer A notes (not stored in wisdom doc)
 
-```markdown
-## YYYY-MM-DD — TWIC NNNN — [Event or game label]
-
-**Game:** White vs Black, Result, Event, Date  
-**Hypothesis tested:** …  
-**Board (critical ply):** `FEN …` (optional — from twic_game_board.py)  
-**Concession pressure chain:** …  
-**Conversion-delta chain:** …  
-**Lesson (general):** …  
-**New vs prior:** new | reinforces | contradicts  
-**Next:** one focused follow-up
-```
-
----
-
-## Current step
-
-**Waiting on your review** — see choices at bottom of `manual-wisdom-master-games.md`.
+Board-verified study may use scratch notes locally. When a pattern repeats across event types, promote it into the **Principles** or **Candidate principles** tables in `manual-wisdom-master-games.md` — never append individual games to that file.
 
 ### Phase 2 — Repeat per issue (newest → older)

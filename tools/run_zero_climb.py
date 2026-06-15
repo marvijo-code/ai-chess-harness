@@ -44,6 +44,7 @@ PROFILE_DEFAULTS = {
         "promotion_visits": 16,
     },
 }
+INTERNAL_NEUTRAL_SCORE = 0.5
 
 
 def load_zero_research():
@@ -531,21 +532,36 @@ def finalize_candidate_promotion(
 ) -> dict:
     promotion = dict(promotion)
     internal_promoted = bool(promotion.get("promoted"))
+    internal_score = float((promotion.get("match") or {}).get("score") or 0.0)
+    internal_neutral = internal_score + 1e-9 >= INTERNAL_NEUTRAL_SCORE
     promotion["internal_promoted"] = internal_promoted
+    promotion["internal_neutral"] = internal_neutral
     promotion.setdefault("committed", False)
-    if not internal_promoted:
+    if not internal_promoted and not internal_neutral:
         return promotion
     guard = external_regression_guard(stage, baseline_evaluation, candidate, zero_visits=zero_visits, seed=seed)
     promotion["external_regression_guard"] = guard
     if guard.get("passed") is False:
         promotion["promoted"] = False
         promotion["committed"] = False
-        promotion["reason"] = "candidate passed internal gate but failed external regression guard"
+        promotion["reason"] = (
+            "candidate passed internal gate but failed external regression guard"
+            if internal_promoted
+            else "candidate drew internal gate but failed external regression guard"
+        )
+        return promotion
+    if not internal_promoted and guard.get("passed") is not True:
+        promotion["promoted"] = False
+        promotion["committed"] = False
+        promotion["reason"] = "candidate drew internal gate but external regression guard was unavailable"
         return promotion
     candidate.save(zero.CURRENT_NETWORK_PATH)
+    promotion["promoted"] = True
     promotion["committed"] = True
     promotion["reason"] = (
         "candidate met internal gate and external regression guard"
+        if internal_promoted and guard.get("passed") is True
+        else "candidate drew internal gate and passed external regression guard"
         if guard.get("passed") is True
         else "candidate met internal gate; external regression guard unavailable"
     )
@@ -718,6 +734,7 @@ def build_round_metrics(row: dict) -> dict:
         "internal_gate_games": match.get("games"),
         "internal_gate_promoted": promotion.get("promoted"),
         "internal_gate_passed": promotion.get("internal_promoted"),
+        "internal_gate_neutral": promotion.get("internal_neutral"),
         "internal_gate_committed": promotion.get("committed"),
         "external_regression_guard_passed": (promotion.get("external_regression_guard") or {}).get("passed"),
         "external_regression_guard_baseline_score": (promotion.get("external_regression_guard") or {}).get("baseline_score"),

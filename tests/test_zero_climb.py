@@ -169,6 +169,52 @@ class ZeroClimbTests(unittest.TestCase):
         self.assertFalse(result["external_regression_guard"]["passed"])
         self.assertEqual(saved["network_id"], "current")
 
+    def test_neutral_internal_gate_can_commit_when_external_guard_is_safe(self):
+        stage = self.climb.LadderStage(
+            name="stockfish-depth-2",
+            opponent="stockfish",
+            games=6,
+            pass_score=0.5,
+            max_plies=120,
+            stockfish_depth=2,
+        )
+        incumbent = self.climb.zero.PolicyValueNetwork(network_id="current", generation=12)
+        candidate = self.climb.zero.PolicyValueNetwork(network_id="candidate", generation=13)
+        promotion = {"promoted": False, "committed": False, "match": {"score": 0.5, "games": 8}}
+        baseline = {"available": True, "network_id": "current", "score": 0.416667}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            current_path = Path(tmp) / "current-network.json"
+            original_current = self.climb.zero.CURRENT_NETWORK_PATH
+            self.climb.zero.CURRENT_NETWORK_PATH = current_path
+            incumbent.save(current_path)
+            try:
+                with patch.object(self.climb, "evaluate_stage") as evaluate:
+                    evaluate.return_value = {
+                        "available": True,
+                        "network_id": "candidate",
+                        "score": 0.416667,
+                        "training_sources": {"opponent_labels_used": False, "stockfish_labels_used": False},
+                    }
+                    result = self.climb.finalize_candidate_promotion(
+                        candidate,
+                        promotion,
+                        stage=stage,
+                        baseline_evaluation=baseline,
+                        zero_visits=16,
+                        seed=99,
+                    )
+                saved = json.loads(current_path.read_text(encoding="utf-8"))
+            finally:
+                self.climb.zero.CURRENT_NETWORK_PATH = original_current
+
+        self.assertTrue(result["promoted"])
+        self.assertTrue(result["committed"])
+        self.assertFalse(result["internal_promoted"])
+        self.assertTrue(result["internal_neutral"])
+        self.assertTrue(result["external_regression_guard"]["passed"])
+        self.assertEqual(saved["network_id"], "candidate")
+
     def test_failed_gate_seed_windows_do_not_overlap_between_attempts(self):
         stages = [
             self.climb.LadderStage(
@@ -295,6 +341,7 @@ class ZeroClimbTests(unittest.TestCase):
         self.assertEqual(metrics["external_draws"], 1)
         self.assertEqual(metrics["external_losses"], 2)
         self.assertEqual(metrics["internal_gate_score"], 0.5)
+        self.assertFalse(metrics["internal_gate_neutral"])
         self.assertEqual(metrics["policy_loss"], 0.12)
 
 

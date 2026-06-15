@@ -1,0 +1,14 @@
+{
+  "schema": "composer-training-rules-v1",
+  "min_search_depth": 8,
+  "movetime_fraction": 0.98,
+  "bans": [
+    "passive_opening_pawn",
+    "early_queen_a_h_file",
+    "slow_minor_development",
+    "unsound_knight_capture",
+    "king_march_opening",
+    "flank_pawn_opening"
+  ],
+  "updated_at": "2026-06-08T17:08:07Z"
+}

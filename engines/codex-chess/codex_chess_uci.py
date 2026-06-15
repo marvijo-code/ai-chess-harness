@@ -398,6 +398,17 @@ def collect_text_context(root: Path, max_files: int = 8, max_chars_per_file: int
     return files
 
 
+def pin_text_context_file(entries: list[dict], root: Path, relative_path: str, max_chars: int) -> list[dict]:
+    if max_chars <= 0:
+        return entries
+    path = root / relative_path
+    if not path.exists():
+        return entries
+    normalized = Path(relative_path).as_posix().lower()
+    remaining = [entry for entry in entries if Path(str(entry.get("path", ""))).as_posix().lower() != normalized]
+    return [{"path": relative_path, "text": read_limited_text(path, max_chars)}, *remaining]
+
+
 def extract_text_fragment(value) -> str:
     if isinstance(value, str):
         return value
@@ -649,8 +660,10 @@ class CodexAppServer:
         fen_knowledge = read_limited_text(FEN_KNOWLEDGE_PATH, fen_chars)
         strategy_lessons = read_limited_text(STRATEGY_LESSONS_PATH, strategy_chars)
         policy = (
-            "Apply the learner memory, fen_knowledge, strategy_lessons, and knowledgebase directly. "
-            "Apply engine-local skills and tool summaries only as generalized concept/current-position feature aids. "
+            "Apply the learner memory, fen_knowledge, and strategy_lessons directly. "
+            "For learner move selection, apply the existing authored master wisdom in knowledgebase/master-wisdom.md first in every position. "
+            "If engine-local skills are enabled, apply skills/master-game-wisdom/SKILL.md as the mirrored priority summary of that same authored wisdom, not as an optional extra. "
+            "Apply the rest of the knowledgebase, engine-local skills, and tool summaries only as generalized concept/current-position feature aids. "
             "Use model-discovered strategy_lessons as generic value adjustments before finalizing a move, not as memorized move answers. "
             "Never invent UCI: copy uci exactly from legal_moves, and never return 0000 while legal moves exist."
         )
@@ -663,7 +676,13 @@ class CodexAppServer:
                 "Never invent UCI or return 0000 while legal moves exist."
             )
         if lean:
-            policy += " Lean clock mode is active: use only the strongest remembered idea and answer quickly."
+            policy += " Lean clock mode is active: keep the authored master-wisdom principle that best fits the current position, then answer quickly."
+        knowledgebase_context = collect_text_context(KNOWLEDGEBASE_DIR, max_files=kb_files, max_chars_per_file=kb_chars)
+        skills_context = collect_text_context(SKILLS_DIR, max_files=skill_files, max_chars_per_file=skill_chars)
+        if engine_profile == "learner":
+            knowledgebase_context = pin_text_context_file(knowledgebase_context, KNOWLEDGEBASE_DIR, "master-wisdom.md", max(kb_chars, 350))
+            if self.use_skills:
+                skills_context = pin_text_context_file(skills_context, SKILLS_DIR, "master-game-wisdom/SKILL.md", max(skill_chars, 350))
         return {
             "profile": profile,
             "memory_path": str(MEMORY_PATH),
@@ -673,9 +692,9 @@ class CodexAppServer:
             "fen_knowledge": fen_knowledge,
             "strategy_lessons_path": str(STRATEGY_LESSONS_PATH),
             "strategy_lessons": strategy_lessons,
-            "knowledgebase": collect_text_context(KNOWLEDGEBASE_DIR, max_files=kb_files, max_chars_per_file=kb_chars),
+            "knowledgebase": knowledgebase_context,
             "skills_path": str(SKILLS_DIR),
-            "skills": collect_text_context(SKILLS_DIR, max_files=skill_files, max_chars_per_file=skill_chars),
+            "skills": skills_context,
             "tools_path": str(TOOLS_DIR),
             "tools": collect_text_context(TOOLS_DIR, max_files=tool_files, max_chars_per_file=tool_chars),
             "policy": policy,

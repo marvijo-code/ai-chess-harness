@@ -24,7 +24,8 @@ Append a concise memory entry with the current run time, loop status/PID, curren
 '''
 status = "ACTIVE"
 rrule = "FREQ=MINUTELY;INTERVAL=15"
-model = "gpt-5.5"
+target_thread_id = "019ea954-4107-7632-9ec6-b21f6f12f6eb"
+model = "gpt-5.3-codex"
 reasoning_effort = "low"
 execution_environment = "local"
 cwds = ["C:/dev/chess-harness-codex"]

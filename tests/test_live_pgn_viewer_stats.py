@@ -8,7 +8,7 @@ import chess
 import chess.pgn
 
 import tools.live_pgn_viewer as viewer
-from tools.live_pgn_viewer import collect_stats, collect_zero_research_data, resolve_live_default_game_path, viewer_event_signatures
+from tools.live_pgn_viewer import collect_master_wisdom_data, collect_stats, collect_zero_research_data, resolve_live_default_game_path, viewer_event_signatures
 
 
 def write_finished_game(path: Path, event: str = "Synthetic game") -> None:
@@ -106,6 +106,16 @@ class LivePgnViewerStatsTests(unittest.TestCase):
         self.assertTrue(any(row["name"] == "Codex-chess-zero deliberative" for row in data["benchmark_ladder"]))
         self.assertTrue(data["anti_memorization"]["ok"])
 
+    def test_master_wisdom_data_has_separate_leaderboard_contract(self):
+        data = collect_master_wisdom_data()
+
+        self.assertIn("summary", data)
+        self.assertIn("source", data)
+        self.assertIn("wisdom", data)
+        self.assertIn("leaderboard", data)
+        self.assertIn("current_attempt", data)
+        self.assertIn("current_depth", data["summary"])
+
     def test_zero_climb_data_reads_persisted_state_without_touching_live_game(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -156,6 +166,7 @@ class LivePgnViewerStatsTests(unittest.TestCase):
 
         self.assertIn("research", signatures)
         self.assertIn("learner", signatures)
+        self.assertIn("master-wisdom", signatures)
 
     def test_isolated_zero_stockfish_depth_match_writes_outside_live_matches(self):
         class FakeNetwork:

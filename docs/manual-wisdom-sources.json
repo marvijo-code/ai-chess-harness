@@ -1,0 +1,906 @@
+{
+  "updated_at": "2026-06-05T15:52:50Z",
+  "provider": "The Week in Chess",
+  "provider_url": "https://theweekinchess.com/twic",
+  "latest_zip": "twic1647g.zip",
+  "issue_count": 99,
+  "issue_range": [
+    1647,
+    1549
+  ],
+  "decisive_games": 623110,
+  "game_date_span": "2023-04-17 \u2192 2026-06-01",
+  "issues": [
+    {
+      "issue": 1647,
+      "zip": "twic1647g.zip",
+      "url": "https://theweekinchess.com/zips/twic1647g.zip",
+      "earliest_date": "2026-05-15",
+      "latest_date": "2026-06-01",
+      "game_count": 6217,
+      "decisive_count": 5182
+    },
+    {
+      "issue": 1646,
+      "zip": "twic1646g.zip",
+      "url": "https://theweekinchess.com/zips/twic1646g.zip",
+      "earliest_date": "2026-05-05",
+      "latest_date": "2026-05-25",
+      "game_count": 5302,
+      "decisive_count": 4459
+    },
+    {
+      "issue": 1645,
+      "zip": "twic1645g.zip",
+      "url": "https://theweekinchess.com/zips/twic1645g.zip",
+      "earliest_date": "2026-04-11",
+      "latest_date": "2026-05-18",
+      "game_count": 6809,
+      "decisive_count": 5593
+    },
+    {
+      "issue": 1644,
+      "zip": "twic1644g.zip",
+      "url": "https://theweekinchess.com/zips/twic1644g.zip",
+      "earliest_date": "2025-05-10",
+      "latest_date": "2026-05-11",
+      "game_count": 5841,
+      "decisive_count": 4622
+    },
+    {
+      "issue": 1643,
+      "zip": "twic1643g.zip",
+      "url": "https://theweekinchess.com/zips/twic1643g.zip",
+      "earliest_date": "2025-11-01",
+      "latest_date": "2026-05-04",
+      "game_count": 5544,
+      "decisive_count": 4446
+    },
+    {
+      "issue": 1642,
+      "zip": "twic1642g.zip",
+      "url": "https://theweekinchess.com/zips/twic1642g.zip",
+      "earliest_date": "2025-10-12",
+      "latest_date": "2026-04-27",
+      "game_count": 7119,
+      "decisive_count": 5487
+    },
+    {
+      "issue": 1641,
+      "zip": "twic1641g.zip",
+      "url": "https://theweekinchess.com/zips/twic1641g.zip",
+      "earliest_date": "2026-02-08",
+      "latest_date": "2026-04-20",
+      "game_count": 5667,
+      "decisive_count": 4493
+    },
+    {
+      "issue": 1640,
+      "zip": "twic1640g.zip",
+      "url": "https://theweekinchess.com/zips/twic1640g.zip",
+      "earliest_date": "2026-03-21",
+      "latest_date": "2026-04-13",
+      "game_count": 5757,
+      "decisive_count": 4707
+    },
+    {
+      "issue": 1639,
+      "zip": "twic1639g.zip",
+      "url": "https://theweekinchess.com/zips/twic1639g.zip",
+      "earliest_date": "2025-12-13",
+      "latest_date": "2026-04-06",
+      "game_count": 8571,
+      "decisive_count": 6786
+    },
+    {
+      "issue": 1638,
+      "zip": "twic1638g.zip",
+      "url": "https://theweekinchess.com/zips/twic1638g.zip",
+      "earliest_date": "2026-03-16",
+      "latest_date": "2026-03-30",
+      "game_count": 6358,
+      "decisive_count": 5358
+    },
+    {
+      "issue": 1637,
+      "zip": "twic1637g.zip",
+      "url": "https://theweekinchess.com/zips/twic1637g.zip",
+      "earliest_date": "2026-01-31",
+      "latest_date": "2026-03-23",
+      "game_count": 6195,
+      "decisive_count": 5107
+    },
+    {
+      "issue": 1636,
+      "zip": "twic1636g.zip",
+      "url": "https://theweekinchess.com/zips/twic1636g.zip",
+      "earliest_date": "2026-02-14",
+      "latest_date": "2026-03-15",
+      "game_count": 6136,
+      "decisive_count": 5349
+    },
+    {
+      "issue": 1635,
+      "zip": "twic1635g.zip",
+      "url": "https://theweekinchess.com/zips/twic1635g.zip",
+      "earliest_date": "2025-11-13",
+      "latest_date": "2026-03-09",
+      "game_count": 6236,
+      "decisive_count": 5081
+    },
+    {
+      "issue": 1634,
+      "zip": "twic1634g.zip",
+      "url": "https://theweekinchess.com/zips/twic1634g.zip",
+      "earliest_date": "2026-02-06",
+      "latest_date": "2026-03-02",
+      "game_count": 6475,
+      "decisive_count": 5107
+    },
+    {
+      "issue": 1633,
+      "zip": "twic1633g.zip",
+      "url": "https://theweekinchess.com/zips/twic1633g.zip",
+      "earliest_date": "2025-11-23",
+      "latest_date": "2026-02-23",
+      "game_count": 6302,
+      "decisive_count": 5129
+    },
+    {
+      "issue": 1632,
+      "zip": "twic1632g.zip",
+      "url": "https://theweekinchess.com/zips/twic1632g.zip",
+      "earliest_date": "2026-01-29",
+      "latest_date": "2026-02-16",
+      "game_count": 5350,
+      "decisive_count": 4618
+    },
+    {
+      "issue": 1631,
+      "zip": "twic1631g.zip",
+      "url": "https://theweekinchess.com/zips/twic1631g.zip",
+      "earliest_date": "2026-01-17",
+      "latest_date": "2026-02-09",
+      "game_count": 6370,
+      "decisive_count": 5303
+    },
+    {
+      "issue": 1630,
+      "zip": "twic1630g.zip",
+      "url": "https://theweekinchess.com/zips/twic1630g.zip",
+      "earliest_date": "2025-11-16",
+      "latest_date": "2026-02-02",
+      "game_count": 7091,
+      "decisive_count": 5706
+    },
+    {
+      "issue": 1629,
+      "zip": "twic1629g.zip",
+      "url": "https://theweekinchess.com/zips/twic1629g.zip",
+      "earliest_date": "2025-12-26",
+      "latest_date": "2026-01-26",
+      "game_count": 6060,
+      "decisive_count": 5041
+    },
+    {
+      "issue": 1628,
+      "zip": "twic1628g.zip",
+      "url": "https://theweekinchess.com/zips/twic1628g.zip",
+      "earliest_date": "2025-12-27",
+      "latest_date": "2026-01-19",
+      "game_count": 6014,
+      "decisive_count": 5028
+    },
+    {
+      "issue": 1627,
+      "zip": "twic1627g.zip",
+      "url": "https://theweekinchess.com/zips/twic1627g.zip",
+      "earliest_date": "2025-12-18",
+      "latest_date": "2026-01-12",
+      "game_count": 6996,
+      "decisive_count": 5581
+    },
+    {
+      "issue": 1626,
+      "zip": "twic1626g.zip",
+      "url": "https://theweekinchess.com/zips/twic1626g.zip",
+      "earliest_date": "2025-10-16",
+      "latest_date": "2026-01-05",
+      "game_count": 8412,
+      "decisive_count": 6586
+    },
+    {
+      "issue": 1625,
+      "zip": "twic1625g.zip",
+      "url": "https://theweekinchess.com/zips/twic1625g.zip",
+      "earliest_date": "2025-12-21",
+      "latest_date": "2025-12-29",
+      "game_count": 8400,
+      "decisive_count": 6518
+    },
+    {
+      "issue": 1624,
+      "zip": "twic1624g.zip",
+      "url": "https://theweekinchess.com/zips/twic1624g.zip",
+      "earliest_date": "2025-09-14",
+      "latest_date": "2025-12-22",
+      "game_count": 7360,
+      "decisive_count": 5941
+    },
+    {
+      "issue": 1623,
+      "zip": "twic1623g.zip",
+      "url": "https://theweekinchess.com/zips/twic1623g.zip",
+      "earliest_date": "2025-10-13",
+      "latest_date": "2025-12-15",
+      "game_count": 6628,
+      "decisive_count": 5275
+    },
+    {
+      "issue": 1622,
+      "zip": "twic1622g.zip",
+      "url": "https://theweekinchess.com/zips/twic1622g.zip",
+      "earliest_date": "2025-11-12",
+      "latest_date": "2025-12-08",
+      "game_count": 6344,
+      "decisive_count": 5059
+    },
+    {
+      "issue": 1621,
+      "zip": "twic1621g.zip",
+      "url": "https://theweekinchess.com/zips/twic1621g.zip",
+      "earliest_date": "2025-10-19",
+      "latest_date": "2025-12-01",
+      "game_count": 8315,
+      "decisive_count": 6691
+    },
+    {
+      "issue": 1620,
+      "zip": "twic1620g.zip",
+      "url": "https://theweekinchess.com/zips/twic1620g.zip",
+      "earliest_date": "2025-11-13",
+      "latest_date": "2025-11-24",
+      "game_count": 6701,
+      "decisive_count": 5523
+    },
+    {
+      "issue": 1619,
+      "zip": "twic1619g.zip",
+      "url": "https://theweekinchess.com/zips/twic1619g.zip",
+      "earliest_date": "2025-11-08",
+      "latest_date": "2025-11-17",
+      "game_count": 5937,
+      "decisive_count": 4804
+    },
+    {
+      "issue": 1618,
+      "zip": "twic1618g.zip",
+      "url": "https://theweekinchess.com/zips/twic1618g.zip",
+      "earliest_date": "2023-04-17",
+      "latest_date": "2025-11-10",
+      "game_count": 5347,
+      "decisive_count": 3929
+    },
+    {
+      "issue": 1617,
+      "zip": "twic1617g.zip",
+      "url": "https://theweekinchess.com/zips/twic1617g.zip",
+      "earliest_date": "2025-10-27",
+      "latest_date": "2025-11-03",
+      "game_count": 4565,
+      "decisive_count": 3512
+    },
+    {
+      "issue": 1616,
+      "zip": "twic1616g.zip",
+      "url": "https://theweekinchess.com/zips/twic1616g.zip",
+      "earliest_date": "2025-10-13",
+      "latest_date": "2025-10-27",
+      "game_count": 6251,
+      "decisive_count": 4723
+    },
+    {
+      "issue": 1615,
+      "zip": "twic1615g.zip",
+      "url": "https://theweekinchess.com/zips/twic1615g.zip",
+      "earliest_date": "2025-09-20",
+      "latest_date": "2025-10-20",
+      "game_count": 6590,
+      "decisive_count": 5135
+    },
+    {
+      "issue": 1614,
+      "zip": "twic1614g.zip",
+      "url": "https://theweekinchess.com/zips/twic1614g.zip",
+      "earliest_date": "2025-09-03",
+      "latest_date": "2025-10-13",
+      "game_count": 5994,
+      "decisive_count": 4319
+    },
+    {
+      "issue": 1613,
+      "zip": "twic1613g.zip",
+      "url": "https://theweekinchess.com/zips/twic1613g.zip",
+      "earliest_date": "2025-09-26",
+      "latest_date": "2025-10-06",
+      "game_count": 4907,
+      "decisive_count": 3853
+    },
+    {
+      "issue": 1612,
+      "zip": "twic1612g.zip",
+      "url": "https://theweekinchess.com/zips/twic1612g.zip",
+      "earliest_date": "2025-09-15",
+      "latest_date": "2025-09-29",
+      "game_count": 6314,
+      "decisive_count": 4769
+    },
+    {
+      "issue": 1611,
+      "zip": "twic1611g.zip",
+      "url": "https://theweekinchess.com/zips/twic1611g.zip",
+      "earliest_date": "2025-06-28",
+      "latest_date": "2025-09-22",
+      "game_count": 4875,
+      "decisive_count": 3854
+    },
+    {
+      "issue": 1610,
+      "zip": "twic1610g.zip",
+      "url": "https://theweekinchess.com/zips/twic1610g.zip",
+      "earliest_date": "2025-08-25",
+      "latest_date": "2025-09-15",
+      "game_count": 4643,
+      "decisive_count": 3485
+    },
+    {
+      "issue": 1609,
+      "zip": "twic1609g.zip",
+      "url": "https://theweekinchess.com/zips/twic1609g.zip",
+      "earliest_date": "2025-07-31",
+      "latest_date": "2025-09-08",
+      "game_count": 5179,
+      "decisive_count": 3713
+    },
+    {
+      "issue": 1608,
+      "zip": "twic1608g.zip",
+      "url": "https://theweekinchess.com/zips/twic1608g.zip",
+      "earliest_date": "2025-07-24",
+      "latest_date": "2025-09-01",
+      "game_count": 6245,
+      "decisive_count": 4813
+    },
+    {
+      "issue": 1607,
+      "zip": "twic1607g.zip",
+      "url": "https://theweekinchess.com/zips/twic1607g.zip",
+      "earliest_date": "2025-08-15",
+      "latest_date": "2025-08-25",
+      "game_count": 10597,
+      "decisive_count": 8756
+    },
+    {
+      "issue": 1606,
+      "zip": "twic1606g.zip",
+      "url": "https://theweekinchess.com/zips/twic1606g.zip",
+      "earliest_date": "2025-07-01",
+      "latest_date": "2025-08-18",
+      "game_count": 7849,
+      "decisive_count": 6008
+    },
+    {
+      "issue": 1605,
+      "zip": "twic1605g.zip",
+      "url": "https://theweekinchess.com/zips/twic1605g.zip",
+      "earliest_date": "2025-07-07",
+      "latest_date": "2025-08-11",
+      "game_count": 8544,
+      "decisive_count": 6559
+    },
+    {
+      "issue": 1604,
+      "zip": "twic1604g.zip",
+      "url": "https://theweekinchess.com/zips/twic1604g.zip",
+      "earliest_date": "2025-07-26",
+      "latest_date": "2025-08-04",
+      "game_count": 8662,
+      "decisive_count": 7040
+    },
+    {
+      "issue": 1603,
+      "zip": "twic1603g.zip",
+      "url": "https://theweekinchess.com/zips/twic1603g.zip",
+      "earliest_date": "2025-06-25",
+      "latest_date": "2025-07-28",
+      "game_count": 8435,
+      "decisive_count": 6585
+    },
+    {
+      "issue": 1602,
+      "zip": "twic1602g.zip",
+      "url": "https://theweekinchess.com/zips/twic1602g.zip",
+      "earliest_date": "2025-07-12",
+      "latest_date": "2025-07-21",
+      "game_count": 8826,
+      "decisive_count": 6888
+    },
+    {
+      "issue": 1601,
+      "zip": "twic1601g.zip",
+      "url": "https://theweekinchess.com/zips/twic1601g.zip",
+      "earliest_date": "2025-06-28",
+      "latest_date": "2025-07-14",
+      "game_count": 8513,
+      "decisive_count": 6914
+    },
+    {
+      "issue": 1600,
+      "zip": "twic1600g.zip",
+      "url": "https://theweekinchess.com/zips/twic1600g.zip",
+      "earliest_date": "2025-04-24",
+      "latest_date": "2025-07-07",
+      "game_count": 8891,
+      "decisive_count": 7128
+    },
+    {
+      "issue": 1599,
+      "zip": "twic1599g.zip",
+      "url": "https://theweekinchess.com/zips/twic1599g.zip",
+      "earliest_date": "2025-06-21",
+      "latest_date": "2025-06-30",
+      "game_count": 7300,
+      "decisive_count": 6003
+    },
+    {
+      "issue": 1598,
+      "zip": "twic1598g.zip",
+      "url": "https://theweekinchess.com/zips/twic1598g.zip",
+      "earliest_date": "2025-06-07",
+      "latest_date": "2025-06-23",
+      "game_count": 8080,
+      "decisive_count": 6758
+    },
+    {
+      "issue": 1597,
+      "zip": "twic1597g.zip",
+      "url": "https://theweekinchess.com/zips/twic1597g.zip",
+      "earliest_date": "2025-02-21",
+      "latest_date": "2025-06-16",
+      "game_count": 11224,
+      "decisive_count": 9270
+    },
+    {
+      "issue": 1596,
+      "zip": "twic1596g.zip",
+      "url": "https://theweekinchess.com/zips/twic1596g.zip",
+      "earliest_date": "2025-05-23",
+      "latest_date": "2025-06-09",
+      "game_count": 5961,
+      "decisive_count": 4959
+    },
+    {
+      "issue": 1595,
+      "zip": "twic1595g.zip",
+      "url": "https://theweekinchess.com/zips/twic1595g.zip",
+      "earliest_date": "2025-04-09",
+      "latest_date": "2025-06-02",
+      "game_count": 9599,
+      "decisive_count": 7654
+    },
+    {
+      "issue": 1594,
+      "zip": "twic1594g.zip",
+      "url": "https://theweekinchess.com/zips/twic1594g.zip",
+      "earliest_date": "2025-05-13",
+      "latest_date": "2025-05-26",
+      "game_count": 7669,
+      "decisive_count": 6281
+    },
+    {
+      "issue": 1593,
+      "zip": "twic1593g.zip",
+      "url": "https://theweekinchess.com/zips/twic1593g.zip",
+      "earliest_date": "2024-11-23",
+      "latest_date": "2025-05-19",
+      "game_count": 6678,
+      "decisive_count": 5531
+    },
+    {
+      "issue": 1592,
+      "zip": "twic1592g.zip",
+      "url": "https://theweekinchess.com/zips/twic1592g.zip",
+      "earliest_date": "2025-04-17",
+      "latest_date": "2025-05-12",
+      "game_count": 7114,
+      "decisive_count": 5775
+    },
+    {
+      "issue": 1591,
+      "zip": "twic1591g.zip",
+      "url": "https://theweekinchess.com/zips/twic1591g.zip",
+      "earliest_date": "2025-04-18",
+      "latest_date": "2025-05-05",
+      "game_count": 7553,
+      "decisive_count": 6105
+    },
+    {
+      "issue": 1590,
+      "zip": "twic1590g.zip",
+      "url": "https://theweekinchess.com/zips/twic1590g.zip",
+      "earliest_date": "2025-03-15",
+      "latest_date": "2025-04-28",
+      "game_count": 6431,
+      "decisive_count": 5032
+    },
+    {
+      "issue": 1589,
+      "zip": "twic1589g.zip",
+      "url": "https://theweekinchess.com/zips/twic1589g.zip",
+      "earliest_date": "2025-04-11",
+      "latest_date": "2025-04-21",
+      "game_count": 10235,
+      "decisive_count": 8011
+    },
+    {
+      "issue": 1588,
+      "zip": "twic1588g.zip",
+      "url": "https://theweekinchess.com/zips/twic1588g.zip",
+      "earliest_date": "2025-04-05",
+      "latest_date": "2025-04-14",
+      "game_count": 7010,
+      "decisive_count": 5845
+    },
+    {
+      "issue": 1587,
+      "zip": "twic1587g.zip",
+      "url": "https://theweekinchess.com/zips/twic1587g.zip",
+      "earliest_date": "2025-03-29",
+      "latest_date": "2025-04-07",
+      "game_count": 6155,
+      "decisive_count": 5116
+    },
+    {
+      "issue": 1586,
+      "zip": "twic1586g.zip",
+      "url": "https://theweekinchess.com/zips/twic1586g.zip",
+      "earliest_date": "2025-03-02",
+      "latest_date": "2025-03-31",
+      "game_count": 6872,
+      "decisive_count": 5562
+    },
+    {
+      "issue": 1585,
+      "zip": "twic1585g.zip",
+      "url": "https://theweekinchess.com/zips/twic1585g.zip",
+      "earliest_date": "2025-01-09",
+      "latest_date": "2025-03-24",
+      "game_count": 7030,
+      "decisive_count": 5559
+    },
+    {
+      "issue": 1584,
+      "zip": "twic1584g.zip",
+      "url": "https://theweekinchess.com/zips/twic1584g.zip",
+      "earliest_date": "2025-01-24",
+      "latest_date": "2025-03-17",
+      "game_count": 6078,
+      "decisive_count": 5043
+    },
+    {
+      "issue": 1583,
+      "zip": "twic1583g.zip",
+      "url": "https://theweekinchess.com/zips/twic1583g.zip",
+      "earliest_date": "2025-02-06",
+      "latest_date": "2025-03-10",
+      "game_count": 7213,
+      "decisive_count": 5972
+    },
+    {
+      "issue": 1582,
+      "zip": "twic1582g.zip",
+      "url": "https://theweekinchess.com/zips/twic1582g.zip",
+      "earliest_date": "2025-02-16",
+      "latest_date": "2025-03-03",
+      "game_count": 8728,
+      "decisive_count": 7280
+    },
+    {
+      "issue": 1581,
+      "zip": "twic1581g.zip",
+      "url": "https://theweekinchess.com/zips/twic1581g.zip",
+      "earliest_date": "2025-02-11",
+      "latest_date": "2025-02-24",
+      "game_count": 8651,
+      "decisive_count": 7072
+    },
+    {
+      "issue": 1580,
+      "zip": "twic1580g.zip",
+      "url": "https://theweekinchess.com/zips/twic1580g.zip",
+      "earliest_date": "2025-01-10",
+      "latest_date": "2025-02-17",
+      "game_count": 8609,
+      "decisive_count": 7049
+    },
+    {
+      "issue": 1579,
+      "zip": "twic1579g.zip",
+      "url": "https://theweekinchess.com/zips/twic1579g.zip",
+      "earliest_date": "2024-12-06",
+      "latest_date": "2025-02-10",
+      "game_count": 8602,
+      "decisive_count": 7188
+    },
+    {
+      "issue": 1578,
+      "zip": "twic1578g.zip",
+      "url": "https://theweekinchess.com/zips/twic1578g.zip",
+      "earliest_date": "2025-01-25",
+      "latest_date": "2025-02-03",
+      "game_count": 7719,
+      "decisive_count": 6698
+    },
+    {
+      "issue": 1577,
+      "zip": "twic1577g.zip",
+      "url": "https://theweekinchess.com/zips/twic1577g.zip",
+      "earliest_date": "2025-01-16",
+      "latest_date": "2025-01-27",
+      "game_count": 9163,
+      "decisive_count": 7823
+    },
+    {
+      "issue": 1576,
+      "zip": "twic1576g.zip",
+      "url": "https://theweekinchess.com/zips/twic1576g.zip",
+      "earliest_date": "2024-12-07",
+      "latest_date": "2025-01-20",
+      "game_count": 7983,
+      "decisive_count": 6811
+    },
+    {
+      "issue": 1575,
+      "zip": "twic1575g.zip",
+      "url": "https://theweekinchess.com/zips/twic1575g.zip",
+      "earliest_date": "2024-12-07",
+      "latest_date": "2025-01-13",
+      "game_count": 8553,
+      "decisive_count": 7393
+    },
+    {
+      "issue": 1574,
+      "zip": "twic1574g.zip",
+      "url": "https://theweekinchess.com/zips/twic1574g.zip",
+      "earliest_date": "2024-11-26",
+      "latest_date": "2025-01-06",
+      "game_count": 9807,
+      "decisive_count": 7976
+    },
+    {
+      "issue": 1573,
+      "zip": "twic1573g.zip",
+      "url": "https://theweekinchess.com/zips/twic1573g.zip",
+      "earliest_date": "2024-12-23",
+      "latest_date": "2024-12-30",
+      "game_count": 9405,
+      "decisive_count": 7692
+    },
+    {
+      "issue": 1572,
+      "zip": "twic1572g.zip",
+      "url": "https://theweekinchess.com/zips/twic1572g.zip",
+      "earliest_date": "2024-09-25",
+      "latest_date": "2024-12-23",
+      "game_count": 10167,
+      "decisive_count": 8398
+    },
+    {
+      "issue": 1571,
+      "zip": "twic1571g.zip",
+      "url": "https://theweekinchess.com/zips/twic1571g.zip",
+      "earliest_date": "2024-10-13",
+      "latest_date": "2024-12-16",
+      "game_count": 7853,
+      "decisive_count": 6724
+    },
+    {
+      "issue": 1570,
+      "zip": "twic1570g.zip",
+      "url": "https://theweekinchess.com/zips/twic1570g.zip",
+      "earliest_date": "2024-11-09",
+      "latest_date": "2024-12-09",
+      "game_count": 10046,
+      "decisive_count": 8046
+    },
+    {
+      "issue": 1569,
+      "zip": "twic1569g.zip",
+      "url": "https://theweekinchess.com/zips/twic1569g.zip",
+      "earliest_date": "2024-04-16",
+      "latest_date": "2024-12-01",
+      "game_count": 9982,
+      "decisive_count": 8037
+    },
+    {
+      "issue": 1568,
+      "zip": "twic1568g.zip",
+      "url": "https://theweekinchess.com/zips/twic1568g.zip",
+      "earliest_date": "2024-10-05",
+      "latest_date": "2024-11-25",
+      "game_count": 7163,
+      "decisive_count": 5970
+    },
+    {
+      "issue": 1567,
+      "zip": "twic1567g.zip",
+      "url": "https://theweekinchess.com/zips/twic1567g.zip",
+      "earliest_date": "2024-09-16",
+      "latest_date": "2024-11-18",
+      "game_count": 8172,
+      "decisive_count": 6709
+    },
+    {
+      "issue": 1566,
+      "zip": "twic1566g.zip",
+      "url": "https://theweekinchess.com/zips/twic1566g.zip",
+      "earliest_date": "2024-10-26",
+      "latest_date": "2024-11-11",
+      "game_count": 8185,
+      "decisive_count": 6805
+    },
+    {
+      "issue": 1565,
+      "zip": "twic1565g.zip",
+      "url": "https://theweekinchess.com/zips/twic1565g.zip",
+      "earliest_date": "2024-10-14",
+      "latest_date": "2024-11-04",
+      "game_count": 8439,
+      "decisive_count": 6946
+    },
+    {
+      "issue": 1564,
+      "zip": "twic1564g.zip",
+      "url": "https://theweekinchess.com/zips/twic1564g.zip",
+      "earliest_date": "2024-10-04",
+      "latest_date": "2024-10-28",
+      "game_count": 8487,
+      "decisive_count": 7063
+    },
+    {
+      "issue": 1563,
+      "zip": "twic1563g.zip",
+      "url": "https://theweekinchess.com/zips/twic1563g.zip",
+      "earliest_date": "2024-10-03",
+      "latest_date": "2024-10-21",
+      "game_count": 9397,
+      "decisive_count": 7518
+    },
+    {
+      "issue": 1562,
+      "zip": "twic1562g.zip",
+      "url": "https://theweekinchess.com/zips/twic1562g.zip",
+      "earliest_date": "2024-09-28",
+      "latest_date": "2024-10-14",
+      "game_count": 9044,
+      "decisive_count": 7247
+    },
+    {
+      "issue": 1561,
+      "zip": "twic1561g.zip",
+      "url": "https://theweekinchess.com/zips/twic1561g.zip",
+      "earliest_date": "2024-08-31",
+      "latest_date": "2024-10-07",
+      "game_count": 7957,
+      "decisive_count": 6490
+    },
+    {
+      "issue": 1560,
+      "zip": "twic1560g.zip",
+      "url": "https://theweekinchess.com/zips/twic1560g.zip",
+      "earliest_date": "2024-09-20",
+      "latest_date": "2024-09-30",
+      "game_count": 7772,
+      "decisive_count": 6660
+    },
+    {
+      "issue": 1559,
+      "zip": "twic1559g.zip",
+      "url": "https://theweekinchess.com/zips/twic1559g.zip",
+      "earliest_date": "2024-09-08",
+      "latest_date": "2024-09-23",
+      "game_count": 10157,
+      "decisive_count": 8358
+    },
+    {
+      "issue": 1558,
+      "zip": "twic1558g.zip",
+      "url": "https://theweekinchess.com/zips/twic1558g.zip",
+      "earliest_date": "2024-08-26",
+      "latest_date": "2024-09-16",
+      "game_count": 10135,
+      "decisive_count": 8567
+    },
+    {
+      "issue": 1557,
+      "zip": "twic1557g.zip",
+      "url": "https://theweekinchess.com/zips/twic1557g.zip",
+      "earliest_date": "2024-08-28",
+      "latest_date": "2024-09-09",
+      "game_count": 8563,
+      "decisive_count": 7047
+    },
+    {
+      "issue": 1556,
+      "zip": "twic1556g.zip",
+      "url": "https://theweekinchess.com/zips/twic1556g.zip",
+      "earliest_date": "2024-08-22",
+      "latest_date": "2024-09-02",
+      "game_count": 10170,
+      "decisive_count": 8305
+    },
+    {
+      "issue": 1555,
+      "zip": "twic1555g.zip",
+      "url": "https://theweekinchess.com/zips/twic1555g.zip",
+      "earliest_date": "2024-08-15",
+      "latest_date": "2024-08-26",
+      "game_count": 11423,
+      "decisive_count": 9239
+    },
+    {
+      "issue": 1554,
+      "zip": "twic1554g.zip",
+      "url": "https://theweekinchess.com/zips/twic1554g.zip",
+      "earliest_date": "2024-06-22",
+      "latest_date": "2024-08-19",
+      "game_count": 12425,
+      "decisive_count": 10004
+    },
+    {
+      "issue": 1553,
+      "zip": "twic1553g.zip",
+      "url": "https://theweekinchess.com/zips/twic1553g.zip",
+      "earliest_date": "2024-07-03",
+      "latest_date": "2024-08-12",
+      "game_count": 10991,
+      "decisive_count": 8876
+    },
+    {
+      "issue": 1552,
+      "zip": "twic1552g.zip",
+      "url": "https://theweekinchess.com/zips/twic1552g.zip",
+      "earliest_date": "2024-07-18",
+      "latest_date": "2024-08-05",
+      "game_count": 10582,
+      "decisive_count": 8799
+    },
+    {
+      "issue": 1551,
+      "zip": "twic1551g.zip",
+      "url": "https://theweekinchess.com/zips/twic1551g.zip",
+      "earliest_date": "2024-03-11",
+      "latest_date": "2024-07-29",
+      "game_count": 10595,
+      "decisive_count": 8409
+    },
+    {
+      "issue": 1550,
+      "zip": "twic1550g.zip",
+      "url": "https://theweekinchess.com/zips/twic1550g.zip",
+      "earliest_date": "2024-06-25",
+      "latest_date": "2024-07-22",
+      "game_count": 12486,
+      "decisive_count": 9874
+    },
+    {
+      "issue": 1549,
+      "zip": "twic1549g.zip",
+      "url": "https://theweekinchess.com/zips/twic1549g.zip",
+      "earliest_date": "2024-06-26",
+      "latest_date": "2024-07-15",
+      "game_count": 11277,
+      "decisive_count": 8998
+    }
+  ]
+}

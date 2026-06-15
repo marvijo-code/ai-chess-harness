@@ -6,9 +6,9 @@
     "criticalMoveEffort": "low",
     "zeroMoveEffort": "low",
     "preflightTimeoutSeconds": 45,
-    "moveTimeoutSeconds": 45,
+    "moveTimeoutSeconds": 120,
     "moveTimeoutClockDivisor": 4,
-    "retryMoveTimeoutSeconds": 8,
+    "retryMoveTimeoutSeconds": 60,
     "retryEffort": "low",
     "criticalMoveTimeoutSeconds": 3,
     "zeroMoveTimeoutSeconds": 6,
@@ -123,5 +123,24 @@
     "model": "gpt-5.3-codex",
     "effort": "medium",
     "maxCycles": 4
+  },
+  "masterWisdom": {
+    "sourceUrl": "https://database.nikonoel.fr/",
+    "batchSize": 500,
+    "maxBatchSize": 16000,
+    "gamesPerAttempt": 10,
+    "passScore": 0.8,
+    "targetDepth": 8,
+    "playModel": "gpt-5.5",
+    "playEffort": "high",
+    "preflightPlayModel": true,
+    "playPreflightTimeoutSeconds": 150,
+    "modelSynthesis": true,
+    "synthesisModel": "gpt-5.5",
+    "synthesisEffort": "xhigh",
+    "synthesisTimeoutSeconds": 420,
+    "moveEvidenceMaxPlyPerGame": 160,
+    "moveEvidencePromptTraceLimit": 24,
+    "moveEvidenceTopPatternLimit": 40
   }
 }

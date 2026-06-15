@@ -111,7 +111,7 @@ WEIGHT_BOUNDS = {
     "conversion_stall": (-6.0, 0.5),
     "moved_piece_risk": (-8.0, 0.5),
     "value_material": (0.25, 12.0),
-    "value_mobility": (-6.0, 6.0),
+    "value_mobility": (0.0, 6.0),
     "value_king_safety": (-8.0, 8.0),
 }
 FOUNDATIONAL_PROGRESS_FEATURES = {
@@ -131,6 +131,37 @@ DELIBERATIVE_CONTROLLER = "deliberative-human-v1"
 DELIBERATIVE_REFUTATION_CANDIDATE_LIMIT = 12
 DELIBERATIVE_SAFE_CANDIDATE_LIMIT = 4
 DELIBERATIVE_RETURNED_CANDIDATE_LIMIT = 8
+DELIBERATIVE_LOCAL_SEARCH_PLIES = 4
+DELIBERATIVE_LOCAL_SEARCH_WIDTH = 8
+DELIBERATIVE_QUIESCENCE_PLIES = 0
+DELIBERATIVE_QUIESCENCE_WIDTH = 4
+ZERO_ALPHA_BETA_DEFAULT_TIME_LIMIT_MS = 300
+ZERO_ALPHA_BETA_MATE_SCORE = 100000.0
+ZERO_ALPHA_BETA_INF = 200000.0
+ZERO_ALPHA_BETA_MIN_DEPTH = 2
+ZERO_ALPHA_BETA_MAX_DEPTH = 5
+ZERO_ALPHA_BETA_SEARCH_WIDTH = 28
+ZERO_ALPHA_BETA_QUIESCENCE_WIDTH = 5
+ZERO_ALPHA_BETA_QUIESCENCE_PLIES = 2
+ZERO_FAST_CENTER = {chess.C4, chess.D4, chess.E4, chess.F4, chess.C5, chess.D5, chess.E5, chess.F5}
+ZERO_FAST_EXTENDED_CENTER = {
+    chess.C3,
+    chess.D3,
+    chess.E3,
+    chess.F3,
+    chess.C4,
+    chess.D4,
+    chess.E4,
+    chess.F4,
+    chess.C5,
+    chess.D5,
+    chess.E5,
+    chess.F5,
+    chess.C6,
+    chess.D6,
+    chess.E6,
+    chess.F6,
+}
 NOVELTY_REPLAY_LOOKBACK = 8192
 SELF_PLAY_NOVELTY_WEIGHT = 0.55
 
@@ -732,6 +763,7 @@ def deliberative_score(
     root_visits: int,
     features: dict[str, float],
     refutation: dict,
+    local_tactical_score: float = 0.0,
 ) -> float:
     assert child.move is not None
     value = -child.value
@@ -753,7 +785,7 @@ def deliberative_score(
         + 0.25 * child.prior
         + 0.30 * value
         + forcing_bonus
-        + 0.10 * features["castle"]
+        + 0.35 * features["castle"]
         + 0.08 * features["development"]
         + 0.07 * features["center_to"]
         - 0.24 * features["conversion_stall"]
@@ -761,6 +793,7 @@ def deliberative_score(
         - 0.72 * refutation_penalty
         - 0.33 * forcing_reply_penalty
         - refutation_status_penalty
+        + 1.25 * local_tactical_score
     )
     return round(score, 6)
 
@@ -841,16 +874,45 @@ def select_deliberative_candidate_children(
     return list(selected.values())
 
 
-def deliberative_candidate_rows(board: chess.Board, root: PuctNode, limit: int | None = 8) -> list[dict]:
+def deliberative_candidate_rows(
+    board: chess.Board,
+    root: PuctNode,
+    limit: int | None = 8,
+    local_search_plies: int = DELIBERATIVE_LOCAL_SEARCH_PLIES,
+) -> list[dict]:
     rows = []
     root_visits = max(1, root.visit_count)
     children = [child for child in root.children.values() if child.move is not None]
+    tactical_cache: dict[tuple[str, bool, int], float] = {}
     if limit is not None and len(children) > limit:
-        children = select_deliberative_candidate_children(board, root, children, limit)
+        selected = {child.move.uci(): child for child in select_deliberative_candidate_children(board, root, children, limit) if child.move}
+        tactical_ranked = sorted(
+            children,
+            key=lambda child: (
+                local_tactical_score(board, child.move, plies=local_search_plies, cache=tactical_cache) if child.move else -1_000_000.0,
+                child.visit_count,
+                child.move.uci() if child.move else "",
+            ),
+            reverse=True,
+        )
+        for child in tactical_ranked[: max(1, DELIBERATIVE_SAFE_CANDIDATE_LIMIT)]:
+            assert child.move is not None
+            selected[child.move.uci()] = child
+        children = sorted(
+            selected.values(),
+            key=lambda child: (
+                local_tactical_score(board, child.move, plies=local_search_plies, cache=tactical_cache) if child.move else -1_000_000.0,
+                child.visit_count,
+                child.move.uci() if child.move else "",
+            ),
+            reverse=True,
+        )[:limit]
     for child in children:
         assert child.move is not None
         features = move_features(board, child.move)
         refutation = refutation_check(board, child.move)
+        local_score_cp = local_tactical_score(board, child.move, plies=local_search_plies, cache=tactical_cache)
+        local_score = normalize_local_tactical_score(local_score_cp)
         rows.append(
             {
                 "uci": child.move.uci(),
@@ -861,7 +923,9 @@ def deliberative_candidate_rows(board: chess.Board, root: PuctNode, limit: int |
                 "visit_share": round(child.visit_count / root_visits, 6),
                 "prior": round(child.prior, 6),
                 "value": round(-child.value, 6),
-                "human_score": deliberative_score(board, child, root_visits, features, refutation),
+                "human_score": deliberative_score(board, child, root_visits, features, refutation, local_score),
+                "local_tactical_score": round(local_score, 6),
+                "local_tactical_score_cp": int(round(local_score_cp)),
                 "risk": round(features["moved_piece_risk"], 6),
                 "gives_check": bool(features["gives_check"]),
                 "capture_value": round(features["capture_value"], 6),
@@ -873,8 +937,17 @@ def deliberative_candidate_rows(board: chess.Board, root: PuctNode, limit: int |
     return rows[:limit] if limit is not None else rows
 
 
-def select_deliberative_child(board: chess.Board, root: PuctNode) -> tuple[PuctNode, list[dict]]:
-    candidates = deliberative_candidate_rows(board, root, limit=DELIBERATIVE_REFUTATION_CANDIDATE_LIMIT)
+def select_deliberative_child(
+    board: chess.Board,
+    root: PuctNode,
+    local_search_plies: int = DELIBERATIVE_LOCAL_SEARCH_PLIES,
+) -> tuple[PuctNode, list[dict]]:
+    candidates = deliberative_candidate_rows(
+        board,
+        root,
+        limit=DELIBERATIVE_REFUTATION_CANDIDATE_LIMIT,
+        local_search_plies=local_search_plies,
+    )
     if not candidates:
         raise ValueError("deliberative controller produced no candidates")
     best_uci = candidates[0]["uci"]
@@ -922,16 +995,74 @@ def run_mcts(
     root_visit_counts = {uci: child.visit_count for uci, child in root.children.items()}
     visit_total = sum(root_visit_counts.values()) or 1
     root_visit_policy = {uci: count / visit_total for uci, count in root_visit_counts.items()}
-    best, candidates = select_deliberative_child(board, root)
-    assert best.move is not None
-    explanation = explain_choice(board, best.move, candidates)
+    candidate_local_plies = 1 if time_limit_ms is None else 2
+    puct_best, candidates = select_deliberative_child(
+        board,
+        root,
+        local_search_plies=candidate_local_plies,
+    )
+    assert puct_best.move is not None
+    alpha_beta_target_depth = alpha_beta_depth_for_visits(completed_visits or visits, time_limit_ms)
+    adaptive_depth = False
+    if time_limit_ms is None:
+        adapted_depth = adaptive_alpha_beta_depth(board, alpha_beta_target_depth)
+        adaptive_depth = adapted_depth > alpha_beta_target_depth
+        alpha_beta_target_depth = adapted_depth
+    alpha_beta = alpha_beta_root_search(
+        board,
+        max_depth=alpha_beta_target_depth,
+        time_limit_ms=time_limit_ms,
+    )
+    alpha_beta["adaptive_depth"] = adaptive_depth
+    raw_alpha_move = alpha_beta["move"] if isinstance(alpha_beta.get("move"), chess.Move) else puct_best.move
+    safety = (
+        {
+            "move": raw_alpha_move,
+            "overridden": False,
+            "proposed": raw_alpha_move.uci(),
+            "selected": raw_alpha_move.uci(),
+            "proposed_score_cp": alpha_beta.get("score_cp"),
+            "selected_score_cp": alpha_beta.get("score_cp"),
+            "threshold_cp": 0,
+            "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
+        }
+        if alpha_beta.get("fast_safety_root")
+        else material_safety_override(board, raw_alpha_move)
+    )
+    if safety.get("overridden"):
+        alpha_beta["raw_move"] = raw_alpha_move
+        alpha_beta["move"] = safety["move"]
+        alpha_beta["safety_override"] = safety
+    else:
+        alpha_beta["safety_override"] = safety
+    best_move = alpha_beta["move"] if isinstance(alpha_beta.get("move"), chess.Move) else puct_best.move
+    candidates = merge_alpha_beta_candidate(board, candidates, alpha_beta)
+    explanation = explain_choice(board, best_move, candidates)
+    explanation["puct_role"] = "policy/value telemetry and fast calculation support; deterministic alpha-beta is the final live arbiter"
+    explanation["calculation_verifier"]["method"] = (
+        "deterministic first-principles alpha-beta final arbiter with local legal-move scan, "
+        "bounded tactical search, and PUCT visit/value support"
+    )
+    explanation["calculation_verifier"]["alpha_beta"] = {
+        "selected": True,
+        "score_cp": alpha_beta.get("score_cp"),
+        "depth": alpha_beta.get("depth"),
+        "target_depth": alpha_beta.get("target_depth"),
+        "nodes": alpha_beta.get("nodes"),
+        "time_limit_ms": alpha_beta.get("time_limit_ms"),
+        "time_up": alpha_beta.get("time_up"),
+        "adaptive_depth": alpha_beta.get("adaptive_depth", False),
+        "fast_safety_root": alpha_beta.get("fast_safety_root", False),
+        "safety_override": {key: value for key, value in (alpha_beta.get("safety_override") or {}).items() if key != "move"},
+        "training_sources": alpha_beta.get("training_sources"),
+    }
     comment = public_comment(explanation)
     return ZeroSearchResult(
-        move=best.move,
+        move=best_move,
         network_id=network.network_id,
         root_value=root_value,
         visits=completed_visits,
-        nodes=count_nodes(root),
+        nodes=count_nodes(root) + int(alpha_beta.get("nodes", 0) or 0),
         candidates=candidates,
         root_visit_counts=root_visit_counts,
         root_visit_policy=root_visit_policy,
@@ -998,8 +1129,13 @@ def count_nodes(node: PuctNode) -> int:
     return 1 + sum(count_nodes(child) for child in node.children.values())
 
 
-def candidate_rows(board: chess.Board, root: PuctNode, limit: int = 5) -> list[dict]:
-    return deliberative_candidate_rows(board, root, limit=limit)
+def candidate_rows(
+    board: chess.Board,
+    root: PuctNode,
+    limit: int = 5,
+    local_search_plies: int = DELIBERATIVE_LOCAL_SEARCH_PLIES,
+) -> list[dict]:
+    return deliberative_candidate_rows(board, root, limit=limit, local_search_plies=local_search_plies)
 
 
 def best_reply_summary(board: chess.Board, move: chess.Move) -> dict:
@@ -1031,6 +1167,981 @@ def best_reply_summary(board: chess.Board, move: chess.Move) -> dict:
             best = candidate
             best_rank = rank
     return best or {"uci": "", "san": "", "material_swing_cp": 0, "gives_check": False, "is_capture": False, "is_checkmate": False}
+
+
+def static_zero_evaluation(board: chess.Board, color: bool) -> float:
+    outcome = board.outcome(claim_draw=True)
+    if outcome is not None:
+        if outcome.winner is None:
+            return 0.0
+        return 100000.0 if outcome.winner == color else -100000.0
+    score = float(material_balance(board, color))
+    center = {chess.C4, chess.D4, chess.E4, chess.F4, chess.C5, chess.D5, chess.E5, chess.F5}
+    own_attack_squares = 0
+    enemy_attack_squares = 0
+    loose_material = 0.0
+    for square, piece in board.piece_map().items():
+        sign = 1.0 if piece.color == color else -1.0
+        rank = chess.square_rank(square)
+        file_index = chess.square_file(square)
+        relative_rank = rank if piece.color == chess.WHITE else 7 - rank
+        if square in center:
+            score += sign * 14.0
+        if piece.piece_type == chess.PAWN:
+            score += sign * relative_rank * 5.0
+            if file_index in {3, 4}:
+                score += sign * 4.0
+        elif piece.piece_type in {chess.KNIGHT, chess.BISHOP}:
+            if relative_rank >= 2:
+                score += sign * 12.0
+        elif piece.piece_type == chess.ROOK:
+            if relative_rank >= 3:
+                score += sign * 6.0
+        attacks = len(board.attacks(square))
+        if piece.color == color:
+            own_attack_squares += attacks
+        else:
+            enemy_attack_squares += attacks
+        if piece.piece_type != chess.KING:
+            attackers = len(board.attackers(not piece.color, square))
+            defenders = len(board.attackers(piece.color, square))
+            if attackers:
+                value = float(PIECE_VALUES.get(piece.piece_type, 0))
+                if defenders == 0:
+                    loose_material += sign * -0.48 * value
+                elif attackers > defenders:
+                    loose_material += sign * -0.24 * value
+                elif value >= 500:
+                    loose_material += sign * -0.08 * value
+    score += (own_attack_squares - enemy_attack_squares) * 1.5
+    score += loose_material
+    own_king = board.king(color)
+    enemy_king = board.king(not color)
+    if own_king is not None:
+        score -= 42.0 * len(board.attackers(not color, own_king))
+        score += king_development_safety(board, color, own_king)
+    if enemy_king is not None:
+        score += 42.0 * len(board.attackers(color, enemy_king))
+        score -= king_development_safety(board, not color, enemy_king)
+    score += opening_discipline_score(board, color)
+    score -= opening_discipline_score(board, not color)
+    return score
+
+
+def minor_development_count(board: chess.Board, color: bool) -> int:
+    back_rank = 0 if color == chess.WHITE else 7
+    count = 0
+    for piece_type in (chess.KNIGHT, chess.BISHOP):
+        for square in board.pieces(piece_type, color):
+            if chess.square_rank(square) != back_rank:
+                count += 1
+    return count
+
+
+def is_castled_shape(board: chess.Board, color: bool, king_square: chess.Square) -> bool:
+    if color == chess.WHITE:
+        return (
+            (king_square == chess.G1 and board.piece_at(chess.F1) == chess.Piece(chess.ROOK, color))
+            or (king_square == chess.C1 and board.piece_at(chess.D1) == chess.Piece(chess.ROOK, color))
+        )
+    return (
+        (king_square == chess.G8 and board.piece_at(chess.F8) == chess.Piece(chess.ROOK, color))
+        or (king_square == chess.C8 and board.piece_at(chess.D8) == chess.Piece(chess.ROOK, color))
+    )
+
+
+def opening_discipline_score(board: chess.Board, color: bool) -> float:
+    if board.fullmove_number > 14:
+        return 0.0
+    score = 0.0
+    developed = minor_development_count(board, color)
+    home_queen_square = chess.D1 if color == chess.WHITE else chess.D8
+    queen_squares = list(board.pieces(chess.QUEEN, color))
+    if queen_squares and queen_squares[0] != home_queen_square and developed < 2:
+        score -= 320.0
+    king_square = board.king(color)
+    home_king_square = chess.E1 if color == chess.WHITE else chess.E8
+    if king_square is not None and king_square != home_king_square and not is_castled_shape(board, color, king_square):
+        score -= 350.0
+    if developed >= 2:
+        score += 85.0
+    if developed >= 3:
+        score += 70.0
+    return score
+
+
+def king_development_safety(board: chess.Board, color: bool, king_square: chess.Square) -> float:
+    home_rank = 0 if color == chess.WHITE else 7
+    central_home = {chess.D1, chess.E1} if color == chess.WHITE else {chess.D8, chess.E8}
+    score = 0.0
+    if is_castled_shape(board, color, king_square):
+        score += 180.0
+    if king_square in central_home:
+        score -= 180.0
+        center_pawns = [
+            board.piece_at(chess.square(file_index, home_rank + (1 if color == chess.WHITE else -1)))
+            for file_index in (3, 4)
+        ]
+        missing_center_pawns = sum(1 for pawn in center_pawns if pawn is None or pawn.color != color or pawn.piece_type != chess.PAWN)
+        score -= 80.0 * missing_center_pawns
+        enemy_queen = board.pieces(chess.QUEEN, not color)
+        enemy_bishops = board.pieces(chess.BISHOP, not color)
+        enemy_rooks = board.pieces(chess.ROOK, not color)
+        enemy_activity = 0
+        for square in [*enemy_queen, *enemy_bishops, *enemy_rooks]:
+            if chess.square_rank(square) not in {0, 7}:
+                enemy_activity += 1
+        score -= 55.0 * enemy_activity
+    return score
+
+
+def fast_piece_activity_bonus(piece_type: chess.PieceType, square: chess.Square, color: bool) -> float:
+    file_index = chess.square_file(square)
+    rank = chess.square_rank(square)
+    relative_rank = rank if color == chess.WHITE else 7 - rank
+    center_file = 3.5 - abs(file_index - 3.5)
+    center_rank = 3.5 - abs(relative_rank - 3.5)
+    edge_penalty = (1 if file_index in {0, 7} else 0) + (1 if rank in {0, 7} else 0)
+    if piece_type == chess.PAWN:
+        bonus = relative_rank * 7.0
+        if file_index in {3, 4}:
+            bonus += 12.0
+        if square in ZERO_FAST_CENTER:
+            bonus += 8.0
+        if file_index in {0, 7}:
+            bonus -= 7.0
+        return bonus
+    if piece_type == chess.KNIGHT:
+        bonus = (center_file * 9.0) + (center_rank * 6.0) - (edge_penalty * 42.0)
+        if relative_rank >= 2:
+            bonus += 22.0
+        return bonus
+    if piece_type == chess.BISHOP:
+        bonus = (center_file * 4.0) + (center_rank * 4.0)
+        if relative_rank >= 1:
+            bonus += 18.0
+        return bonus
+    if piece_type == chess.ROOK:
+        bonus = 0.0
+        if relative_rank >= 3:
+            bonus += 18.0
+        if file_index in {3, 4}:
+            bonus += 8.0
+        return bonus
+    if piece_type == chess.QUEEN:
+        bonus = (center_file * 2.0) + (center_rank * 2.0)
+        if relative_rank >= 2:
+            bonus += 8.0
+        return bonus
+    if piece_type == chess.KING:
+        if relative_rank <= 1 and file_index in {1, 2, 5, 6}:
+            return 18.0
+        if relative_rank >= 3:
+            return -28.0
+    return 0.0
+
+
+def pawn_structure_fast_score(board: chess.Board, color: bool) -> float:
+    score = 0.0
+    own_files = [0] * 8
+    enemy_files = [0] * 8
+    own_pawns = list(board.pieces(chess.PAWN, color))
+    enemy_pawns = list(board.pieces(chess.PAWN, not color))
+    for square in own_pawns:
+        own_files[chess.square_file(square)] += 1
+    for square in enemy_pawns:
+        enemy_files[chess.square_file(square)] += 1
+    for file_index, count in enumerate(own_files):
+        if count > 1:
+            score -= 14.0 * (count - 1)
+        if count and not any(own_files[adj] for adj in (file_index - 1, file_index + 1) if 0 <= adj < 8):
+            score -= 8.0
+    for file_index, count in enumerate(enemy_files):
+        if count > 1:
+            score += 14.0 * (count - 1)
+        if count and not any(enemy_files[adj] for adj in (file_index - 1, file_index + 1) if 0 <= adj < 8):
+            score += 8.0
+    for square in own_pawns:
+        file_index = chess.square_file(square)
+        rank = chess.square_rank(square)
+        relative_rank = rank if color == chess.WHITE else 7 - rank
+        blocked = False
+        for enemy_square in enemy_pawns:
+            enemy_file = chess.square_file(enemy_square)
+            enemy_rank = chess.square_rank(enemy_square)
+            if abs(enemy_file - file_index) <= 1:
+                if color == chess.WHITE and enemy_rank > rank:
+                    blocked = True
+                    break
+                if color == chess.BLACK and enemy_rank < rank:
+                    blocked = True
+                    break
+        if not blocked:
+            score += passed_pawn_fast_bonus(relative_rank)
+    enemy_color = not color
+    for square in enemy_pawns:
+        file_index = chess.square_file(square)
+        rank = chess.square_rank(square)
+        relative_rank = rank if enemy_color == chess.WHITE else 7 - rank
+        blocked = False
+        for own_square in own_pawns:
+            own_file = chess.square_file(own_square)
+            own_rank = chess.square_rank(own_square)
+            if abs(own_file - file_index) <= 1:
+                if enemy_color == chess.WHITE and own_rank > rank:
+                    blocked = True
+                    break
+                if enemy_color == chess.BLACK and own_rank < rank:
+                    blocked = True
+                    break
+        if not blocked:
+            score -= passed_pawn_fast_bonus(relative_rank)
+    return score
+
+
+def passed_pawn_fast_bonus(relative_rank: int) -> float:
+    bonus = max(0.0, float(relative_rank) - 1.0) * 14.0
+    if relative_rank >= 5:
+        bonus += 70.0
+    if relative_rank >= 6:
+        bonus += 150.0
+    if relative_rank >= 7:
+        bonus += 320.0
+    return bonus
+
+
+def loose_minor_major_fast_score(board: chess.Board, color: bool) -> float:
+    score = 0.0
+    for square, piece in board.piece_map().items():
+        if piece.piece_type in {chess.PAWN, chess.KING}:
+            continue
+        value = float(PIECE_VALUES.get(piece.piece_type, 0))
+        attackers = board.attackers(not piece.color, square)
+        if not attackers:
+            continue
+        defenders = board.attackers(piece.color, square)
+        attacker_values = [
+            PIECE_VALUES.get(attacker.piece_type, 0)
+            for attacker_square in attackers
+            if (attacker := board.piece_at(attacker_square)) is not None
+        ]
+        least_attacker = min(attacker_values) if attacker_values else value
+        penalty = 0.0
+        if not defenders:
+            penalty = value * 0.58
+        elif len(attackers) > len(defenders) and least_attacker <= value:
+            penalty = value * 0.28
+        elif piece.piece_type in {chess.ROOK, chess.QUEEN} and least_attacker < value:
+            penalty = value * 0.10
+        if penalty:
+            score += (-penalty if piece.color == color else penalty)
+    return score
+
+
+def fast_king_safety_score(board: chess.Board, color: bool) -> float:
+    king_square = board.king(color)
+    if king_square is None:
+        return -900.0
+    score = 0.0
+    home_rank = 0 if color == chess.WHITE else 7
+    home_king_square = chess.E1 if color == chess.WHITE else chess.E8
+    if is_castled_shape(board, color, king_square):
+        score += 220.0
+    elif king_square != home_king_square and board.fullmove_number <= 18:
+        score -= 420.0
+    elif king_square == home_king_square and board.fullmove_number <= 14:
+        score -= 130.0
+        for file_index in (3, 4):
+            pawn = board.piece_at(chess.square(file_index, home_rank + (1 if color == chess.WHITE else -1)))
+            if pawn is None or pawn.color != color or pawn.piece_type != chess.PAWN:
+                score -= 65.0
+    enemy_attackers = len(board.attackers(not color, king_square))
+    own_defenders = len(board.attackers(color, king_square))
+    score -= 52.0 * enemy_attackers
+    score += 16.0 * own_defenders
+    shield_rank = chess.square_rank(king_square) + (1 if color == chess.WHITE else -1)
+    if 0 <= shield_rank < 8:
+        for file_index in range(max(0, chess.square_file(king_square) - 1), min(7, chess.square_file(king_square) + 1) + 1):
+            shield = board.piece_at(chess.square(file_index, shield_rank))
+            if shield is not None and shield.color == color and shield.piece_type == chess.PAWN:
+                score += 18.0
+    return score
+
+
+def terminal_score_for_color(board: chess.Board, color: bool, ply: int = 0) -> float | None:
+    if board.halfmove_clock >= 100 or board.is_insufficient_material():
+        return 0.0
+    if not board.is_check():
+        return None
+    if any(board.legal_moves):
+        return None
+    winner = not board.turn
+    score = ZERO_ALPHA_BETA_MATE_SCORE - float(ply)
+    return score if winner == color else -score
+
+
+def fast_zero_leaf_evaluation(board: chess.Board, color: bool) -> float:
+    terminal = terminal_score_for_color(board, color)
+    if terminal is not None:
+        return terminal
+    score = 0.0
+    bishop_counts = {chess.WHITE: 0, chess.BLACK: 0}
+    for square, piece in board.piece_map().items():
+        sign = 1.0 if piece.color == color else -1.0
+        score += sign * float(PIECE_VALUES.get(piece.piece_type, 0))
+        score += sign * fast_piece_activity_bonus(piece.piece_type, square, piece.color)
+        if square in ZERO_FAST_CENTER:
+            score += sign * 12.0
+        elif square in ZERO_FAST_EXTENDED_CENTER:
+            score += sign * 5.0
+        if piece.piece_type == chess.BISHOP:
+            bishop_counts[piece.color] += 1
+    if bishop_counts[color] >= 2:
+        score += 35.0
+    if bishop_counts[not color] >= 2:
+        score -= 35.0
+    score += pawn_structure_fast_score(board, color)
+    score += fast_king_safety_score(board, color)
+    score -= fast_king_safety_score(board, not color)
+    score += opening_discipline_score(board, color)
+    score -= opening_discipline_score(board, not color)
+    if board.turn == color:
+        score += min(35.0, board.legal_moves.count() * 1.1)
+    else:
+        score -= min(35.0, board.legal_moves.count() * 1.1)
+    return score
+
+
+def material_capped_safety_score(board: chess.Board, color: bool) -> float:
+    terminal = terminal_score_for_color(board, color)
+    if terminal is not None:
+        return terminal
+    raw_material = float(material_balance(board, color))
+    safety_score = fast_zero_leaf_evaluation(board, color) + loose_minor_major_fast_score(board, color)
+    return min(safety_score, raw_material + 180.0)
+
+
+def alpha_beta_cache_key(board: chess.Board) -> object:
+    key_func = getattr(board, "_transposition_key", None)
+    if callable(key_func):
+        return key_func()
+    return board.fen()
+
+
+def tactical_move_order_score(board: chess.Board, move: chess.Move) -> tuple[float, str]:
+    mover = board.piece_at(move.from_square)
+    captured = board.piece_at(move.to_square)
+    if board.is_en_passant(move):
+        offset = -8 if board.turn == chess.WHITE else 8
+        captured = board.piece_at(move.to_square + offset)
+    captured_value = PIECE_VALUES.get(captured.piece_type, 0) if captured else 0
+    mover_value = PIECE_VALUES.get(mover.piece_type, 0) if mover else 0
+    promotion_value = PIECE_VALUES.get(move.promotion, 0) if move.promotion else 0
+    score = float((captured_value * 10) - mover_value + promotion_value)
+    if board.gives_check(move):
+        score += 600.0
+    if move.to_square in {chess.C4, chess.D4, chess.E4, chess.F4, chess.C5, chess.D5, chess.E5, chess.F5}:
+        score += 25.0
+    if mover and mover.piece_type == chess.PAWN:
+        from_rank = chess.square_rank(move.from_square)
+        to_rank = chess.square_rank(move.to_square)
+        if (mover.color == chess.WHITE and to_rank > from_rank) or (mover.color == chess.BLACK and to_rank < from_rank):
+            score += 12.0
+    if mover and mover.piece_type in {chess.KNIGHT, chess.BISHOP}:
+        from_rank = chess.square_rank(move.from_square)
+        if (mover.color == chess.WHITE and from_rank == 0) or (mover.color == chess.BLACK and from_rank == 7):
+            score += 18.0
+    return (score, move.uci())
+
+
+def ordered_tactical_moves(board: chess.Board, width: int = DELIBERATIVE_LOCAL_SEARCH_WIDTH) -> list[chess.Move]:
+    moves = list(board.legal_moves)
+    moves.sort(key=lambda move: tactical_move_order_score(board, move), reverse=True)
+    return moves[: max(1, int(width))]
+
+
+def ordered_noisy_moves(board: chess.Board, width: int = DELIBERATIVE_QUIESCENCE_WIDTH) -> list[chess.Move]:
+    moves = [
+        move
+        for move in board.legal_moves
+        if board.is_capture(move) or board.gives_check(move) or bool(move.promotion)
+    ]
+    moves.sort(key=lambda move: tactical_move_order_score(board, move), reverse=True)
+    return moves[: max(1, int(width))]
+
+
+def quiescence_search(
+    board: chess.Board,
+    root_color: bool,
+    alpha: float,
+    beta: float,
+    depth: int = DELIBERATIVE_QUIESCENCE_PLIES,
+    width: int = DELIBERATIVE_QUIESCENCE_WIDTH,
+) -> float:
+    stand_pat = static_zero_evaluation(board, root_color)
+    if depth <= 0 or board.is_game_over(claim_draw=True):
+        return stand_pat
+    moves = ordered_noisy_moves(board, width=width)
+    if not moves:
+        return stand_pat
+    if board.turn == root_color:
+        value = stand_pat
+        alpha = max(alpha, value)
+        for move in moves:
+            child = board.copy(stack=False)
+            child.push(move)
+            value = max(value, quiescence_search(child, root_color, alpha, beta, depth - 1, width))
+            alpha = max(alpha, value)
+            if alpha >= beta:
+                break
+        return value
+    value = stand_pat
+    beta = min(beta, value)
+    for move in moves:
+        child = board.copy(stack=False)
+        child.push(move)
+        value = min(value, quiescence_search(child, root_color, alpha, beta, depth - 1, width))
+        beta = min(beta, value)
+        if alpha >= beta:
+            break
+    return value
+
+
+def local_tactical_search(
+    board: chess.Board,
+    root_color: bool,
+    depth: int,
+    alpha: float,
+    beta: float,
+    width: int = DELIBERATIVE_LOCAL_SEARCH_WIDTH,
+    cache: dict[tuple[str, bool, int], float] | None = None,
+) -> float:
+    if depth <= 0 or board.is_game_over(claim_draw=True):
+        return quiescence_search(board, root_color, alpha, beta)
+    key = (board.fen(), root_color, int(depth))
+    if cache is not None and key in cache:
+        return cache[key]
+    moves = ordered_tactical_moves(board, width=width)
+    cutoff = False
+    if board.turn == root_color:
+        value = -1_000_000.0
+        for move in moves:
+            child = board.copy(stack=False)
+            child.push(move)
+            value = max(value, local_tactical_search(child, root_color, depth - 1, alpha, beta, width, cache))
+            alpha = max(alpha, value)
+            if alpha >= beta:
+                cutoff = True
+                break
+        if cache is not None and not cutoff:
+            cache[key] = value
+        return value
+    value = 1_000_000.0
+    for move in moves:
+        child = board.copy(stack=False)
+        child.push(move)
+        value = min(value, local_tactical_search(child, root_color, depth - 1, alpha, beta, width, cache))
+        beta = min(beta, value)
+        if alpha >= beta:
+            cutoff = True
+            break
+    if cache is not None and not cutoff:
+        cache[key] = value
+    return value
+
+
+def local_tactical_score(
+    board: chess.Board,
+    move: chess.Move,
+    plies: int = DELIBERATIVE_LOCAL_SEARCH_PLIES,
+    width: int = DELIBERATIVE_LOCAL_SEARCH_WIDTH,
+    cache: dict[tuple[str, bool, int], float] | None = None,
+) -> float:
+    root_color = board.turn
+    child = board.copy(stack=False)
+    child.push(move)
+    return local_tactical_search(
+        child,
+        root_color,
+        max(0, int(plies) - 1),
+        -1_000_000.0,
+        1_000_000.0,
+        width=max(1, int(width)),
+        cache=cache,
+    )
+
+
+def normalize_local_tactical_score(score_cp: float) -> float:
+    return max(-4.0, min(4.0, float(score_cp) / 600.0))
+
+
+def local_search_plies_for_visits(visits: int) -> int:
+    if int(visits) >= 16:
+        return DELIBERATIVE_LOCAL_SEARCH_PLIES
+    return 2
+
+
+def alpha_beta_depth_for_visits(visits: int, time_limit_ms: int | None = None) -> int:
+    if time_limit_ms is None:
+        return 3 if int(visits) >= 32 else 2
+    if time_limit_ms is not None and time_limit_ms <= 600:
+        return 3
+    if int(visits) >= 48:
+        return ZERO_ALPHA_BETA_MAX_DEPTH
+    if int(visits) >= 16:
+        return 4
+    return 3
+
+
+def has_advanced_enemy_passer(board: chess.Board, color: bool) -> bool:
+    own_pawns = list(board.pieces(chess.PAWN, color))
+    enemy_color = not color
+    for square in board.pieces(chess.PAWN, enemy_color):
+        file_index = chess.square_file(square)
+        rank = chess.square_rank(square)
+        relative_rank = rank if enemy_color == chess.WHITE else 7 - rank
+        if relative_rank < 5:
+            continue
+        blocked = False
+        for own_square in own_pawns:
+            own_file = chess.square_file(own_square)
+            own_rank = chess.square_rank(own_square)
+            if abs(own_file - file_index) <= 1:
+                if enemy_color == chess.WHITE and own_rank > rank:
+                    blocked = True
+                    break
+                if enemy_color == chess.BLACK and own_rank < rank:
+                    blocked = True
+                    break
+        if not blocked:
+            return True
+    return False
+
+
+def king_zone_pressure(board: chess.Board, color: bool) -> int:
+    king_square = board.king(color)
+    if king_square is None:
+        return 4
+    king_file = chess.square_file(king_square)
+    king_rank = chess.square_rank(king_square)
+    pressure = len(board.attackers(not color, king_square)) * 2
+    for square, piece in board.piece_map().items():
+        if piece.color == color or piece.piece_type == chess.PAWN:
+            continue
+        distance = max(abs(chess.square_file(square) - king_file), abs(chess.square_rank(square) - king_rank))
+        if piece.piece_type == chess.QUEEN and distance <= 4:
+            pressure += 2
+        elif piece.piece_type == chess.ROOK and distance <= 3:
+            pressure += 2
+        elif piece.piece_type in {chess.BISHOP, chess.KNIGHT} and distance <= 2:
+            pressure += 1
+    return pressure
+
+
+def tactical_alert_for_deeper_search(board: chess.Board) -> bool:
+    color = board.turn
+    if board.is_check():
+        return True
+    piece_count = len(board.piece_map())
+    if piece_count <= 14 or board.fullmove_number >= 36:
+        return True
+    if material_balance(board, color) <= -250:
+        return True
+    if has_advanced_enemy_passer(board, color):
+        return True
+    if king_zone_pressure(board, color) >= 3:
+        return True
+    return False
+
+
+def adaptive_alpha_beta_depth(board: chess.Board, base_depth: int) -> int:
+    target = max(ZERO_ALPHA_BETA_MIN_DEPTH, int(base_depth))
+    piece_count = len(board.piece_map())
+    if piece_count <= 10 or board.fullmove_number >= 55:
+        return max(target, 4)
+    if target < 3 and tactical_alert_for_deeper_search(board):
+        return 3
+    return target
+
+
+def alpha_beta_terminal_score(board: chess.Board, ply: int = 0) -> float | None:
+    return terminal_score_for_color(board, board.turn, ply=ply)
+
+
+def alpha_beta_static_eval(board: chess.Board) -> float:
+    terminal = alpha_beta_terminal_score(board)
+    if terminal is not None:
+        return terminal
+    return fast_zero_leaf_evaluation(board, board.turn)
+
+
+def alpha_beta_move_order_score(board: chess.Board, move: chess.Move, preferred: chess.Move | None = None) -> tuple[float, str]:
+    if preferred is not None and move == preferred:
+        return (1_000_000.0, move.uci())
+    mover = board.piece_at(move.from_square)
+    captured = board.piece_at(move.to_square)
+    if board.is_en_passant(move):
+        offset = -8 if board.turn == chess.WHITE else 8
+        captured = board.piece_at(move.to_square + offset)
+    captured_value = PIECE_VALUES.get(captured.piece_type, 0) if captured else 0
+    mover_value = PIECE_VALUES.get(mover.piece_type, 0) if mover else 0
+    promotion_value = PIECE_VALUES.get(move.promotion, 0) if move.promotion else 0
+    to_file = chess.square_file(move.to_square)
+    to_rank = chess.square_rank(move.to_square)
+    from_rank = chess.square_rank(move.from_square)
+    score = float((captured_value * 16) - mover_value + (promotion_value * 12))
+    if board.gives_check(move):
+        score += 4500.0
+    if board.is_castling(move):
+        score += 1600.0
+    if to_file in {3, 4} and to_rank in {3, 4}:
+        score += 260.0
+    elif to_file in {2, 3, 4, 5} and to_rank in {2, 3, 4, 5}:
+        score += 90.0
+    if mover and mover.piece_type in {chess.KNIGHT, chess.BISHOP}:
+        back_rank = 0 if mover.color == chess.WHITE else 7
+        if from_rank == back_rank:
+            score += 180.0
+        if to_file in {0, 7} or to_rank in {0, 7}:
+            score -= 220.0
+    if mover and mover.piece_type == chess.PAWN:
+        if to_file in {3, 4}:
+            score += 140.0
+        if to_file in {0, 7} and not board.is_capture(move):
+            score -= 120.0
+    if mover and mover.piece_type == chess.QUEEN and board.fullmove_number <= 10 and not board.is_capture(move):
+        score -= 160.0
+    if mover and mover.piece_type == chess.KING and not board.is_castling(move) and not board.is_check():
+        if board.fullmove_number <= 18:
+            score -= 260.0
+    return (score, move.uci())
+
+
+def ordered_alpha_beta_moves(
+    board: chess.Board,
+    preferred: chess.Move | None = None,
+    width: int | None = None,
+) -> list[chess.Move]:
+    moves = list(board.legal_moves)
+    moves.sort(key=lambda move: alpha_beta_move_order_score(board, move, preferred), reverse=True)
+    if width is not None and width > 0 and not board.is_check():
+        forcing = [move for move in moves if board.gives_check(move) or board.is_capture(move) or bool(move.promotion)]
+        selected: dict[str, chess.Move] = {move.uci(): move for move in forcing[: max(4, width // 3)]}
+        for move in moves:
+            selected.setdefault(move.uci(), move)
+            if len(selected) >= width:
+                break
+        return list(selected.values())
+    return moves
+
+
+def alpha_beta_quiescence(
+    board: chess.Board,
+    alpha: float,
+    beta: float,
+    deadline: float | None,
+    stats: dict[str, object],
+    qdepth: int = 0,
+) -> float:
+    if deadline is not None and time.monotonic() >= deadline:
+        stats["time_up"] = True
+        return alpha_beta_static_eval(board)
+    stand_pat = alpha_beta_static_eval(board)
+    if stand_pat >= beta:
+        return beta
+    if stand_pat > alpha:
+        alpha = stand_pat
+    if qdepth >= ZERO_ALPHA_BETA_QUIESCENCE_PLIES or terminal_score_for_color(board, board.turn) is not None:
+        return alpha
+    if board.is_check():
+        moves = ordered_alpha_beta_moves(board, width=ZERO_ALPHA_BETA_QUIESCENCE_WIDTH)
+    else:
+        noisy = [move for move in board.legal_moves if board.is_capture(move) or board.gives_check(move) or bool(move.promotion)]
+        noisy.sort(key=lambda move: alpha_beta_move_order_score(board, move), reverse=True)
+        moves = noisy[:ZERO_ALPHA_BETA_QUIESCENCE_WIDTH]
+    for move in moves:
+        board.push(move)
+        score = -alpha_beta_quiescence(board, -beta, -alpha, deadline, stats, qdepth + 1)
+        board.pop()
+        if score >= beta:
+            return beta
+        if score > alpha:
+            alpha = score
+    return alpha
+
+
+def alpha_beta_search(
+    board: chess.Board,
+    depth: int,
+    alpha: float,
+    beta: float,
+    deadline: float | None,
+    stats: dict[str, object],
+    table: dict[tuple[object, int], tuple[float, int, chess.Move | None]],
+    ply: int = 0,
+) -> float:
+    if deadline is not None and time.monotonic() >= deadline:
+        stats["time_up"] = True
+        return alpha_beta_static_eval(board)
+    terminal = alpha_beta_terminal_score(board, ply=ply)
+    if terminal is not None:
+        return terminal
+    stats["nodes"] = int(stats.get("nodes", 0)) + 1
+    if depth <= 0:
+        return alpha_beta_quiescence(board, alpha, beta, deadline, stats)
+    key = (alpha_beta_cache_key(board), int(depth))
+    alpha_original = alpha
+    tt_move: chess.Move | None = None
+    cached = table.get(key)
+    if cached is not None:
+        cached_score, flag, cached_move = cached
+        tt_move = cached_move
+        if flag == 0:
+            return cached_score
+        if flag < 0 and cached_score <= alpha:
+            return cached_score
+        if flag > 0 and cached_score >= beta:
+            return cached_score
+    best_move: chess.Move | None = None
+    width = ZERO_ALPHA_BETA_SEARCH_WIDTH if depth >= 3 and not board.is_check() else None
+    moves = ordered_alpha_beta_moves(board, preferred=tt_move, width=width)
+    if not moves:
+        return -ZERO_ALPHA_BETA_MATE_SCORE + float(ply) if board.is_check() else 0.0
+    for move in moves:
+        board.push(move)
+        extension = 1 if board.is_check() and depth <= 2 else 0
+        score = -alpha_beta_search(board, depth - 1 + extension, -beta, -alpha, deadline, stats, table, ply + 1)
+        board.pop()
+        if bool(stats.get("time_up")):
+            break
+        if score >= beta:
+            table[key] = (score, 1, move)
+            return score
+        if score > alpha:
+            alpha = score
+            best_move = move
+    flag = 0 if alpha_original < alpha < beta else -1 if alpha <= alpha_original else 1
+    table[key] = (alpha, flag, best_move)
+    return alpha
+
+
+def alpha_beta_root_search(
+    board: chess.Board,
+    max_depth: int,
+    time_limit_ms: int | None = None,
+) -> dict:
+    legal = list(board.legal_moves)
+    if not legal:
+        raise ValueError("no legal moves available")
+    for move in ordered_alpha_beta_moves(board, width=12):
+        board.push(move)
+        is_mate = board.is_checkmate()
+        board.pop()
+        if is_mate:
+            return {
+                "move": move,
+                "score_cp": int(ZERO_ALPHA_BETA_MATE_SCORE),
+                "depth": 1,
+                "target_depth": max(1, int(max_depth)),
+                "nodes": 1,
+                "time_limit_ms": time_limit_ms if time_limit_ms is not None else ZERO_ALPHA_BETA_DEFAULT_TIME_LIMIT_MS,
+                "time_up": False,
+                "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
+            }
+    effective_limit_ms = time_limit_ms if time_limit_ms is not None else 0
+    deadline = time.monotonic() + max(0.05, effective_limit_ms / 1000.0) if effective_limit_ms > 0 else None
+    table: dict[tuple[object, int], tuple[float, int, chess.Move | None]] = {}
+    stats: dict[str, object] = {"nodes": 0, "time_up": False}
+    best_move = legal[0]
+    best_score = -ZERO_ALPHA_BETA_INF
+    depth_reached = 0
+    target_depth = max(ZERO_ALPHA_BETA_MIN_DEPTH, min(ZERO_ALPHA_BETA_MAX_DEPTH, int(max_depth)))
+    for depth in range(1, target_depth + 1):
+        if bool(stats.get("time_up")) and depth > 1:
+            break
+        depth_best = best_move
+        depth_score = -ZERO_ALPHA_BETA_INF
+        alpha = -ZERO_ALPHA_BETA_INF
+        beta = ZERO_ALPHA_BETA_INF
+        moves = ordered_alpha_beta_moves(board, preferred=best_move)
+        for move in moves:
+            if deadline is not None and time.monotonic() >= deadline and depth > 1:
+                stats["time_up"] = True
+                break
+            board.push(move)
+            score = -alpha_beta_search(board, depth - 1, -beta, -alpha, deadline, stats, table, ply=1)
+            board.pop()
+            if bool(stats.get("time_up")) and depth > 1:
+                break
+            if score > depth_score:
+                depth_score = score
+                depth_best = move
+            if score > alpha:
+                alpha = score
+        if depth_score > -ZERO_ALPHA_BETA_INF:
+            best_move = depth_best
+            best_score = depth_score
+            depth_reached = depth
+    return {
+        "move": best_move,
+        "score_cp": int(round(best_score if best_score > -ZERO_ALPHA_BETA_INF else alpha_beta_static_eval(board))),
+        "depth": depth_reached,
+        "target_depth": target_depth,
+        "nodes": int(stats.get("nodes", 0)),
+        "time_limit_ms": effective_limit_ms,
+        "time_up": bool(stats.get("time_up")),
+        "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
+    }
+
+
+def worst_reply_static_score(board: chess.Board, move: chess.Move, color: bool) -> float:
+    after = board.copy(stack=False)
+    after.push(move)
+    terminal = terminal_score_for_color(after, color, ply=1)
+    if terminal is not None:
+        return terminal
+    replies = list(after.legal_moves)
+    if not replies:
+        return material_capped_safety_score(after, color)
+    worst = ZERO_ALPHA_BETA_INF
+    for reply in replies:
+        after.push(reply)
+        if after.is_checkmate():
+            score = -ZERO_ALPHA_BETA_MATE_SCORE
+        else:
+            score = material_capped_safety_score(after, color)
+        after.pop()
+        worst = min(worst, score)
+    return worst
+
+
+def worst_reply_material_floor(board: chess.Board, move: chess.Move, color: bool) -> float:
+    after = board.copy(stack=False)
+    after.push(move)
+    terminal = terminal_score_for_color(after, color, ply=1)
+    if terminal is not None:
+        return terminal
+    replies = list(after.legal_moves)
+    if not replies:
+        return float(material_balance(after, color))
+    floor = ZERO_ALPHA_BETA_INF
+    for reply in replies:
+        after.push(reply)
+        terminal = terminal_score_for_color(after, color, ply=2)
+        score = terminal if terminal is not None else float(material_balance(after, color))
+        after.pop()
+        floor = min(floor, score)
+    return floor
+
+
+def material_safety_override(
+    board: chess.Board,
+    proposed: chess.Move,
+    threshold_cp: float = 120.0,
+    scan_width: int = 18,
+) -> dict:
+    color = board.turn
+    current_material = float(material_balance(board, color))
+    proposed_score = worst_reply_static_score(board, proposed, color)
+    proposed_material_floor = worst_reply_material_floor(board, proposed, color)
+    best_move = proposed
+    best_score = proposed_score
+    best_material_floor = proposed_material_floor
+    for move in ordered_alpha_beta_moves(board, preferred=proposed, width=scan_width):
+        score = worst_reply_static_score(board, move, color)
+        material_floor = worst_reply_material_floor(board, move, color)
+        if score > best_score or (score == best_score and material_floor > best_material_floor):
+            best_score = score
+            best_move = move
+            best_material_floor = material_floor
+    sacrifice_guard = (
+        best_move != proposed
+        and (current_material - proposed_material_floor) >= 250.0
+        and (best_material_floor - proposed_material_floor) >= 90.0
+        and (best_score - proposed_score) >= 40.0
+    )
+    overridden = best_move != proposed and ((best_score - proposed_score) >= threshold_cp or sacrifice_guard)
+    return {
+        "move": best_move if overridden else proposed,
+        "overridden": overridden,
+        "proposed": proposed.uci(),
+        "selected": best_move.uci() if overridden else proposed.uci(),
+        "proposed_score_cp": int(round(proposed_score)),
+        "selected_score_cp": int(round(best_score if overridden else proposed_score)),
+        "proposed_material_floor_cp": int(round(proposed_material_floor)),
+        "selected_material_floor_cp": int(round(best_material_floor if overridden else proposed_material_floor)),
+        "sacrifice_guard": bool(sacrifice_guard),
+        "threshold_cp": int(round(threshold_cp)),
+        "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
+    }
+
+
+def fast_safety_root_search(board: chess.Board, width: int = 18) -> dict:
+    moves = ordered_alpha_beta_moves(board, width=width)
+    if not moves:
+        raise ValueError("no legal moves available")
+    best_move = moves[0]
+    best_score = -ZERO_ALPHA_BETA_INF
+    nodes = 0
+    for move in moves:
+        score = worst_reply_static_score(board, move, board.turn)
+        nodes += 1
+        if score > best_score:
+            best_score = score
+            best_move = move
+    return {
+        "move": best_move,
+        "score_cp": int(round(best_score)),
+        "depth": 2,
+        "target_depth": 2,
+        "nodes": nodes,
+        "time_limit_ms": 0,
+        "time_up": False,
+        "fast_safety_root": True,
+        "training_sources": {source: False for source in FORBIDDEN_TRAINING_SOURCES},
+    }
+
+
+def merge_alpha_beta_candidate(board: chess.Board, candidates: list[dict], search: dict) -> list[dict]:
+    move = search.get("move")
+    if not isinstance(move, chess.Move):
+        return candidates
+    rows = [dict(candidate) for candidate in candidates]
+    selected = None
+    for row in rows:
+        if row.get("uci") == move.uci():
+            selected = row
+            break
+    if selected is None:
+        features = move_features(board, move)
+        refutation = refutation_check(board, move)
+        local_score_cp = local_tactical_score(board, move, plies=1)
+        selected = {
+            "uci": move.uci(),
+            "san": board.san(move),
+            "role_tags": move_role_tags(board, move, features),
+            "plan_intent": plan_intent_for_move(board, move, features),
+            "visits": 0,
+            "visit_share": 0.0,
+            "prior": 0.0,
+            "value": 0.0,
+            "human_score": 0.0,
+            "local_tactical_score": round(normalize_local_tactical_score(local_score_cp), 6),
+            "local_tactical_score_cp": int(round(local_score_cp)),
+            "risk": round(features["moved_piece_risk"], 6),
+            "gives_check": bool(features["gives_check"]),
+            "capture_value": round(features["capture_value"], 6),
+            "created_threats": created_threats(board, move),
+            "refutation": refutation,
+        }
+        rows.append(selected)
+    selected["alpha_beta_selected"] = True
+    selected["alpha_beta_score_cp"] = int(search.get("score_cp", 0) or 0)
+    selected["alpha_beta_depth"] = int(search.get("depth", 0) or 0)
+    selected["alpha_beta_nodes"] = int(search.get("nodes", 0) or 0)
+    selected["human_score"] = max(float(selected.get("human_score", 0.0) or 0.0), 8.0 + (selected["alpha_beta_score_cp"] / 10000.0))
+    rows.sort(key=lambda row: (0 if row.get("alpha_beta_selected") else 1, -float(row.get("human_score", 0.0) or 0.0), str(row.get("uci", ""))))
+    return rows[:DELIBERATIVE_RETURNED_CANDIDATE_LIMIT]
 
 
 def threat_map(board: chess.Board) -> dict:
@@ -1078,8 +2189,9 @@ def explain_choice(board: chess.Board, move: chess.Move, candidates: list[dict])
         "plan_continuity": plan,
         "opponent_best_reply": reply,
         "calculation_verifier": {
-            "method": "local legal-move scan for immediate material refutations plus PUCT visit/value support",
+            "method": "local legal-move scan, bounded tactical search, and PUCT visit/value support",
             "selected_refutation": selected.get("refutation") or refutation_check(board, move),
+            "selected_local_tactical_score_cp": selected.get("local_tactical_score_cp"),
         },
         "tactical_blunder_check": {
             "moved_piece_risk": features["moved_piece_risk"],

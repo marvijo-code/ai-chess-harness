@@ -1,0 +1,14 @@
+version = 1
+id = "master-wisdom-climb-monitor"
+kind = "cron"
+name = "Master wisdom climb monitor"
+prompt = "Monitor the master-wisdom learner climb in C:\\dev\\chess-harness-codex until out\\lichess-master\\master-wisdom-state.json reports completion through Stockfish depth 8. Inspect out\\lichess-master\\master-wisdom-state.json, out\\live\\master-wisdom-live.pgn, recent out\\lichess-master\\matches\\*.pgn, and running master_wisdom.py/live_pgn_viewer.py processes. Do not start duplicate cycle processes. If training has stopped before completion, restart a long cycle with python .\\tools\\master_wisdom.py cycle --cycles 100 and keep the viewer on port 8766 against out\\live\\master-wisdom-live.pgn. During replay-scan phases, inspect processed_file_offset_counts and processed_file_totals in master-wisdom-state.json; advancing offsets are progress even before new move-evidence exists. After a failed 10-game gate, confirm the next cycle loads the next batch, writes move-evidence artifacts under out\\lichess-master\\move-evidence, synthesizes with gpt-5.5/xhigh before the next attempt, preflights the configured learner play model such as masterWisdom.playModel, and only then resumes games. If state.last_training_blocker is present, report the blocker as infrastructure and do not treat it as a ladder loss. If a recent err log shows a learner bestmove timeout, treat it as a game forfeit that should be recorded by the patched ladder; only restart when no cycle process remains. Use the existing authored learner wisdom in engines\\codex-chess-learner\\knowledgebase\\master-wisdom.md/json and engines\\codex-chess-learner\\skills\\master-game-wisdom\\SKILL.md as the default explanation source in all instances. Only propose a wisdom change when the existing authored wisdom does not already cover the observed class; if recent games show a class already covered, report that the existing wisdom already covers it instead of describing a fresh obvious learner mistake. Do not add opening stats, evidence counts, exact FEN-to-move rules, Stockfish lines, tablebases, or Zero data. Keep output concise: current depth, batch size, latest attempt score, whether training/viewer are alive, and what wisdom changed."
+status = "PAUSED"
+rrule = "FREQ=MINUTELY;INTERVAL=10"
+model = "gpt-5.4"
+reasoning_effort = "medium"
+execution_environment = "local"
+cwds = ["C:/dev/chess-harness-codex"]
+created_at = 1779385651584
+updated_at = 1780444043037
+

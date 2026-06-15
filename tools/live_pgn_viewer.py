@@ -34,7 +34,15 @@ ZERO_CLIMB_LOG_PATH = ZERO_RESEARCH_DIR / "climb" / "climb-log.jsonl"
 ZERO_DEPTH_MATCH_DIR = OUT_DIR / "zero-depth-matches"
 ZERO_MEMORY_PATH = ZERO_DIR / "MEMORY.md"
 ZERO_KNOWLEDGEBASE_DIR = ZERO_DIR / "knowledgebase"
+MASTER_WISDOM_PATH = ROOT / "tools" / "master_wisdom.py"
+MASTER_WISDOM_DIR = OUT_DIR / "lichess-master"
+MASTER_WISDOM_STATE_PATH = MASTER_WISDOM_DIR / "master-wisdom-state.json"
+MASTER_WISDOM_LEADERBOARD_PATH = MASTER_WISDOM_DIR / "leaderboard.json"
+MASTER_WISDOM_MD_PATH = LEARNER_KNOWLEDGEBASE_DIR / "master-wisdom.md"
+MASTER_WISDOM_JSON_PATH = LEARNER_KNOWLEDGEBASE_DIR / "master-wisdom.json"
+MASTER_WISDOM_SKILL_PATH = LEARNER_SKILLS_DIR / "master-game-wisdom" / "SKILL.md"
 ENGINE_LOG_DIR = OUT_DIR / "codex-chess-logs"
+COMPOSER_LOG_DIR = OUT_DIR / "composer-chess-logs"
 CLK_COMMENT_RE = re.compile(r"\[%clk\s+(?P<value>\d+(?::\d{1,2}){1,2}(?:\.\d+)?)\]")
 LIVE_STATUS_MAX_AGE_SECONDS = 3 * 60
 HOT_RELOAD_ENV = "CHESS_VIEWER_HOT_RELOAD_CHILD"
@@ -46,6 +54,7 @@ HOT_RELOAD_FILES = (
     ROOT / "AGENTS.md",
     ROOT / "chess-harness.config.json",
     ZERO_RESEARCH_PATH,
+    MASTER_WISDOM_PATH,
 )
 
 
@@ -263,19 +272,37 @@ INDEX_HTML = """<!doctype html>
 
     /* === MAIN GRID === */
     .main {
-      width: min(1680px, 100%); margin: 0 auto;
+      width: min(1920px, 100%); margin: 0 auto;
       padding: 20px;
       display: grid;
-      grid-template-columns: minmax(280px, 360px) minmax(420px, 1fr) minmax(300px, 420px);
+      grid-template-columns: minmax(260px, 320px) minmax(560px, 2.1fr) minmax(260px, 340px);
       gap: 16px; align-items: start;
     }
     .left-col, .center-col, .side-col { display: grid; gap: 16px; min-width: 0; }
+    .center-col { container-type: inline-size; container-name: board-col; }
     .thinking-card {
       position: sticky; top: 70px;
+      display: grid; grid-template-rows: auto minmax(0, 1fr);
+    }
+    .thinking-card:not(.collapsed) {
       height: 520px;
-      display: grid; grid-template-rows: auto auto auto minmax(0, 1fr);
+    }
+    .thinking-card.collapsed {
+      height: auto;
+    }
+    .thinking-card.collapsed .thinking-panel-body,
+    .analysis-card.collapsed .analysis-panel-body {
+      display: none;
+    }
+    .thinking-panel-body {
+      display: grid;
+      grid-template-rows: auto auto auto minmax(0, 1fr);
+      min-height: 0;
     }
     .thinking-card .card-body { overflow: auto; min-height: 0; }
+    .analysis-card.collapsed {
+      height: auto;
+    }
     .view-panel.hidden { display: none !important; }
 
     .learner-main {
@@ -421,6 +448,18 @@ INDEX_HTML = """<!doctype html>
     .card-title { font-size: 13px; font-weight: 600; }
     .card-sub { font-size: 11px; color: var(--muted); }
     .card-body { padding: 14px 16px; }
+    .card-tools { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+    .card-tool-btn {
+      border: 1px solid var(--line);
+      border-radius: var(--r-sm);
+      background: var(--surface);
+      color: var(--text);
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .card-tool-btn:hover { border-color: var(--accent); color: var(--accent); }
 
     /* === BOARD CARD === */
     .board-card {
@@ -452,23 +491,85 @@ INDEX_HTML = """<!doctype html>
     .dot-b { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #1C1C1E; border: 1.5px solid #888; }
     .board-turn { font-size: 12px; color: var(--muted); }
 
-    .board-shell { padding: 14px; display: grid; gap: 8px; }
+    .board-shell {
+      --board-pixel-size: min(78vh, 900px);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+    .board-stage {
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      gap: 6px;
+      width: calc(var(--board-pixel-size) + 28px);
+      max-width: 100%;
+      margin: 0 auto;
+    }
+    .eval-bar {
+      position: relative;
+      width: 22px;
+      flex: 0 0 22px;
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: #3a3a3c;
+      box-shadow: var(--sh-board);
+    }
+    .eval-bar.hidden { opacity: .35; }
+    .eval-fill {
+      position: absolute;
+      left: 0;
+      right: 0;
+      transition: height .22s ease, top .22s ease, bottom .22s ease;
+    }
+    .eval-white { background: #f5f5f7; }
+    .eval-black { background: #1c1c1e; }
+    .eval-label {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%) rotate(-90deg);
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: .02em;
+      color: #fff;
+      text-shadow: 0 0 3px rgba(0, 0, 0, .85);
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 2;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .player-bar {
-      width: min(100%, 66vh); margin: 0 auto;
-      display: flex; align-items: center; gap: 8px;
-      padding: 7px 12px;
+      width: calc(var(--board-pixel-size) + 28px);
+      max-width: 100%;
+      margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 8px 12px;
       background: var(--surface-alt); border: 1px solid var(--line); border-radius: var(--r-md);
       font-size: 13px; font-weight: 600;
     }
-    .bar-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .player-bar-main {
+      display: flex; align-items: center; gap: 8px;
+      min-width: 0; flex: 1;
+    }
+    .bar-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .clock {
       flex-shrink: 0;
-      min-width: 62px;
-      padding: 3px 7px;
+      min-width: 76px;
+      padding: 5px 10px;
       border: 1px solid var(--line);
       border-radius: var(--r-sm);
       background: var(--surface);
       text-align: center;
+      font-size: 14px;
+      font-weight: 700;
       font-variant-numeric: tabular-nums;
       font-feature-settings: "tnum";
       line-height: 1.15;
@@ -479,13 +580,19 @@ INDEX_HTML = """<!doctype html>
 
     /* === CHESSBOARD === */
     .board {
-      width: min(100%, 66vh); aspect-ratio: 1;
-      margin: 0 auto;
+      width: var(--board-pixel-size);
+      height: var(--board-pixel-size);
+      flex: 0 0 auto;
+      margin: 0;
       border-radius: 3px; overflow: hidden;
       display: grid;
       grid-template-columns: repeat(8, 1fr);
       grid-template-rows: repeat(8, 1fr);
       box-shadow: var(--sh-board);
+    }
+    @supports (container-type: inline-size) {
+      .board-shell { --board-pixel-size: min(78vh, calc(100cqw - 56px)); }
+      .board-stage, .player-bar { max-width: calc(100cqw - 28px); }
     }
     .sq {
       position: relative;
@@ -530,6 +637,17 @@ INDEX_HTML = """<!doctype html>
     .moves-tbl td:first-child { width: 42px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
     .moves-tbl tbody tr:last-child td { border-bottom: none; }
     .moves-tbl tbody tr:hover td { background: var(--surface-alt); }
+    .moves-tbl td.move-cell { cursor: default; }
+    .moves-tbl td.move-active {
+      background: rgba(10, 132, 255, .16);
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .moves-tbl tr.move-row-active td:first-child {
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .move-list-card.collapsed #moves { display: none; }
 
     /* === STATS TABLE === */
     .stats-tbl { width: 100%; border-collapse: collapse; }
@@ -649,7 +767,7 @@ INDEX_HTML = """<!doctype html>
       .brand-meta { max-width: 100%; }
       .brand-path { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
       .main, .learner-main { grid-template-columns: 1fr; padding: 12px; gap: 14px; }
-      .board-shell { padding: 10px; }
+      .board-shell { padding: 10px; --board-pixel-size: min(72vh, calc(100vw - 28px)); }
       .eng-head, .eng-fields, .eng-settings { grid-template-columns: 1fr; }
       .summary-row { grid-template-columns: 1fr; gap: 2px; }
       .summary-row strong, .file-row summary, .log-text { min-width: 0; overflow-wrap: anywhere; }
@@ -681,6 +799,7 @@ INDEX_HTML = """<!doctype html>
           <button id="board-view-tab" class="active" type="button">Board</button>
           <button id="learner-view-tab" type="button">Learner</button>
           <button id="research-view-tab" type="button">Research</button>
+          <button id="master-view-tab" type="button">Master Wisdom</button>
         </div>
         <label class="pill-toggle"><input id="follow-toggle" type="checkbox" checked> Follow live</label>
         <div class="nav-cluster">
@@ -700,9 +819,14 @@ INDEX_HTML = """<!doctype html>
 
     <main id="board-view" class="main view-panel">
       <aside class="left-col">
-        <section class="card thinking-card">
+        <section class="card thinking-card collapsed">
           <div class="card-hd">
             <span class="card-title">Bot Thinking</span>
+            <button id="thinking-panel-toggle" class="card-tool-btn" type="button" aria-expanded="false">Show</button>
+          </div>
+          <div class="thinking-panel-body">
+          <div class="log-filter-row">
+            <span class="log-filter-label">Side</span>
             <div class="segmented log-side-filter" role="group" aria-label="Thinking side filter">
               <button class="active" type="button" data-log-side="all">All</button>
               <button type="button" data-log-side="white">White</button>
@@ -724,15 +848,21 @@ INDEX_HTML = """<!doctype html>
           </div>
           <div id="board-thinking-meta" class="card-sub" style="padding:0 16px 8px"></div>
           <div id="board-thinking-logs" class="card-body"></div>
+          </div>
         </section>
 
-        <section class="card analysis-card">
+        <section class="card analysis-card collapsed">
           <div class="card-hd">
             <span id="analysis-title" class="card-title">Engine Analysis</span>
-            <label class="pill-toggle" style="font-size:12px;text-transform:none;letter-spacing:0"><input id="analysis-panel-toggle" type="checkbox" checked> On</label>
+            <div class="card-tools">
+              <label class="pill-toggle" style="font-size:12px;text-transform:none;letter-spacing:0"><input id="analysis-panel-toggle" type="checkbox" checked> On</label>
+              <button id="analysis-collapse-toggle" class="card-tool-btn" type="button" aria-expanded="false">Show</button>
+            </div>
           </div>
+          <div class="analysis-panel-body">
           <div id="analysis-meta" class="card-sub" style="padding:5px 16px 0"></div>
           <div id="analysis" class="card-body" style="padding-top:6px"></div>
+          </div>
         </section>
       </aside>
 
@@ -752,17 +882,40 @@ INDEX_HTML = """<!doctype html>
           </div>
           <div class="board-shell">
             <div id="top-player" class="player-bar">
-              <span class="dot-b"></span>
-              <span class="bar-name">Black: &#8212;</span>
-              <span id="black-clock" class="clock">--:--</span>
+              <div class="player-bar-main">
+                <span class="dot-b"></span>
+                <span class="bar-name">Black: &#8212;</span>
+              </div>
+              <span id="black-clock" class="clock" aria-label="Black clock">--:--</span>
             </div>
-            <div id="board" class="board" aria-label="Chess board"></div>
+            <div class="board-stage">
+              <div id="eval-bar" class="eval-bar" aria-label="Engine evaluation bar">
+                <div id="eval-black" class="eval-fill eval-black"></div>
+                <div id="eval-white" class="eval-fill eval-white"></div>
+                <span id="eval-label" class="eval-label">0.0</span>
+              </div>
+              <div id="board" class="board" aria-label="Chess board"></div>
+            </div>
             <div id="bottom-player" class="player-bar">
-              <span class="dot-w"></span>
-              <span class="bar-name">White: &#8212;</span>
-              <span id="white-clock" class="clock">--:--</span>
+              <div class="player-bar-main">
+                <span class="dot-w"></span>
+                <span class="bar-name">White: &#8212;</span>
+              </div>
+              <span id="white-clock" class="clock" aria-label="White clock">--:--</span>
             </div>
           </div>
+        </section>
+
+        <section class="card move-list-card">
+          <div class="card-hd">
+            <span class="card-title">Move List</span>
+            <div class="card-tools">
+              <span id="meta" class="card-sub"></span>
+              <button id="move-history-toggle" class="card-tool-btn" type="button" aria-pressed="false">All Moves</button>
+              <button id="move-list-toggle" class="card-tool-btn" type="button" aria-expanded="true">Hide</button>
+            </div>
+          </div>
+          <div id="moves"></div>
         </section>
       </div>
 
@@ -780,6 +933,14 @@ INDEX_HTML = """<!doctype html>
 
         <section class="card">
           <div class="card-hd">
+            <span class="card-title">Current Attempt</span>
+            <span id="master-current-meta" class="card-sub"></span>
+          </div>
+          <div id="master-current-attempt" class="card-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
             <span class="card-title">Matches</span>
             <div class="pager">
               <button id="matches-prev" type="button" aria-label="Previous matches page">&#8592;</button>
@@ -788,14 +949,6 @@ INDEX_HTML = """<!doctype html>
             </div>
           </div>
           <div id="matches" class="card-body"></div>
-        </section>
-
-        <section class="card">
-          <div class="card-hd">
-            <span class="card-title">Move List</span>
-            <span id="meta" class="card-sub"></span>
-          </div>
-          <div id="moves"></div>
         </section>
 
         <details id="engine-config-card" class="card config-card">
@@ -952,6 +1105,72 @@ INDEX_HTML = """<!doctype html>
         </section>
       </div>
     </main>
+
+    <main id="master-view" class="learner-main view-panel hidden">
+      <div class="learner-col">
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Master Wisdom</span>
+            <span id="master-updated" class="card-sub"></span>
+          </div>
+          <div id="master-summary" class="card-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Source Downloads</span>
+            <span id="master-source-meta" class="card-sub"></span>
+          </div>
+          <div id="master-source" class="card-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Learned Wisdom</span>
+            <span id="master-wisdom-meta" class="card-sub"></span>
+          </div>
+          <div class="card-body">
+            <pre id="master-wisdom-text" class="doc-text"></pre>
+          </div>
+        </section>
+      </div>
+
+      <div class="learner-col">
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Current Match Leaderboard</span>
+            <span id="master-current-main-meta" class="card-sub"></span>
+          </div>
+          <div id="master-current-attempt-main" class="card-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Depth Leaderboard</span>
+            <span id="master-leaderboard-meta" class="card-sub"></span>
+          </div>
+          <div id="master-leaderboard" class="card-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Learned Principles</span>
+            <span id="master-patterns-meta" class="card-sub"></span>
+          </div>
+          <div id="master-patterns" class="card-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
+            <span class="card-title">Learner Skill</span>
+            <span id="master-skill-meta" class="card-sub"></span>
+          </div>
+          <div class="card-body">
+            <pre id="master-skill-text" class="doc-text"></pre>
+          </div>
+        </section>
+      </div>
+    </main>
   </div>
 
   <script>
@@ -977,15 +1196,29 @@ INDEX_HTML = """<!doctype html>
     };
 
     let lastFen = "";
+    let boardSquareEls = null;
+    let boardStructureOrientation = null;
+    let renderedPlayerBarsKey = "";
+    let renderedLiveMoveCount = -1;
     let configData = [];
     let rawConfigMode = false;
     let engineConfigExpanded = localStorage.getItem("livePgnEngineConfigExpanded") === "on";
+    let moveListCollapsed = localStorage.getItem("livePgnMoveListCollapsed") === "on";
+    let moveListFullHistory = localStorage.getItem("livePgnMoveListFullHistory") === "on";
+    function panelCollapsedByDefault(storageKey) {
+      const stored = localStorage.getItem(storageKey);
+      if (stored === null) return true;
+      return stored === "on";
+    }
+    let thinkingPanelCollapsed = panelCollapsedByDefault("livePgnThinkingCollapsed");
+    let analysisPanelCollapsed = panelCollapsedByDefault("livePgnAnalysisPanelCollapsed");
     let analysisEnabled = true;
     let analysisAvailable = true;
     let analysisRequestSeq = 0;
     let analysisAbort = null;
     let requestedAnalysisKey = "";
     let renderedAnalysisKey = "";
+    let latestAnalysis = null;
     let activeTheme = "light";
     let followLive = true;
     let latestGame = null;
@@ -995,10 +1228,12 @@ INDEX_HTML = """<!doctype html>
     let activeView = "board";
     let latestLearnerData = null;
     let latestResearchData = null;
+    let latestMasterData = null;
     let logSideFilter = localStorage.getItem("livePgnLogSide") || "all";
     const logKindOptions = ["setup", "prompt", "comment", "move", "repair", "account", "log"];
     const logKindStorageKey = "livePgnLogKindsV2";
     let logKindFilter = new Set(loadLogKindFilter());
+    let boardOrientationMode = localStorage.getItem("livePgnBoardOrientationMode") === "manual" ? "manual" : "learner";
     let boardOrientation = localStorage.getItem("livePgnBoardOrientation") === "black" ? "black" : "white";
     let replayThinkingKey = "";
     let selectedMatch = null;
@@ -1017,6 +1252,7 @@ INDEX_HTML = """<!doctype html>
     let fallbackStatsTimer = null;
     let fallbackLearnerTimer = null;
     let fallbackResearchTimer = null;
+    let fallbackMasterTimer = null;
     let fallbackVersionTimer = null;
     const previousMatchesPageSize = 5;
 
@@ -1059,6 +1295,76 @@ INDEX_HTML = """<!doctype html>
       updateLogSideButtons();
       updateLogKindButtons();
       updateBoardOrientationButton();
+      syncMoveListCollapsed();
+      syncMoveHistoryToggle();
+      syncThinkingPanelCollapsed();
+      syncAnalysisPanelCollapsed();
+      renderEvalBar(null);
+    }
+
+    function syncThinkingPanelCollapsed() {
+      const card = document.querySelector(".thinking-card");
+      const button = document.getElementById("thinking-panel-toggle");
+      const body = document.querySelector(".thinking-panel-body");
+      if (!card || !button || !body) return;
+      card.classList.toggle("collapsed", thinkingPanelCollapsed);
+      button.textContent = thinkingPanelCollapsed ? "Show" : "Hide";
+      button.setAttribute("aria-expanded", thinkingPanelCollapsed ? "false" : "true");
+      body.setAttribute("aria-hidden", thinkingPanelCollapsed ? "true" : "false");
+    }
+
+    function setThinkingPanelCollapsed(collapsed) {
+      thinkingPanelCollapsed = !!collapsed;
+      localStorage.setItem("livePgnThinkingCollapsed", thinkingPanelCollapsed ? "on" : "off");
+      syncThinkingPanelCollapsed();
+    }
+
+    function syncAnalysisPanelCollapsed() {
+      const card = document.querySelector(".analysis-card");
+      const button = document.getElementById("analysis-collapse-toggle");
+      const body = document.querySelector(".analysis-panel-body");
+      if (!card || !button || !body) return;
+      card.classList.toggle("collapsed", analysisPanelCollapsed);
+      button.textContent = analysisPanelCollapsed ? "Show" : "Hide";
+      button.setAttribute("aria-expanded", analysisPanelCollapsed ? "false" : "true");
+      body.setAttribute("aria-hidden", analysisPanelCollapsed ? "true" : "false");
+    }
+
+    function setAnalysisPanelCollapsed(collapsed) {
+      analysisPanelCollapsed = !!collapsed;
+      localStorage.setItem("livePgnAnalysisPanelCollapsed", analysisPanelCollapsed ? "on" : "off");
+      syncAnalysisPanelCollapsed();
+    }
+
+    function syncMoveListCollapsed() {
+      const card = document.querySelector(".move-list-card");
+      const button = document.getElementById("move-list-toggle");
+      const moves = document.getElementById("moves");
+      if (!card || !button || !moves) return;
+      card.classList.toggle("collapsed", moveListCollapsed);
+      button.textContent = moveListCollapsed ? "Show" : "Hide";
+      button.setAttribute("aria-expanded", moveListCollapsed ? "false" : "true");
+      moves.setAttribute("aria-hidden", moveListCollapsed ? "true" : "false");
+    }
+
+    function setMoveListCollapsed(collapsed) {
+      moveListCollapsed = !!collapsed;
+      localStorage.setItem("livePgnMoveListCollapsed", moveListCollapsed ? "on" : "off");
+      syncMoveListCollapsed();
+    }
+
+    function syncMoveHistoryToggle() {
+      const button = document.getElementById("move-history-toggle");
+      if (!button) return;
+      button.textContent = moveListFullHistory ? "Latest 5" : "All Moves";
+      button.setAttribute("aria-pressed", moveListFullHistory ? "true" : "false");
+    }
+
+    function setMoveListFullHistory(enabled) {
+      moveListFullHistory = !!enabled;
+      localStorage.setItem("livePgnMoveListFullHistory", moveListFullHistory ? "on" : "off");
+      syncMoveHistoryToggle();
+      refresh();
     }
 
     function syncEngineConfigExpanded() {
@@ -1118,15 +1424,38 @@ INDEX_HTML = """<!doctype html>
     function updateBoardOrientationButton() {
       const button = document.getElementById("flip-board");
       button.textContent = boardOrientation === "white" ? "Flip Board" : "White View";
-      button.title = boardOrientation === "white" ? "Flip board to Black" : "Flip board to White";
+      button.title = boardOrientationMode === "learner"
+        ? "Codex-chess-learner is at the bottom by default; click to flip manually"
+        : (boardOrientation === "white" ? "Flip board to Black" : "Flip board to White");
     }
 
-    function setBoardOrientation(orientation) {
+    function playerIsLearner(name) {
+      return String(name || "").toLowerCase().includes("codex-chess-learner");
+    }
+
+    function learnerBottomOrientation(white, black) {
+      if (playerIsLearner(black)) return "black";
+      return "white";
+    }
+
+    function syncDefaultBoardOrientation(white, black) {
+      if (boardOrientationMode !== "learner") return;
+      boardOrientation = learnerBottomOrientation(white, black);
+      localStorage.setItem("livePgnBoardOrientation", boardOrientation);
+      updateBoardOrientationButton();
+    }
+
+    function setBoardOrientation(orientation, mode = "manual") {
+      boardOrientationMode = mode === "learner" ? "learner" : "manual";
+      localStorage.setItem("livePgnBoardOrientationMode", boardOrientationMode);
       boardOrientation = orientation === "black" ? "black" : "white";
       localStorage.setItem("livePgnBoardOrientation", boardOrientation);
       updateBoardOrientationButton();
       if (latestGame && latestGame.has_game) renderGame(latestGame);
-      else renderBoard("8/8/8/8/8/8/8/8 w - - 0 1", null);
+      else {
+        renderBoard("8/8/8/8/8/8/8/8 w - - 0 1", null);
+        renderEvalBar(latestAnalysis);
+      }
     }
 
     function updateAnalysisControls() {
@@ -1158,16 +1487,19 @@ INDEX_HTML = """<!doctype html>
     }
 
     function setActiveView(view) {
-      activeView = ["learner", "research"].includes(view) ? view : "board";
+      activeView = ["learner", "research", "master"].includes(view) ? view : "board";
       document.getElementById("board-view").classList.toggle("hidden", activeView !== "board");
       document.getElementById("learner-view").classList.toggle("hidden", activeView !== "learner");
       document.getElementById("research-view").classList.toggle("hidden", activeView !== "research");
+      document.getElementById("master-view").classList.toggle("hidden", activeView !== "master");
       document.getElementById("board-view-tab").classList.toggle("active", activeView === "board");
       document.getElementById("learner-view-tab").classList.toggle("active", activeView === "learner");
       document.getElementById("research-view-tab").classList.toggle("active", activeView === "research");
+      document.getElementById("master-view-tab").classList.toggle("active", activeView === "master");
       localStorage.setItem("livePgnView", activeView);
       if (activeView === "learner") loadLearner();
       if (activeView === "research") loadResearch();
+      if (activeView === "master") loadMasterWisdom();
     }
 
     function setActivePgnPath(path) {
@@ -1403,29 +1735,17 @@ INDEX_HTML = """<!doctype html>
       return pieces;
     }
 
-    function renderBoard(fen, lastMove) {
+    function buildBoardStructure() {
       const boardEl = document.getElementById("board");
-      const pieces = parseFen(fen);
-      boardEl.innerHTML = "";
+      boardEl.replaceChildren();
+      boardSquareEls = new Array(64);
       for (let rank = 0; rank < 8; rank++) {
         for (let file = 0; file < 8; file++) {
           const displayRank = boardOrientation === "black" ? 7 - rank : rank;
           const displayFile = boardOrientation === "black" ? 7 - file : file;
-          const sq = squareName(displayFile, displayRank);
           const isLight = (displayRank + displayFile) % 2 === 0;
-          const isLast = lastMove && (sq === lastMove.from || sq === lastMove.to);
           const el = document.createElement("div");
-          el.className = "sq " + (isLight ? "light" : "dark") + (isLast ? " last" : "");
-          const piece = pieces[sq];
-          if (piece) {
-            const key = PIECE_KEY[piece];
-            if (key && PIECES[key]) {
-              const span = document.createElement("span");
-              span.className = "piece";
-              span.innerHTML = PIECES[key];
-              el.appendChild(span);
-            }
-          }
+          el.className = "sq " + (isLight ? "light" : "dark");
           if (file === 0) {
             const r = document.createElement("span");
             r.className = "coord rank";
@@ -1438,24 +1758,154 @@ INDEX_HTML = """<!doctype html>
             f.textContent = "abcdefgh"[displayFile];
             el.appendChild(f);
           }
+          boardSquareEls[rank * 8 + file] = el;
           boardEl.appendChild(el);
+        }
+      }
+      boardStructureOrientation = boardOrientation;
+    }
+
+    function setSquarePiece(el, piece) {
+      const normalized = piece || "";
+      if ((el.dataset.piece || "") === normalized) return;
+      el.dataset.piece = normalized;
+      const existing = el.querySelector(".piece");
+      if (!normalized) {
+        if (existing) existing.remove();
+        return;
+      }
+      const key = PIECE_KEY[normalized];
+      if (!key || !PIECES[key]) {
+        if (existing) existing.remove();
+        el.dataset.piece = "";
+        return;
+      }
+      if (existing) {
+        existing.innerHTML = PIECES[key];
+        return;
+      }
+      const span = document.createElement("span");
+      span.className = "piece";
+      span.innerHTML = PIECES[key];
+      el.appendChild(span);
+    }
+
+    function renderBoard(fen, lastMove) {
+      if (!boardSquareEls || boardStructureOrientation !== boardOrientation) {
+        buildBoardStructure();
+      }
+      const pieces = parseFen(fen);
+      const lastFrom = lastMove ? lastMove.from : "";
+      const lastTo = lastMove ? lastMove.to : "";
+      for (let rank = 0; rank < 8; rank++) {
+        for (let file = 0; file < 8; file++) {
+          const el = boardSquareEls[rank * 8 + file];
+          const displayRank = boardOrientation === "black" ? 7 - rank : rank;
+          const displayFile = boardOrientation === "black" ? 7 - file : file;
+          const sq = squareName(displayFile, displayRank);
+          el.classList.toggle("last", sq === lastFrom || sq === lastTo);
+          setSquarePiece(el, pieces[sq] || "");
         }
       }
     }
 
-    function renderMoves(moves, whiteName = "White", blackName = "Black") {
+    function movesTableHeadHtml(whiteName, blackName) {
+      return `<thead><tr><th>#</th><th>White<br><span style="color:var(--muted);font-size:10px;text-transform:none;letter-spacing:0;font-weight:400">${escapeHtml(whiteName)}</span></th><th>Black<br><span style="color:var(--muted);font-size:10px;text-transform:none;letter-spacing:0;font-weight:400">${escapeHtml(blackName)}</span></th></tr></thead>`;
+    }
+
+    function moveRowHtml(w, b, index, active) {
+      const whitePly = Number(w.ply || (index + 1));
+      const blackPly = b ? Number(b.ply || (index + 2)) : null;
+      const whiteActive = active !== null && whitePly === active;
+      const blackActive = active !== null && blackPly === active;
+      return `<tr class="${whiteActive || blackActive ? "move-row-active" : ""}"><td>${escapeHtml(w.move_number)}</td><td class="move-cell ${whiteActive ? "move-active" : ""}" data-ply="${escapeHtml(whitePly)}">${escapeHtml(w.san)}</td><td class="move-cell ${blackActive ? "move-active" : ""}" data-ply="${b ? escapeHtml(blackPly) : ""}">${b ? escapeHtml(b.san) : ""}</td></tr>`;
+    }
+
+    function appendLiveMoves(tbody, moves, fromCount, whiteName, blackName) {
+      for (let i = fromCount; i < moves.length; i++) {
+        const move = moves[i];
+        const isWhite = i % 2 === 0;
+        if (isWhite) {
+          const row = document.createElement("tr");
+          row.innerHTML = `<td>${escapeHtml(move.move_number)}</td><td class="move-cell move-active" data-ply="${escapeHtml(Number(move.ply || (i + 1)))}">${escapeHtml(move.san)}</td><td class="move-cell" data-ply=""></td>`;
+          tbody.appendChild(row);
+        } else {
+          const row = tbody.lastElementChild;
+          if (!row) continue;
+          const blackPly = Number(move.ply || (i + 1));
+          row.classList.add("move-row-active");
+          row.querySelectorAll(".move-cell").forEach(cell => cell.classList.remove("move-active"));
+          const blackCell = row.children[2];
+          blackCell.className = "move-cell move-active";
+          blackCell.dataset.ply = String(blackPly);
+          blackCell.textContent = move.san;
+        }
+      }
+      while (tbody.children.length > 5) {
+        tbody.removeChild(tbody.firstElementChild);
+      }
+      tbody.querySelectorAll("tr").forEach(row => {
+        row.classList.remove("move-row-active");
+        row.querySelectorAll(".move-cell").forEach(cell => cell.classList.remove("move-active"));
+      });
+      const lastRow = tbody.lastElementChild;
+      if (lastRow) {
+        lastRow.classList.add("move-row-active");
+        const activeCell = moves.length % 2 === 1 ? lastRow.children[1] : lastRow.children[2];
+        if (activeCell) activeCell.classList.add("move-active");
+      }
+    }
+
+    function renderMoves(moves, whiteName = "White", blackName = "Black", activePly = null) {
       const container = document.getElementById("moves");
       if (!moves.length) {
+        renderedLiveMoveCount = -1;
         container.innerHTML = '<div class="card-body"><div class="empty">No moves yet.</div></div>';
+        syncMoveListCollapsed();
+        syncMoveHistoryToggle();
         return;
       }
-      const rows = [];
-      for (let i = 0; i < moves.length; i += 2) {
-        const w = moves[i];
-        const b = moves[i + 1];
-        rows.push(`<tr><td>${escapeHtml(w.move_number)}</td><td>${escapeHtml(w.san)}</td><td>${b ? escapeHtml(b.san) : ""}</td></tr>`);
+      const active = activePly === null || activePly === undefined ? null : Number(activePly);
+      if (followLive && !moveListFullHistory && active !== null && active === moves.length) {
+        const tbody = container.querySelector("table.moves-tbl tbody");
+        if (tbody && renderedLiveMoveCount >= 0 && moves.length > renderedLiveMoveCount && moves.length <= renderedLiveMoveCount + 2) {
+          appendLiveMoves(tbody, moves, renderedLiveMoveCount, whiteName, blackName);
+          renderedLiveMoveCount = moves.length;
+          syncMoveListCollapsed();
+          syncMoveHistoryToggle();
+          return;
+        }
+        if (tbody && renderedLiveMoveCount === moves.length) {
+          syncMoveListCollapsed();
+          syncMoveHistoryToggle();
+          return;
+        }
+      } else {
+        renderedLiveMoveCount = -1;
       }
-      container.innerHTML = `<table class="moves-tbl"><thead><tr><th>#</th><th>White<br><span style="color:var(--muted);font-size:10px;text-transform:none;letter-spacing:0;font-weight:400">${escapeHtml(whiteName)}</span></th><th>Black<br><span style="color:var(--muted);font-size:10px;text-transform:none;letter-spacing:0;font-weight:400">${escapeHtml(blackName)}</span></th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+      const pairs = [];
+      for (let i = 0; i < moves.length; i += 2) {
+        pairs.push({ w: moves[i], b: moves[i + 1], index: i });
+      }
+      let end = pairs.length;
+      if (active !== null && Number.isFinite(active) && active > 0) {
+        const activeIndex = pairs.findIndex(pair => {
+          const whitePly = Number(pair.w.ply || (pair.index + 1));
+          const blackPly = pair.b ? Number(pair.b.ply || (pair.index + 2)) : null;
+          return whitePly === active || blackPly === active;
+        });
+        if (activeIndex >= 0) end = activeIndex + 1;
+      }
+      const visiblePairs = moveListFullHistory ? pairs : pairs.slice(Math.max(0, end - 5), end);
+      const rows = visiblePairs.map(pair => moveRowHtml(pair.w, pair.b, pair.index, active));
+      container.innerHTML = `<table class="moves-tbl">${movesTableHeadHtml(whiteName, blackName)}<tbody>${rows.join("")}</tbody></table>`;
+      if (followLive && !moveListFullHistory && active !== null && active === moves.length) {
+        renderedLiveMoveCount = moves.length;
+      } else {
+        renderedLiveMoveCount = -1;
+      }
+      syncMoveListCollapsed();
+      syncMoveHistoryToggle();
     }
 
     function selectedPly(data) {
@@ -1528,15 +1978,38 @@ INDEX_HTML = """<!doctype html>
       ].join("|");
     }
 
+    function pgnThoughtForPly(moves, ply) {
+      if (!moves || !moves.length) return "";
+      const move = moves[Math.max(0, Math.min(moves.length, ply)) - 1];
+      return move && move.comment ? String(move.comment).trim() : "";
+    }
+
     function renderBoardThinking(force = false) {
       const key = boardThinkingKey();
       if (!followLive && !force && replayThinkingKey === key) return;
+      const moves = latestGame && Array.isArray(latestGame.moves) ? latestGame.moves : [];
+      const ply = latestGame && latestGame.has_game ? selectedPly(latestGame) : moves.length;
+      const thought = pgnThoughtForPly(moves, ply);
+      if (thought) {
+        const move = moves[Math.max(0, ply - 1)] || null;
+        document.getElementById("board-thinking-meta").textContent = move
+          ? `PGN thought · ${moveNumberLabel(move)}`
+          : "PGN thought";
+        document.getElementById("board-thinking-logs").innerHTML = `<div class="log-entry composer comment log-kind-comment">
+          <div class="log-head">
+            <span><span class="bot-name">Composer-chess</span><span class="log-kind">comment</span></span>
+          </div>
+          <div class="log-text">${escapeHtml(thought)}</div>
+        </div>`;
+        replayThinkingKey = followLive ? "" : key;
+        return;
+      }
       const logs = latestGame && Array.isArray(latestGame.logs)
         ? latestGame.logs
         : (latestLearnerData && Array.isArray(latestLearnerData.logs) ? latestLearnerData.logs : []);
       const selected = logsForBoardPly(logs);
       document.getElementById("board-thinking-meta").textContent = selected.label;
-      document.getElementById("board-thinking-logs").innerHTML = logListHtml(selected.logs, "No bot decisions matched this replay move.");
+      document.getElementById("board-thinking-logs").innerHTML = logListHtml(selected.logs, "No thought on this move yet — waiting for PGN comment.");
       replayThinkingKey = followLive ? "" : key;
     }
 
@@ -1569,6 +2042,7 @@ INDEX_HTML = """<!doctype html>
       const value = clockValue(latestClock, side);
       el.textContent = formatClock(value);
       el.className = "clock";
+      el.setAttribute("aria-label", `${side} clock`);
       if (latestClock && latestClock.running_side === side && !latestClock.completed && (!Number.isFinite(value) || value > 0)) el.classList.add("running");
       if (Number.isFinite(value) && value <= 30000) el.classList.add("low");
       if (Number.isFinite(value) && value <= 10000) el.classList.add("danger");
@@ -1605,16 +2079,20 @@ INDEX_HTML = """<!doctype html>
 
     function playerBarHtml(side, name) {
       const isWhite = side === "White";
-      return `<span class="${isWhite ? "dot-w" : "dot-b"}"></span><span class="bar-name">${side}: ${escapeHtml(name)}</span><span id="${isWhite ? "white-clock" : "black-clock"}" class="clock">--:--</span>`;
+      return `<div class="player-bar-main"><span class="${isWhite ? "dot-w" : "dot-b"}"></span><span class="bar-name">${side}: ${escapeHtml(name)}</span></div><span id="${isWhite ? "white-clock" : "black-clock"}" class="clock" aria-label="${side} clock">--:--</span>`;
     }
 
     function renderPlayerBars(white, black) {
-      if (boardOrientation === "black") {
-        document.getElementById("top-player").innerHTML = playerBarHtml("White", white);
-        document.getElementById("bottom-player").innerHTML = playerBarHtml("Black", black);
-      } else {
-        document.getElementById("top-player").innerHTML = playerBarHtml("Black", black);
-        document.getElementById("bottom-player").innerHTML = playerBarHtml("White", white);
+      const key = `${boardOrientation}|${white}|${black}`;
+      if (renderedPlayerBarsKey !== key) {
+        renderedPlayerBarsKey = key;
+        if (boardOrientation === "black") {
+          document.getElementById("top-player").innerHTML = playerBarHtml("White", white);
+          document.getElementById("bottom-player").innerHTML = playerBarHtml("Black", black);
+        } else {
+          document.getElementById("top-player").innerHTML = playerBarHtml("Black", black);
+          document.getElementById("bottom-player").innerHTML = playerBarHtml("White", white);
+        }
       }
       updateClockDisplays();
     }
@@ -1654,6 +2132,7 @@ INDEX_HTML = """<!doctype html>
       const headers = data.headers || {};
       const white = headers.White || "White";
       const black = headers.Black || "Black";
+      syncDefaultBoardOrientation(white, black);
       const ply = selectedPly(data);
       const positions = data.positions || [];
       const position = positions.find(item => item.ply === ply) || {
@@ -1680,9 +2159,10 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("prev-move").disabled = ply <= 0;
       document.getElementById("next-move").disabled = ply >= data.moves.length;
       renderBoard(position.fen, position.last_move);
-      renderMoves(data.moves, white, black);
+      renderMoves(data.moves, white, black, ply);
       requestAnalysisForGame(data);
       renderBoardThinking();
+      renderEvalBar(latestAnalysis);
     }
 
     function setFollowLive(enabled) {
@@ -1786,12 +2266,67 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
+    function evalWhiteSharePct(line) {
+      if (!line) return 50;
+      if (line.white_mate !== null && line.white_mate !== undefined) {
+        return line.white_mate > 0 ? 97 : 3;
+      }
+      if (line.white_cp !== null && line.white_cp !== undefined) {
+        const cp = Number(line.white_cp);
+        return Math.max(5, Math.min(95, 50 + cp / 10));
+      }
+      const text = String(line.score || "").trim();
+      const mateMatch = text.match(/^([+-]?)M(\\d+)$/i);
+      if (mateMatch) {
+        return mateMatch[1] !== "-" ? 97 : 3;
+      }
+      const cpMatch = text.match(/^([+-]?\\d+(?:\\.\\d+)?)/);
+      if (cpMatch) {
+        const cp = Number(cpMatch[1]) * 100;
+        return Math.max(5, Math.min(95, 50 + cp / 10));
+      }
+      return 50;
+    }
+
+    function renderEvalBar(analysis) {
+      latestAnalysis = analysis || null;
+      const bar = document.getElementById("eval-bar");
+      const whiteFill = document.getElementById("eval-white");
+      const blackFill = document.getElementById("eval-black");
+      const label = document.getElementById("eval-label");
+      if (!bar || !whiteFill || !blackFill || !label) return;
+
+      const line = analysis && Array.isArray(analysis.lines) && analysis.lines.length ? analysis.lines[0] : null;
+      const inactive = !analysisEnabled || !analysis || analysis.enabled === false || analysis.error || analysis.message || !line;
+      bar.classList.toggle("hidden", inactive);
+
+      const whitePct = inactive ? 50 : evalWhiteSharePct(line);
+      const blackPct = 100 - whitePct;
+      const whiteFromBottom = boardOrientation !== "black";
+
+      whiteFill.style.height = `${whitePct}%`;
+      blackFill.style.height = `${blackPct}%`;
+      if (whiteFromBottom) {
+        whiteFill.style.bottom = "0";
+        whiteFill.style.top = "auto";
+        blackFill.style.top = "0";
+        blackFill.style.bottom = "auto";
+      } else {
+        whiteFill.style.top = "0";
+        whiteFill.style.bottom = "auto";
+        blackFill.style.bottom = "0";
+        blackFill.style.top = "auto";
+      }
+      label.textContent = inactive ? "—" : (line.score || "0.0");
+    }
+
     function renderAnalysis(analysis) {
       const container = document.getElementById("analysis");
       const meta = document.getElementById("analysis-meta");
       const title = document.getElementById("analysis-title");
       title.textContent = analysis && analysis.engine ? `Engine Analysis: ${analysis.engine}` : "Engine Analysis";
       if (!analysis || analysis.enabled === false) {
+        renderEvalBar(analysis);
         if (!analysisAvailable) {
           updateAnalysisControls();
           meta.textContent = "Unavailable";
@@ -1801,7 +2336,6 @@ INDEX_HTML = """<!doctype html>
         if (analysisEnabled) {
           analysisAvailable = false;
           analysisEnabled = false;
-          localStorage.setItem("livePgnAnalysis", "off");
           updateAnalysisControls();
           meta.textContent = "Unavailable";
           container.innerHTML = '<div class="empty">Analysis is unavailable. Start the viewer with Stockfish analysis enabled.</div>';
@@ -1817,17 +2351,20 @@ INDEX_HTML = """<!doctype html>
       if (analysis.error) {
         meta.textContent = "";
         container.innerHTML = `<div class="empty err">${escapeHtml(analysis.error)}</div>`;
+        renderEvalBar(analysis);
         return;
       }
       if (analysis.message) {
         meta.textContent = "";
         container.innerHTML = `<div class="empty">${escapeHtml(analysis.message)}</div>`;
+        renderEvalBar(analysis);
         return;
       }
       const lines = analysis.lines || [];
       meta.textContent = analysis.engine ? `${analysis.engine} · ${analysis.movetime_ms} ms` : "";
       if (!lines.length) {
         container.innerHTML = '<div class="empty">No analysis available.</div>';
+        renderEvalBar(analysis);
         return;
       }
       container.innerHTML = `<div class="analysis-list">${lines.map(line => `
@@ -1835,6 +2372,7 @@ INDEX_HTML = """<!doctype html>
           <div class="score">${escapeHtml(line.score)}</div>
           <div class="pv">${escapeHtml(line.pv_san || line.pv_uci || "")}<div class="pv-meta">depth ${escapeHtml(line.depth || "—")}${line.bestmove ? " · best " + escapeHtml(line.bestmove) : ""}</div></div>
         </div>`).join("")}</div>`;
+      renderEvalBar(analysis);
     }
 
     function renderStats(data) {
@@ -2239,6 +2777,116 @@ INDEX_HTML = """<!doctype html>
       renderResearch(await resp.json());
     }
 
+    function formatPoints(value) {
+      const number = Number(value || 0);
+      return Number.isInteger(number) ? `${number}` : number.toFixed(1);
+    }
+
+    function renderMasterCurrentAttempt(attempt, containerId, metaId) {
+      const container = document.getElementById(containerId);
+      const meta = document.getElementById(metaId);
+      if (!container || !meta) return;
+      if (!attempt || !attempt.exists) {
+        meta.textContent = "idle";
+        container.innerHTML = '<div class="empty">No current master-wisdom match is active.</div>';
+        return;
+      }
+      const totalGames = attempt.total_games || 0;
+      const completed = attempt.completed_games || 0;
+      const learnerPoints = formatPoints(attempt.learner_points);
+      const requiredPoints = formatPoints(attempt.required_points);
+      const neededPoints = formatPoints(attempt.needed_points);
+      const scorePct = Math.round((attempt.match_score || 0) * 100);
+      meta.textContent = `d${attempt.depth || ""} game ${attempt.current_game || completed}/${totalGames}`;
+      const games = (attempt.games || []).slice(-10);
+      const rows = games.map(row => {
+        const score = row.learner_score === null || row.learner_score === undefined ? "--" : formatPoints(row.learner_score);
+        return `<tr>
+          <td class="rk">${escapeHtml(row.game ?? "")}</td>
+          <td>${escapeHtml(row.result || "*")}</td>
+          <td class="n">${escapeHtml(score)}</td>
+        </tr>`;
+      }).join("");
+      const gamesHtml = rows
+        ? `<table class="stats-tbl"><thead><tr><th class="rk">Game</th><th>Result</th><th class="n">Learner</th></tr></thead><tbody>${rows}</tbody></table>`
+        : '<div class="empty">The current match has not recorded a completed game yet.</div>';
+      container.innerHTML = `<div class="learner-summary">
+        <div class="summary-row"><span>Status</span><strong>${escapeHtml(attempt.status || "in progress")}</strong></div>
+        <div class="summary-row"><span>Batch</span><strong>${escapeHtml(attempt.batch_size || 0)} games</strong></div>
+        <div class="summary-row"><span>Score</span><strong>${escapeHtml(learnerPoints)}/${escapeHtml(totalGames)} (${escapeHtml(scorePct)}%)</strong></div>
+        <div class="summary-row"><span>W-D-L</span><strong>${escapeHtml(attempt.wins || 0)}-${escapeHtml(attempt.draws || 0)}-${escapeHtml(attempt.losses || 0)}</strong></div>
+        <div class="summary-row"><span>Need</span><strong>${escapeHtml(requiredPoints)} points; ${escapeHtml(neededPoints)} more</strong></div>
+      </div>${gamesHtml}`;
+    }
+
+    function renderMasterWisdom(data) {
+      latestMasterData = data;
+      document.getElementById("master-updated").textContent = data.updated_at || "";
+      if (data.error) {
+        document.getElementById("master-summary").innerHTML = `<div class="empty err">${escapeHtml(data.error)}</div>`;
+        return;
+      }
+      const summary = data.summary || {};
+      const latest = (data.ladder && data.ladder.latest_attempt) || {};
+      const currentAttempt = data.current_attempt || {};
+      renderMasterCurrentAttempt(currentAttempt, "master-current-attempt", "master-current-meta");
+      renderMasterCurrentAttempt(currentAttempt, "master-current-attempt-main", "master-current-main-meta");
+      document.getElementById("master-summary").innerHTML = `<div class="learner-summary">
+        <div class="summary-row"><span>Context</span><strong>${escapeHtml(data.root || "")}</strong></div>
+        <div class="summary-row"><span>Processed</span><strong>${escapeHtml(summary.processed_games ?? 0)} games</strong></div>
+        <div class="summary-row"><span>Batch size</span><strong>${escapeHtml(summary.batch_size ?? 0)} games</strong></div>
+        <div class="summary-row"><span>Depth gate</span><strong>${escapeHtml(summary.current_depth ?? 1)} / ${escapeHtml(summary.target_depth ?? 8)}</strong></div>
+        <div class="summary-row"><span>Pass mark</span><strong>${escapeHtml(Math.round((summary.pass_score ?? 0.8) * 100))}% over ${escapeHtml(summary.games_per_attempt ?? 10)} games</strong></div>
+        <div class="summary-row"><span>Latest score</span><strong>${latest.games ? `${escapeHtml(Math.round((latest.score || 0) * 100))}% at depth ${escapeHtml(latest.depth)}` : "not run"}</strong></div>
+      </div>`;
+
+      const source = data.source || {};
+      const downloads = source.downloads || [];
+      document.getElementById("master-source-meta").textContent = `${source.months || 0} months`;
+      document.getElementById("master-source").innerHTML = researchListHtml(downloads.map(item => ({
+        title: `${item.month || ""} ${item.exists ? "downloaded" : "not downloaded"}`,
+        detail: `${item.filename || ""}; ${item.exists ? `${Math.round((item.size || 0) / 1024 / 1024)} MB` : item.path || ""}`,
+        state: item.exists ? "ok" : "warn",
+      })), "No source manifest yet.");
+
+      const wisdom = data.wisdom || {};
+      document.getElementById("master-wisdom-meta").textContent = wisdom.exists ? `${wisdom.size || 0} bytes` : "missing";
+      document.getElementById("master-wisdom-text").textContent = wisdom.exists ? wisdom.text || "" : "No master wisdom file generated yet.";
+
+      const leaderboard = data.leaderboard || [];
+      document.getElementById("master-leaderboard-meta").textContent = `${leaderboard.length} rows`;
+      if (!leaderboard.length) {
+        document.getElementById("master-leaderboard").innerHTML = '<div class="empty">No master-wisdom depth attempts yet.</div>';
+      } else {
+        const rows = leaderboard.slice(0, 20).map((row, index) => `
+          <tr>
+            <td class="rk">${index + 1}</td>
+            <td>d${escapeHtml(row.depth ?? "")}</td>
+            <td class="n">${escapeHtml(Math.round((row.score || 0) * 100))}%</td>
+            <td class="n">${escapeHtml(row.total_games ? `${row.games ?? 0}/${row.total_games}` : row.games ?? "")}</td>
+            <td class="n">${escapeHtml(row.wins ?? 0)}-${escapeHtml(row.draws ?? 0)}-${escapeHtml(row.losses ?? 0)}</td>
+            <td>${row.passed ? "passed" : row.early_stopped ? "early stop" : "learning"}</td>
+          </tr>`).join("");
+        document.getElementById("master-leaderboard").innerHTML = `<table class="stats-tbl"><thead><tr><th class="rk">#</th><th>Depth</th><th class="n">Score</th><th class="n">Games</th><th class="n">W-D-L</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+      }
+
+      const principles = data.principles || {};
+      const patternRows = []
+        .concat((principles.useful || []).map(row => ({ title: row.label, detail: "useful principle", state: "ok" })))
+        .concat((principles.caution || []).map(row => ({ title: row.label, detail: "caution principle", state: "warn" })));
+      document.getElementById("master-patterns-meta").textContent = `${patternRows.length} rows`;
+      document.getElementById("master-patterns").innerHTML = researchListHtml(patternRows, "No extracted principles yet.");
+
+      const skill = data.skill || {};
+      document.getElementById("master-skill-meta").textContent = skill.exists ? `${skill.size || 0} bytes` : "missing";
+      document.getElementById("master-skill-text").textContent = skill.exists ? skill.text || "" : "No learner-local master-game skill generated yet.";
+    }
+
+    async function loadMasterWisdom() {
+      const resp = await fetch("/api/master-wisdom", { cache: "no-store" });
+      renderMasterWisdom(await resp.json());
+    }
+
     function setDepthMatchStatus(text, isError = false) {
       const status = document.getElementById("research-depth-match-status");
       status.textContent = text || "";
@@ -2308,6 +2956,9 @@ INDEX_HTML = """<!doctype html>
           if (replayPath) params.set("path", replayPath);
         } else if (followLive && activeLivePgnPath) {
           params.set("path", activeLivePgnPath);
+          params.set("logs", "1");
+        } else if (followLive) {
+          params.set("logs", "1");
         }
         if (!followLive && viewedPly !== null) params.set("ply", String(viewedPly));
         const resp = await fetch(`/api/game?${params}`, { cache: "no-store" });
@@ -2364,13 +3015,14 @@ INDEX_HTML = """<!doctype html>
     }
 
     function clearFallbackPolling() {
-      for (const timer of [fallbackRefreshTimer, fallbackStatsTimer, fallbackLearnerTimer, fallbackResearchTimer, fallbackVersionTimer]) {
+      for (const timer of [fallbackRefreshTimer, fallbackStatsTimer, fallbackLearnerTimer, fallbackResearchTimer, fallbackMasterTimer, fallbackVersionTimer]) {
         if (timer !== null) window.clearInterval(timer);
       }
       fallbackRefreshTimer = null;
       fallbackStatsTimer = null;
       fallbackLearnerTimer = null;
       fallbackResearchTimer = null;
+      fallbackMasterTimer = null;
       fallbackVersionTimer = null;
     }
 
@@ -2380,6 +3032,7 @@ INDEX_HTML = """<!doctype html>
       fallbackStatsTimer = window.setInterval(loadStats, 3000);
       fallbackLearnerTimer = window.setInterval(loadLearner, 2500);
       fallbackResearchTimer = window.setInterval(loadResearch, 4000);
+      fallbackMasterTimer = window.setInterval(loadMasterWisdom, 4000);
       fallbackVersionTimer = window.setInterval(checkViewerVersion, 1200);
     }
 
@@ -2425,6 +3078,7 @@ INDEX_HTML = """<!doctype html>
       pushEvents.addEventListener("stats", () => onPushEvent("stats", () => loadStats()));
       pushEvents.addEventListener("learner", () => onPushEvent("learner", () => loadLearner()));
       pushEvents.addEventListener("research", () => onPushEvent("research", () => loadResearch()));
+      pushEvents.addEventListener("master-wisdom", () => onPushEvent("master-wisdom", () => loadMasterWisdom()));
       pushEvents.addEventListener("viewer-version", () => onPushEvent("viewer-version", () => checkViewerVersion()));
     }
 
@@ -2568,8 +3222,13 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("board-view-tab").addEventListener("click", () => setActiveView("board"));
     document.getElementById("learner-view-tab").addEventListener("click", () => setActiveView("learner"));
     document.getElementById("research-view-tab").addEventListener("click", () => setActiveView("research"));
+    document.getElementById("master-view-tab").addEventListener("click", () => setActiveView("master"));
     document.getElementById("research-depth-match-run").addEventListener("click", runDepthOneMatch);
     document.getElementById("follow-toggle").addEventListener("change", e => setFollowLive(e.target.checked));
+    document.getElementById("move-history-toggle").addEventListener("click", () => setMoveListFullHistory(!moveListFullHistory));
+    document.getElementById("move-list-toggle").addEventListener("click", () => setMoveListCollapsed(!moveListCollapsed));
+    document.getElementById("thinking-panel-toggle").addEventListener("click", () => setThinkingPanelCollapsed(!thinkingPanelCollapsed));
+    document.getElementById("analysis-collapse-toggle").addEventListener("click", () => setAnalysisPanelCollapsed(!analysisPanelCollapsed));
     document.getElementById("prev-move").addEventListener("click", () => navigateMove(-1));
     document.getElementById("next-move").addEventListener("click", () => navigateMove(1));
     document.getElementById("flip-board").addEventListener("click", () => setBoardOrientation(boardOrientation === "white" ? "black" : "white"));
@@ -2631,6 +3290,7 @@ INDEX_HTML = """<!doctype html>
     loadConfig();
     loadLearner();
     loadResearch();
+    loadMasterWisdom();
     setInterval(updateClockDisplays, 250);
     checkViewerVersion();
     startPushUpdates();
@@ -2795,12 +3455,16 @@ def parse_stockfish_info(lines: list[str], board: chess.Board, bestmove: str) ->
             if depth_index + 1 < len(tokens):
                 depth = int(tokens[depth_index + 1])
         pv = tokens[pv_index + 1 :]
+        sign = 1 if board.turn == chess.WHITE else -1
+        white_value = score_value * sign
         latest[multipv] = {
             "multipv": multipv,
             "depth": depth,
             "score": format_score(score_type, score_value, board.turn),
             "score_type": score_type,
             "score_value": score_value,
+            "white_cp": white_value if score_type == "cp" else None,
+            "white_mate": white_value if score_type == "mate" else None,
             "pv_uci": " ".join(pv[:8]),
             "pv_san": pv_to_san(board, pv[:8]),
             "bestmove": bestmove,
@@ -2965,10 +3629,16 @@ def read_game(
     moves = []
     positions = [{"ply": 0, "fen": board.fen(), "turn": "White", "last_move": None}]
     last_move = None
-    for ply, move in enumerate(game.mainline_moves(), start=1):
+    node = game
+    ply = 0
+    while node.variations:
+        child = node.variation(0)
+        move = child.move
+        ply += 1
         san = board.san(move)
         from_square = chess.square_name(move.from_square)
         to_square = chess.square_name(move.to_square)
+        comment = (child.comment or "").strip()
         board.push(move)
         moves.append(
             {
@@ -2977,6 +3647,7 @@ def read_game(
                 "side": "White" if ply % 2 else "Black",
                 "san": san,
                 "uci": move.uci(),
+                "comment": comment,
             }
         )
         last_move = {"from": from_square, "to": to_square, "uci": move.uci()}
@@ -2989,6 +3660,7 @@ def read_game(
                 "san": san,
             }
         )
+        node = child
 
     stat = path.stat()
     result_header = game.headers.get("Result", "*")
@@ -3406,11 +4078,21 @@ def viewer_event_signatures(pgn_path: Path, stats_dir: Path) -> dict[str, str]:
         tree_signature(ZERO_KNOWLEDGEBASE_DIR, {".md", ".json", ".txt", ".yaml", ".yml"}),
         tree_signature(ZERO_RESEARCH_DIR, {".md", ".json", ".jsonl", ".txt"}),
     ]
+    master_parts = [
+        file_signature(MASTER_WISDOM_PATH),
+        file_signature(MASTER_WISDOM_STATE_PATH),
+        file_signature(MASTER_WISDOM_LEADERBOARD_PATH),
+        file_signature(MASTER_WISDOM_MD_PATH),
+        file_signature(MASTER_WISDOM_JSON_PATH),
+        file_signature(MASTER_WISDOM_SKILL_PATH),
+        tree_signature(MASTER_WISDOM_DIR, {".md", ".json", ".jsonl", ".txt"}),
+    ]
     return {
         "game": "|".join(game_parts),
         "stats": tree_signature(stats_dir, {".pgn", ".json"}, {"backups"}),
         "learner": "|".join(learner_parts),
         "research": "|".join(research_parts),
+        "master-wisdom": "|".join(master_parts),
         "viewer-version": hot_reload_stamp(),
     }
 
@@ -3548,6 +4230,8 @@ def game_log_window(headers: chess.pgn.Headers) -> tuple[datetime | None, dateti
 
 def bot_from_thread_line(line: str) -> tuple[str, str]:
     lower = line.lower()
+    if "composer-chess" in lower or "engine=composer" in lower:
+        return "composer", "Composer-chess"
     if str(LEARNER_DIR).lower() in lower:
         return "learner", "Codex-chess-learner"
     if "context=" in lower:
@@ -3574,70 +4258,75 @@ def collect_learner_logs(
     window_start: datetime | None = None,
     window_end: datetime | None = None,
 ) -> tuple[list[dict], int]:
-    if not ENGINE_LOG_DIR.exists():
-        return [], 0
+    log_sources = [
+        (ENGINE_LOG_DIR, "codex-chess-*.log"),
+        (COMPOSER_LOG_DIR, "composer-chess-*.log"),
+    ]
     entries: list[dict] = []
     learner_log_count = 0
-    paths = sorted(ENGINE_LOG_DIR.glob("codex-chess-*.log"), key=lambda path: path.stat().st_mtime, reverse=True)
-    for path in paths[:max_files]:
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
+    for log_dir, glob_pattern in log_sources:
+        if not log_dir.exists():
             continue
-        current_bot = "unknown"
-        current_bot_label = "Unknown"
-        current_side = ""
-        interesting: list[tuple[str, str, str, str]] = []
-        for line in lines:
-            if "thread started:" in line:
-                current_bot, current_bot_label = bot_from_thread_line(line)
-                if current_bot == "learner":
-                    learner_log_count += 1
-            current_side = side_from_line(line, current_side)
-            if any(
-                marker in line
-                for marker in (
-                    "thread started:",
-                    "decision prompt:",
-                    "decision comment:",
-                    "illegal Codex move",
-                    "invalid Codex response",
-                    "invalid model",
-                    "codex turn error",
-                    "Codex app-server turn failed",
-                    "bestmove ",
-                )
-            ):
-                interesting.append((line, current_bot, current_bot_label, current_side))
-        selected_lines = interesting[-per_file_tail:] if per_file_tail is not None else interesting
-        for line, bot, bot_label, side in selected_lines:
-            timestamp, text = parse_log_timestamp(line)
-            parsed_time = parse_log_datetime(timestamp)
-            if window_start and (parsed_time is None or parsed_time < window_start):
+        paths = sorted(log_dir.glob(glob_pattern), key=lambda path: path.stat().st_mtime, reverse=True)
+        for path in paths[:max_files]:
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
                 continue
-            if window_end and (parsed_time is None or parsed_time > window_end):
-                continue
-            entry_fen = line_fen_key(text)
-            entry_move = line_move(text)
-            if target_fens is not None or target_moves is not None:
-                side_key = (side or "").lower()
-                fen_match = bool(entry_fen and target_fens and ((entry_fen, side_key) in target_fens or (entry_fen, "") in target_fens))
-                move_match = bool(entry_move and target_moves and entry_move in target_moves)
-                if not fen_match and not move_match:
+            current_bot = "unknown"
+            current_bot_label = "Unknown"
+            current_side = ""
+            interesting: list[tuple[str, str, str, str]] = []
+            for line in lines:
+                if "thread started:" in line:
+                    current_bot, current_bot_label = bot_from_thread_line(line)
+                    if current_bot == "learner":
+                        learner_log_count += 1
+                current_side = side_from_line(line, current_side)
+                if any(
+                    marker in line
+                    for marker in (
+                        "thread started:",
+                        "decision prompt:",
+                        "decision comment:",
+                        "illegal Codex move",
+                        "invalid Codex response",
+                        "invalid model",
+                        "codex turn error",
+                        "Codex app-server turn failed",
+                        "bestmove ",
+                    )
+                ):
+                    interesting.append((line, current_bot, current_bot_label, current_side))
+            selected_lines = interesting[-per_file_tail:] if per_file_tail is not None else interesting
+            for line, bot, bot_label, side in selected_lines:
+                timestamp, text = parse_log_timestamp(line)
+                parsed_time = parse_log_datetime(timestamp)
+                if window_start and (parsed_time is None or parsed_time < window_start):
                     continue
-            entries.append(
-                {
-                    "timestamp": timestamp,
-                    "text": text,
-                    "kind": classify_log_line(text),
-                    "bot": bot,
-                    "bot_label": bot_label,
-                    "side": side,
-                    "file": path.name,
-                    "fen_key": entry_fen,
-                    "uci": entry_move,
-                }
-            )
+                if window_end and (parsed_time is None or parsed_time > window_end):
+                    continue
+                entry_fen = line_fen_key(text)
+                entry_move = line_move(text)
+                if target_fens is not None or target_moves is not None:
+                    side_key = (side or "").lower()
+                    fen_match = bool(entry_fen and target_fens and ((entry_fen, side_key) in target_fens or (entry_fen, "") in target_fens))
+                    move_match = bool(entry_move and target_moves and entry_move in target_moves)
+                    if not fen_match and not move_match:
+                        continue
+                entries.append(
+                    {
+                        "timestamp": timestamp,
+                        "text": text,
+                        "kind": classify_log_line(text),
+                        "bot": bot,
+                        "bot_label": bot_label,
+                        "side": side,
+                        "file": path.name,
+                        "fen_key": entry_fen,
+                        "uci": entry_move,
+                    }
+                )
     entries.sort(key=lambda item: item.get("timestamp", ""), reverse=True)
     return entries[:max_entries], learner_log_count
 
@@ -3706,6 +4395,23 @@ def collect_zero_research_data() -> dict:
     data["climb"] = collect_zero_climb_data()
     data["depth_match"] = collect_zero_depth_match_data()
     return data
+
+
+def load_master_wisdom_module():
+    if not MASTER_WISDOM_PATH.exists():
+        raise FileNotFoundError(str(MASTER_WISDOM_PATH))
+    spec = importlib.util.spec_from_file_location("codex_chess_master_wisdom_viewer", MASTER_WISDOM_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load {MASTER_WISDOM_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def collect_master_wisdom_data() -> dict:
+    module = load_master_wisdom_module()
+    return module.collect_view_data()
 
 
 def read_json_file(path: Path, default):
@@ -4083,6 +4789,13 @@ class LivePgnHandler(BaseHTTPRequestHandler):
                 self.send_json(collect_zero_research_data())
             except Exception as exc:
                 self.send_json({"root": str(ZERO_DIR), "error": str(exc)})
+            return
+
+        if parsed.path == "/api/master-wisdom":
+            try:
+                self.send_json(collect_master_wisdom_data())
+            except Exception as exc:
+                self.send_json({"root": str(MASTER_WISDOM_DIR), "error": str(exc)})
             return
 
         if parsed.path == "/api/viewer-version":

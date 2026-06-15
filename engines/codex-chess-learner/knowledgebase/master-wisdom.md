@@ -1,0 +1,75 @@
+# Master Game Wisdom
+
+Authored-by: Codex batch synthesis
+Synthesis model: gpt-5.5
+Synthesis effort: xhigh
+Updated: 2026-06-15 00:05:56
+Source: Lichess Elite master-game batches plus the current Stockfish depth ladder
+Current Stockfish depth gate: 1 / 8
+
+Use this as generalized guidance for Codex-chess-learner only. This is not an opening book, a statistics table, a Stockfish line, a tablebase, a FEN-to-move map, or a Zero training signal.
+
+## Live Ladder Corrections
+
+- Before choosing, scan the opponent's forcing replies: checks, captures, mate threats, promotion threats, forks, pins, skewers, discoveries, defender removals, and attacks on loose valuable pieces.
+- Reject any candidate if the opponent's best forcing reply makes your king, queen, rook, passer, blockade, or key defender unsafe.
+- Do not play a quiet improving move while an immediate threat against your king, queen, rook, passer, blockade, or key defender remains unresolved.
+- After any capture, recapture, check, pawn break, or pawn advance, re-scan for counterchecks, loose pieces, pins, overloaded defenders, pawn races, and promotion threats.
+- Do not grab material if it opens your king, removes a defender, abandons a blockade, traps a valuable piece, or gives the opponent a forcing tempo.
+- Do not automatically recapture; compare checks, interpositions, safer trades, blockades, counter-threats, and king-safety moves first.
+- A valuable piece may enter or remain on a contested square only when it is defended, has safe retreats, and cannot be trapped, pinned, forked, overloaded, or chased with tempo.
+- If calculation is limited, choose the stable move that preserves king safety, material safety, legal retreats, defender balance, and pawn-race control.
+- When checks or promotion counterplay exist, neutralize them before improving a piece or taking material.
+- A check is useful only when it wins time, improves coordination, restricts the enemy king, removes a defender, supports conversion, or prevents counterplay.
+
+## How To Think
+
+- In the opening, develop minor pieces to defended useful squares, contest the center, and secure the king before slow flank play or unsupported major-piece activity.
+- Early queen or rook activity must solve a concrete problem or win time; otherwise it becomes a target for development with tempo.
+- An uncastled or exposed king needs concrete compensation: stable central control, coordinated defenders, and no useful enemy forcing replies.
+- Slow development is dangerous when it lets the opponent gain center control, open lines, or create threats before your pieces coordinate.
+- Pawn breaks should be prepared by piece activity, defender balance, and king safety; avoid breaks that create loose pieces or open lines against your king.
+- Before changing the pawn structure, compare open lines, weak squares, passers, blockades, king shelter, and which side gains the next forcing tempo.
+- Quiet improvement is progress only when it improves safety, coordination, pressure, king shelter, passer control, or key-square control.
+- When choosing among quiet moves, fix the least safe piece, loosest defender, weakest king shelter, or most urgent counterplay first.
+- Repeated quiet moves must build pressure or repair weaknesses; do not shuffle while the opponent gains forcing threats.
+- Knights on advanced posts need defenders, retreat squares, and protection against pawn challenges, pins, forks, and overloads.
+- Bishops should use diagonals to attack targets, restrict the king, defend key squares, support safe breaks, or tie defenders down.
+- Rooks should seek active files, invasion lanes, checking distance, and passer-support lines without abandoning defensive duties.
+- Queens need safe retreats, countercheck control, defended captures, and promotion awareness before entering contested squares.
+- Prefer coordinated pressure over single-piece attacks; threats work best when pieces defend each other and restrict the enemy king.
+- Captures are not automatically progress; prove the captured square, recapture sequence, and final alignment do not leave a stronger reply.
+- If a forcing sequence contains several captures or checks, evaluate the final position rather than the first gain or first tempo.
+- Trade only when your king, remaining pieces, passers, and blockades are safer after the exchange.
+- When defending, prefer moves that solve multiple problems: reduce checks, defend loose pieces, cover entry squares, and keep counterplay alive.
+- A defended-looking piece can still be tactically loose if its defender is pinned, overloaded, removable, or needed for king safety.
+- Against a check, prefer a response that also improves shelter, blocks a line, trades the attacker, or keeps counterplay alive.
+- King activity before the endgame is safe only when forcing checks are controlled, central lines are stable, and key defenders remain coordinated.
+- When the board simplifies, activate the king, improve the worst piece, and control passers before taking loose pawns.
+- Endgame king activity is progress only when it escorts a passer, attacks fixed pawns, gains key squares, improves shelter, or escapes checks safely.
+- Do not walk the king into activity if doing so permits checks, forks, lost passers, or abandoned defenses.
+- Passed-pawn conversion depends on support, blockade control, king access, checking resources, and stopping the opponent's fastest passer.
+- When both sides have passers, compare speed, support, blockades, checks, and king access before advancing.
+- Do not assume a near-promoted pawn wins by itself; coordinate the route, king safety, and enemy checking resources.
+- A protected passer is strongest when pieces support its path and the king or rook can answer checking counterplay.
+- Rook endings reward active rooks that check from safe distance, cut off the king, attack passers, or support promotion without becoming passive.
+- Queen endings demand king shelter, countercheck awareness, promotion control, and safe checking routes before pawn grabbing.
+- In rook and queen endings, do not take side material until your king has shelter and the opponent's checking route is controlled.
+- Endgame checks are strongest when they improve the checking piece, force the enemy king away from passers, win time for promotion, or stop counterplay.
+- A checking rook or queen must keep safe distance, escape squares, and coordination with the king or passer.
+- If a check lets the opponent improve king safety or gain tempo on the attacker, improving coordination may be better.
+- Convert advantages by improving the worst-placed piece before forcing matters, but switch immediately to defense if the opponent creates checks or promotion threats.
+- A winning position can still fail if you allow repeated checks, loose-piece tactics, unsupported passers, or an active enemy king.
+- In pawn races, calculate the opponent's fastest forcing route first, including checks that gain time or drag your king away from the promotion path.
+- When behind, seek forcing defensive resources such as checks, blockades, trades, attacks on loose pieces, and ways to slow passers instead of waiting passively.
+
+## Move-Selection Checklist
+
+For every candidate legal move:
+
+- Is my king safe after the opponent's best check?
+- Does the move hang my queen, rook, a minor piece, or a critical defender?
+- What forcing reply does the opponent have?
+- Does the move improve safety, activity, coordination, or conversion?
+
+Choose the final UCI move only from legal_moves after eliminating moves that hang the king, queen, rook, or a tactically loose piece.

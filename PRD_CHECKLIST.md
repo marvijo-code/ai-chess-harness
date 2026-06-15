@@ -187,3 +187,36 @@
 - [x] Prevent Zero replay training from inverting first-principles material/capture/progress priors.
 - [x] Block internally promoted Zero candidates that regress on the current failed external stage.
 - [x] Validate the protected-prior and external regression-guard behavior with focused Zero tests.
+- [x] Add a resumable Lichess Elite/master-game downloader under ignored `out/lichess-master` artifacts.
+- [x] Add batched learner-only master-game wisdom extraction that writes principle-only `master-wisdom.md/json`.
+- [x] Add a learner-local Agent Skill for generalized master-game wisdom without exact FEN-to-move rules or opening-family win-rate summaries.
+- [x] Add a learn/play/repeat master-wisdom Stockfish depth ladder with 10-game batches, 80% pass gates, batch-size escalation on failure, and progression through depth 8.
+- [x] Add viewer Master Wisdom tab and a separate master-wisdom leaderboard.
+- [x] Mirror real master-wisdom ladder games to a viewer-compatible live PGN/status sidecar while training is in progress.
+- [x] Validate focused master-wisdom extraction/ladder tests, viewer API tests, compile checks, and a browser smoke for the new tab.
+- [x] Preserve Codex-authored batch wisdom so later learn/evaluate cycles do not overwrite learner-facing principles with generated counters.
+- [x] Add a current match leaderboard/current attempt card to the game viewer and Master Wisdom tab while ladder games train.
+- [x] Remove opening-family aggregation from master-wisdom state and learner-facing outputs.
+- [x] Pin authored master wisdom and its learner-local skill into learner move context so capped prompt selection cannot skip them during master-wisdom ladder games.
+- [x] Stop master-wisdom depth attempts early once the required 10-game points target is unreachable, then record the partial attempt and start the next learning batch.
+- [x] Make master-wisdom live games emit ticking viewer clocks and `[%clk ...]` comments.
+- [x] Move the board move list directly below the board and highlight the current displayed move.
+- [x] Auto-fetch the next Lichess Elite archive when the current local downloads cannot satisfy a requested master-wisdom learning batch.
+- [x] Default the viewer board orientation so `Codex-chess-learner` is at the bottom and verify analysis is enabled in the active viewer.
+- [x] Limit the board move list to the latest five move-number rows by default, keep the Hide panel toggle, and add a separate full-history toggle.
+- [x] Manually patch learner master wisdom with compact principle-only priority corrections from live ladder blunder classes, mirrored to JSON and the learner-local skill.
+- [x] Use `gpt-5.5` with extra-high reasoning (`xhigh`) for master-wisdom synthesis while keeping ladder game play on `gpt-5.3-codex`.
+- [x] After a failed 10-game master-wisdom gate, scan the next master-game batch move-by-move into bounded abstract evidence for `gpt-5.5`/`xhigh` synthesis before starting the next 10-game attempt.
+- [x] Make learner reasoning explicitly apply authored master wisdom first and make monitor reporting describe existing-wisdom coverage instead of fresh “obvious mistake” discovery when the wisdom already covers the class.
+- [x] Preflight master-wisdom learner play model availability before Stockfish ladder games and record infrastructure blockers without adding fake ladder losses.
+- [x] Add an explicit master-wisdom play-model override for account compatibility while preserving global FastChess Codex defaults.
+- [x] Persist master-wisdom per-archive resume metadata so exhausted or already processed ZIPs are skipped cheaply in later cycles.
+- [x] Validate master-wisdom model blocker handling, play-model override propagation, and archive resume-skip behavior with focused tests.
+- [x] Make master-wisdom learner UCI bestmove timeouts record as game forfeits instead of terminating the cycle, and validate with a focused regression test.
+- [x] Summarize the Zero depth-2 convergence stall from automation memory and climb artifacts.
+- [x] Let externally safe, self-play-trained neutral candidates escape the frozen generation-12 internal draw gate.
+- [x] Add bounded first-principles local tactical search to Zero's deliberative move selector without external labels.
+- [x] Make deterministic first-principles alpha-beta search the final live Zero move arbiter when Stockfish gates expose shallow PUCT failures.
+- [x] Protect Zero value mobility from inverted self-play weights.
+- [x] Make Zero's alpha-beta final arbiter fast enough for full local Stockfish gate batches without changing gate criteria.
+- [ ] Validate the convergence fixes with focused tests, compile checks, and bounded Stockfish depth gates through depth 8.

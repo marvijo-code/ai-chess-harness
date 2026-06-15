@@ -1,4 +1,4 @@
-"""Process all decisive TWIC games, append wisdom ledger, commit/push per issue."""
+"""Process all decisive TWIC games, aggregate wisdom, commit/push per issue."""
 from __future__ import annotations
 
 import argparse
@@ -14,32 +14,41 @@ import chess.pgn
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "out" / "twic-manual-wisdom"
-DOCS_LEDGER = ROOT / "docs" / "manual-wisdom-twic-ledger.md"
 DOCS_MASTER = ROOT / "docs" / "manual-wisdom-master-games.md"
 DOCS_CHECKLIST = ROOT / "docs" / "manual-wisdom-checklist.md"
+EXTEND_FLOOR = 1401
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from analyze_twic_decisive_games import GameAnalysis, analyze_decisive_game, THEME_LESSONS
+from analyze_twic_decisive_games import GameAnalysis, analyze_decisive_game
 from manual_twic_wisdom import (
     DEFAULT_OUT,
     RESULT_WIN_RE,
     SignalLedger,
+    asdict,
     download_issue,
     ledger_to_dict,
+    merge_ledgers,
     parse_pgn_date,
+    process_issue,
     read_pgn_texts,
     scan_game_signals,
 )
+from synthesize_twic_wisdom import write_wisdom_artifacts
+from twic_batch_status import write_status
 
 COMMIT_PATHS = [
     "docs/manual-wisdom-master-games.md",
-    "docs/manual-wisdom-twic-ledger.md",
+    "docs/manual-wisdom-sources.md",
+    "docs/manual-wisdom-sources.json",
+    "docs/manual-wisdom-batch-status.md",
     "docs/manual-wisdom-checklist.md",
     "docs/manual-wisdom-prompt.md",
     "tools/manual_twic_wisdom.py",
     "tools/analyze_twic_decisive_games.py",
     "tools/twic_game_board.py",
     "tools/run_twic_wisdom_batch.py",
+    "tools/synthesize_twic_wisdom.py",
+    "tools/twic_batch_status.py",
     "tools/render_manual_wisdom_doc.py",
     ".gitignore",
 ]
@@ -49,25 +58,54 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def pct(n: int, d: int) -> str:
-    return f"{100.0 * n / d:.1f}%" if d else "0%"
-
-
-def load_issues(out_dir: Path) -> list[dict]:
+def load_state(out_dir: Path) -> dict:
     state_path = out_dir / "state.json"
     if not state_path.exists():
         raise SystemExit(f"Missing {state_path}; run manual_twic_wisdom.py first.")
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    return sorted(state.get("issues", []), key=lambda row: row["issue"], reverse=True)
+    return json.loads(state_path.read_text(encoding="utf-8"))
 
 
-def pick_sample_game(analyses: list[GameAnalysis]) -> GameAnalysis | None:
-    if not analyses:
-        return None
-    return max(
-        analyses,
-        key=lambda a: (a.white_elo or 0) + (a.black_elo or 0),
-    )
+def save_state(out_dir: Path, state: dict) -> None:
+    (out_dir / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def load_issues(out_dir: Path) -> list[dict]:
+    return sorted(load_state(out_dir).get("issues", []), key=lambda row: row["issue"], reverse=True)
+
+
+def scan_issue_into_state(out_dir: Path, issue: int) -> dict:
+    state = load_state(out_dir)
+    known = {row["issue"] for row in state.get("issues", [])}
+    if issue in known:
+        return next(row for row in state["issues"] if row["issue"] == issue)
+
+    write_status(phase="scan", current_issue=issue, note=f"Downloading and parsing twic{issue}g.zip")
+    meta, ledger = process_issue(issue, out_dir / "downloads")
+    state.setdefault("issues", []).append(asdict(meta))
+    total = SignalLedger()
+    if state.get("ledger"):
+        total = SignalLedger(
+            games_parsed=state["ledger"].get("games_parsed", 0),
+            decisive_games=state["ledger"].get("decisive_games", 0),
+            winner_castled_first=state["ledger"].get("winner_castled_first", 0),
+            winner_castled_total=state["ledger"].get("winner_castled_total", 0),
+            loser_castled_total=state["ledger"].get("loser_castled_total", 0),
+            winner_developed_8plus=state["ledger"].get("winner_developed_8plus", 0),
+            loser_developed_8plus=state["ledger"].get("loser_developed_8plus", 0),
+            winner_king_attack_flags=state["ledger"].get("winner_king_attack_flags", 0),
+            queen_trade_winner_ahead=state["ledger"].get("queen_trade_winner_ahead", 0),
+            pawn_break_success=state["ledger"].get("pawn_break_success", 0),
+            open_file_to_king=state["ledger"].get("open_file_to_king", 0),
+            passed_pawn_conversion=state["ledger"].get("passed_pawn_conversion", 0),
+            phase_counts=Counter(state["ledger"].get("phase_counts", {})),
+            termination_counts=Counter(state["ledger"].get("termination_counts", {})),
+            event_samples=state["ledger"].get("event_samples", []),
+        )
+    merge_ledgers(total, ledger)
+    state["ledger"] = ledger_to_dict(total)
+    state["latest_issue"] = issue
+    save_state(out_dir, state)
+    return asdict(meta)
 
 
 def analyze_issue_full(issue: int, downloads_dir: Path) -> tuple[list[GameAnalysis], SignalLedger, list[date]]:
@@ -101,91 +139,17 @@ def analyze_issue_full(issue: int, downloads_dir: Path) -> tuple[list[GameAnalys
     return analyses, ledger, dates
 
 
-def render_issue_section(issue: int, meta: dict, analyses: list[GameAnalysis]) -> str:
-    decisive = len(analyses)
-    theme_counter: Counter[str] = Counter()
-    lesson_counter: Counter[str] = Counter()
+def theme_counts_from_analyses(analyses: list[GameAnalysis]) -> Counter[str]:
+    counts: Counter[str] = Counter()
     for row in analyses:
         for theme in row.themes:
-            theme_counter[theme] += 1
-        lesson_counter[row.lesson] += 1
-
-    lines = [
-        f"## TWIC {issue} · twic{issue}g.zip",
-        "",
-        f"| Field | Value |",
-        f"|---|---|",
-        f"| Date span | {meta.get('earliest_date', '?')} → {meta.get('latest_date', '?')} |",
-        f"| Total games | {meta.get('game_count', 0):,} |",
-        f"| Decisive analyzed | {decisive:,} |",
-        f"| Draws skipped | {meta.get('draw_count', 0):,} |",
-        "",
-    ]
-    if theme_counter:
-        lines.append("**Theme rates (decisive games):**")
-        lines.append("")
-        for theme, count in theme_counter.most_common(8):
-            label = THEME_LESSONS.get(theme, theme)
-            lines.append(f"- `{theme}` — {count:,} ({pct(count, decisive)}): {label}")
-        lines.append("")
-
-    sample = pick_sample_game(analyses)
-    if sample:
-        lines.extend(
-            [
-                "**Highest-rated sample:**",
-                f"- {sample.white} ({sample.white_elo}) vs {sample.black} ({sample.black_elo}) · **{sample.result}** · {sample.event}",
-                f"- Primary themes: {', '.join(sample.themes) or 'general_technique'}",
-                f"- Lesson: {sample.lesson}",
-                "",
-            ]
-        )
-    lines.append("---")
-    lines.append("")
-    return "\n".join(lines)
+            counts[theme] += 1
+    return counts
 
 
-def ensure_ledger_header(path: Path) -> None:
-    if path.exists():
-        return
-    path.write_text(
-        "# TWIC decisive-game wisdom ledger\n\n"
-        "Auto-generated by `tools/run_twic_wisdom_batch.py`. One section per TWIC issue.\n\n"
-        "---\n\n",
-        encoding="utf-8",
-    )
-
-
-def update_master_coverage(processed: int, total: int, decisive: int, latest_issue: int, oldest_issue: int) -> None:
-    block = (
-        "## Batch mode (active)\n\n"
-        f"Updated: {utc_now()}\n\n"
-        "| Field | Value |\n"
-        "|---|---|\n"
-        f"| Mode | Automated — all decisive games, board-verified heuristics |\n"
-        f"| TWIC issues done | {processed} / {total} |\n"
-        f"| Decisive games analyzed | {decisive:,} |\n"
-        f"| Issue range (in progress) | {latest_issue} → {oldest_issue} |\n"
-        f"| Per-issue log | [manual-wisdom-twic-ledger.md](manual-wisdom-twic-ledger.md) |\n"
-        f"| Target cutoff | 2025-01-01 |\n\n"
-        "---\n\n"
-    )
-    text = DOCS_MASTER.read_text(encoding="utf-8")
-    marker = "## Batch mode (active)"
-    if marker in text:
-        start = text.index(marker)
-        rest = text[start + len(marker) :]
-        end = rest.find("\n---\n")
-        if end == -1:
-            end = len(rest)
-        text = text[:start] + block + rest[end + len("\n---\n") :].lstrip("\n")
-    else:
-        anchor = "\n## Principles"
-        if anchor in text:
-            text = text.replace(anchor, "\n\n" + block + anchor, 1)
-        else:
-            text = text + "\n\n" + block
-    DOCS_MASTER.write_text(text, encoding="utf-8")
+def write_wisdom_doc(progress: dict) -> None:
+    theme_totals = Counter(progress.get("theme_totals", {}))
+    write_wisdom_artifacts(progress, theme_totals)
 
 
 def git_commit_push(message: str, paths: list[str]) -> bool:
@@ -201,73 +165,116 @@ def git_commit_push(message: str, paths: list[str]) -> bool:
     return True
 
 
+def build_work_queue(out_dir: Path, extend: bool, completed: set[int]) -> list[int]:
+    state = load_state(out_dir)
+    scanned = {row["issue"] for row in state.get("issues", [])}
+    pending = sorted(scanned - completed, reverse=True)
+    if not extend:
+        return pending
+
+    floor = min(scanned) if scanned else 1647
+    if floor <= EXTEND_FLOOR:
+        return pending
+
+    extension = list(range(floor - 1, EXTEND_FLOOR - 1, -1))
+    seen: set[int] = set()
+    queue: list[int] = []
+    for issue in pending + extension:
+        if issue not in seen:
+            seen.add(issue)
+            queue.append(issue)
+    return queue
+
+
 def run_batch(
     out_dir: Path,
     until_date: date,
     commit_every: int = 1,
     push: bool = True,
+    extend: bool = False,
+    stop_at_cutoff: bool = True,
 ) -> dict:
-    issues = load_issues(out_dir)
     progress_path = out_dir / "batch-progress.json"
-    progress = {"completed_issues": [], "decisive_games": 0, "wisdom_updates": 0}
+    progress = {"completed_issues": [], "decisive_games": 0, "wisdom_updates": 0, "theme_totals": {}}
     if progress_path.exists():
         progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        progress.setdefault("theme_totals", {})
 
     completed = set(progress.get("completed_issues", []))
-    ensure_ledger_header(DOCS_LEDGER)
-    meta_by_issue = {row["issue"]: row for row in issues}
+    theme_totals: Counter[str] = Counter(progress.get("theme_totals", {}))
     pending_commit = 0
+    work = build_work_queue(out_dir, extend, completed)
 
-    for meta in issues:
-        issue = meta["issue"]
+    write_status(
+        phase="starting",
+        note=f"Work queue: {len(work)} issues ({'extend to ' + str(EXTEND_FLOOR) if extend else 'analyze pending only'})",
+    )
+
+    for issue in work:
+        meta = scan_issue_into_state(out_dir, issue) if extend else next(
+            (row for row in load_issues(out_dir) if row["issue"] == issue), {"issue": issue}
+        )
         if issue in completed:
             continue
-        if meta.get("latest_date") and meta["latest_date"] < until_date.isoformat():
-            # still process this issue once — it spans cutoff
-            pass
 
+        write_status(
+            phase="analyze",
+            current_issue=issue,
+            note=f"Tagging {meta.get('decisive_count', '?')} decisive games for wisdom corpus",
+        )
         analyses, ledger, _ = analyze_issue_full(issue, out_dir / "downloads")
-        section = render_issue_section(issue, meta, analyses)
-        with DOCS_LEDGER.open("a", encoding="utf-8") as fh:
-            fh.write(section)
+        issue_themes = theme_counts_from_analyses(analyses)
+        theme_totals.update(issue_themes)
 
         completed.add(issue)
         progress["completed_issues"] = sorted(completed, reverse=True)
         progress["decisive_games"] = progress.get("decisive_games", 0) + len(analyses)
         progress["wisdom_updates"] = progress.get("wisdom_updates", 0) + 1
+        progress["theme_totals"] = dict(theme_totals)
         progress["latest_issue"] = issue
         progress["updated_at"] = utc_now()
         progress_path.write_text(json.dumps(progress, indent=2), encoding="utf-8")
 
-        summary = {
-            "issue": issue,
-            "decisive": len(analyses),
-            "total_decisive": progress["decisive_games"],
-            "ledger": ledger_to_dict(ledger),
-        }
+        write_wisdom_doc(progress)
+        write_status(
+            phase="analyze",
+            current_issue=issue,
+            note=f"Done TWIC {issue}: +{len(analyses):,} decisive ({progress['decisive_games']:,} total)",
+        )
+
         (out_dir / "analysis-summary.json").write_text(
-            json.dumps({**summary, "theme_totals": progress.get("theme_totals", {})}, indent=2),
+            json.dumps(
+                {
+                    "issue": issue,
+                    "decisive": len(analyses),
+                    "total_decisive": progress["decisive_games"],
+                    "ledger": ledger_to_dict(ledger),
+                    "theme_totals": progress["theme_totals"],
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
 
-        update_master_coverage(
-            len(completed),
-            len(issues),
-            progress["decisive_games"],
-            max(completed),
-            min(completed),
+        pending_commit += 1
+        print(
+            json.dumps({"issue": issue, "decisive": len(analyses), "total": progress["decisive_games"]}),
+            flush=True,
         )
 
-        pending_commit += 1
-        print(json.dumps({"issue": issue, "decisive": len(analyses), "total": progress["decisive_games"]}))
-
         if push and pending_commit >= commit_every:
-            msg = f"docs: TWIC {issue} decisive-game wisdom ({len(analyses):,} games)"
+            msg = f"docs: TWIC {issue} wisdom corpus ({len(analyses):,} decisive games)"
             if git_commit_push(msg, COMMIT_PATHS):
                 pending_commit = 0
 
-        if meta.get("latest_date") and meta["latest_date"] < until_date.isoformat():
+        if (
+            stop_at_cutoff
+            and meta.get("latest_date")
+            and meta["latest_date"] < until_date.isoformat()
+        ):
             break
+
+    write_status(phase="done", note=f"Batch pass complete — {len(completed)} issues analyzed")
 
     if push and pending_commit > 0:
         git_commit_push(
@@ -280,7 +287,9 @@ def run_batch(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--until-date", default="2025-01-01")
+    parser.add_argument("--until-date", default="2025-01-01", help="State scan stop + optional batch stop")
+    parser.add_argument("--extend", action="store_true", help="Scan older TWIC issues into state.json first")
+    parser.add_argument("--no-stop-at-cutoff", action="store_true", help="Process all issues in state (for extending past the original cutoff)")
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--commit-every", type=int, default=1, help="Commit after N TWIC issues")
     parser.add_argument("--no-push", action="store_true")
@@ -290,6 +299,8 @@ def main() -> None:
         date.fromisoformat(args.until_date),
         commit_every=args.commit_every,
         push=not args.no_push,
+        extend=args.extend,
+        stop_at_cutoff=not args.no_stop_at_cutoff,
     )
     print(json.dumps({"done": True, **progress}, indent=2))
 

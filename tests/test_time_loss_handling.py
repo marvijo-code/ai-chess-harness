@@ -113,10 +113,49 @@ class TimeLossHandlingTests(unittest.TestCase):
 
     def test_codex_engine_lean_context_is_smaller_than_full_context(self):
         module = load_module("codex_chess_uci_context_test", ROOT / "engines" / "codex-chess" / "codex_chess_uci.py")
-        client = module.CodexAppServer("gpt-test", "high", use_memory=True, use_skills=True, learning_mode=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            context_dir = Path(tmp)
+            knowledgebase_dir = context_dir / "knowledgebase"
+            skills_dir = context_dir / "skills"
+            tools_dir = context_dir / "tools"
+            knowledgebase_dir.mkdir()
+            (skills_dir / "master-game-wisdom").mkdir(parents=True)
+            tools_dir.mkdir()
+            (knowledgebase_dir / "master-wisdom.md").write_text("Always use the authored principles.\n", encoding="utf-8")
+            (knowledgebase_dir / "other.md").write_text("Recent but not pinned.\n", encoding="utf-8")
+            (skills_dir / "master-game-wisdom" / "SKILL.md").write_text("Use master-game principles.\n", encoding="utf-8")
 
-        full_context = client.learner_context("full")
-        lean_context = client.learner_context("lean")
+            original_paths = (
+                module.CONTEXT_DIR,
+                module.MEMORY_PATH,
+                module.SKILLS_DIR,
+                module.KNOWLEDGEBASE_DIR,
+                module.TOOLS_DIR,
+                module.FEN_KNOWLEDGE_PATH,
+                module.STRATEGY_LESSONS_PATH,
+            )
+            module.CONTEXT_DIR = context_dir
+            module.MEMORY_PATH = context_dir / "MEMORY.md"
+            module.SKILLS_DIR = skills_dir
+            module.KNOWLEDGEBASE_DIR = knowledgebase_dir
+            module.TOOLS_DIR = tools_dir
+            module.FEN_KNOWLEDGE_PATH = knowledgebase_dir / "fen-curriculum-lessons.md"
+            module.STRATEGY_LESSONS_PATH = knowledgebase_dir / "strategy-lessons.md"
+            try:
+                client = module.CodexAppServer("gpt-test", "high", use_memory=True, use_skills=True, learning_mode=True)
+
+                full_context = client.learner_context("full")
+                lean_context = client.learner_context("lean")
+            finally:
+                (
+                    module.CONTEXT_DIR,
+                    module.MEMORY_PATH,
+                    module.SKILLS_DIR,
+                    module.KNOWLEDGEBASE_DIR,
+                    module.TOOLS_DIR,
+                    module.FEN_KNOWLEDGE_PATH,
+                    module.STRATEGY_LESSONS_PATH,
+                ) = original_paths
 
         self.assertEqual(lean_context["profile"], "lean")
         self.assertLessEqual(len(lean_context["memory"]), len(full_context["memory"]))
@@ -125,6 +164,13 @@ class TimeLossHandlingTests(unittest.TestCase):
         self.assertLessEqual(len(lean_context["knowledgebase"]), len(full_context["knowledgebase"]))
         self.assertLessEqual(len(lean_context["skills"]), len(full_context["skills"]))
         self.assertLessEqual(len(lean_context["tools"]), len(full_context["tools"]))
+        self.assertIn("apply the existing authored master wisdom in knowledgebase/master-wisdom.md first", full_context["policy"].lower())
+        self.assertIn("skills/master-game-wisdom/skill.md", full_context["policy"].lower())
+        self.assertIn("authored master-wisdom principle", lean_context["policy"].lower())
+        self.assertEqual(full_context["knowledgebase"][0]["path"], "master-wisdom.md")
+        self.assertEqual(lean_context["knowledgebase"][0]["path"], "master-wisdom.md")
+        self.assertTrue(any(item["path"] == "master-game-wisdom/SKILL.md" for item in full_context["skills"]))
+        self.assertTrue(any(item["path"] == "master-game-wisdom/SKILL.md" for item in lean_context["skills"]))
         self.assertIn("tools_path", full_context)
 
     def test_codex_engine_training_effort_is_lower_than_default_high(self):
