@@ -173,3 +173,19 @@
 **Result:** 1-0 (resignation (playbook self-eval hopeless)) as Black, playbook v23 — `playbook-vs-stockfish-depth-6-20260706-133939.pgn`
 
 **Training:** classes {'slow_outplay': 1}, adjustments {'search.root_variety': (5.0, 6.0), 'mobility.per_square': (3.0, 4.0), 'pieces.rook_open_file': (22.0, 24.0)}.
+
+### 2026-07-06 16:58 — Depth 6 attempt 7 (LOSS)
+
+**Result:** 0-1 (max plies 240 material adjudication (-400cp white)) as White, playbook v24 — `playbook-vs-stockfish-depth-6-20260706-162651.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (6.0, 7.0)}.
+
+### 2026-07-06 17:30 — Depth 6 attempt 8 (LOSS)
+
+**Result:** 1-0 (resignation (playbook self-eval hopeless)) as Black, playbook v25 — `playbook-vs-stockfish-depth-6-20260706-165857.pgn`
+
+**Training:** classes {'slow_outplay': 1}, adjustments {'search.root_variety': (7.0, 8.0), 'mobility.per_square': (4.0, 5.0), 'pieces.rook_open_file': (24.0, 26.0), 'king.tropism': (2.0, 3.0)}.
+
+### 2026-07-06 18:03 — Depth 6 attempt 9 (WIN)
+
+**Result:** 1-0 (CHECKMATE) as White, playbook v26 — `playbook-vs-stockfish-depth-6-20260706-173739.pgn`
