@@ -48,6 +48,11 @@ for _d in range(1, 64):
     for _m in range(1, 64):
         _LMR[_d][_m] = int(0.5 + math.log(_d) * math.log(_m) / 2.1)
 
+# King-danger attack weights per piece type (index = piece_type: pawn..king).
+# Used to accumulate a super-linear king-safety penalty so mating attacks are
+# foreseen a ply earlier than the flat per-attacker ring term alone allows.
+ATTACK_UNITS = [0, 1, 2, 2, 3, 5, 0]
+
 WEIGHT_LINE_RE = re.compile(r"^\s*-\s*([a-z][a-z0-9_.]*)\s*=\s*(-?\d+(?:\.\d+)?)")
 
 DEFAULT_PLAYBOOK: dict[str, float] = {
@@ -77,6 +82,8 @@ DEFAULT_PLAYBOOK: dict[str, float] = {
     "king.open_file_penalty": 24,
     "king.ring_attack_penalty": 12,
     "king.tropism": 2,
+    "king.danger_scale": 10,
+    "king.danger_cap": 250,
     "pawns.passed_base": 18,
     "pawns.passed_per_rank": 14,
     "pawns.doubled_penalty": 12,
@@ -330,6 +337,11 @@ def white_eval(board: chess.Board) -> int:
     rook_semi = get("pieces.rook_semi_open_file", defaults["pieces.rook_semi_open_file"])
     rook_seventh = get("pieces.rook_seventh", defaults["pieces.rook_seventh"])
 
+    # King-danger accumulators: units/attackers threatening each king, filled
+    # in the piece pass below and turned into a super-linear penalty after.
+    danger_units = {chess.WHITE: 0, chess.BLACK: 0}
+    danger_attackers = {chess.WHITE: 0, chess.BLACK: 0}
+
     for color in (chess.WHITE, chess.BLACK):
         sign = 1 if color == chess.WHITE else -1
         own_pawns = pawns_w if color == chess.WHITE else pawns_b
@@ -361,12 +373,20 @@ def white_eval(board: chess.Board) -> int:
             val = PV[pt]
             table = PST[pt]
             enemy_king = bk if color == chess.WHITE else wk
+            enemy_color = not color
+            unit_w = ATTACK_UNITS[pt]
             for sq in scan_forward(bb):
                 idx = sq if color == chess.WHITE else square_mirror(sq)
                 att = attacks_mask(sq)
                 score += sign * (val + table[idx] + mobility_w * popcount(att))
                 if enemy_ring:
-                    score += sign * ring_w * popcount(att & enemy_ring)
+                    ring_hits = popcount(att & enemy_ring)
+                    if ring_hits:
+                        score += sign * ring_w * ring_hits
+                        # Accumulate weighted attack units against the enemy
+                        # king for the super-linear danger term below.
+                        danger_units[enemy_color] += unit_w * ring_hits
+                        danger_attackers[enemy_color] += 1
                 if enemy_king is not None:
                     # King tropism: attackers gain by standing near the enemy
                     # king (TWIC: king attacks decide 50.0% of games).
@@ -386,6 +406,19 @@ def white_eval(board: chess.Board) -> int:
         if ksq is not None:
             idx = ksq if color == chess.WHITE else square_mirror(ksq)
             score += sign * (PST_KING_MG[idx] * mg + PST_KING_EG[idx] * phase)
+
+    # Super-linear king danger: real attacks need >= 2 attackers, and danger
+    # grows with the square of accumulated attack units (capped), so the
+    # engine foresees mating nets a ply earlier than flat ring pressure allows
+    # and defends instead of walking into them (depth-8 king-collapse losses).
+    if mg > 0.15:
+        danger_scale = get("king.danger_scale", defaults["king.danger_scale"])
+        danger_cap = get("king.danger_cap", defaults["king.danger_cap"])
+        for kcolor in (chess.WHITE, chess.BLACK):
+            if danger_attackers[kcolor] >= 2:
+                units = danger_units[kcolor]
+                penalty = min(units * units * danger_scale / 100.0, danger_cap) * mg
+                score -= (penalty if kcolor == chess.WHITE else -penalty)
 
     # Bishop pair.
     if popcount(pieces_mask(chess.BISHOP, chess.WHITE)) >= 2:

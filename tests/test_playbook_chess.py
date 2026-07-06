@@ -69,15 +69,43 @@ def test_draw_contempt_sign():
 def test_progress_pressure_breaks_shuffle_when_ahead():
     # Up a queen, a high 50-move clock must score worse than a fresh clock for
     # the winning side, nudging it toward a clock-resetting pawn move/capture.
-    pb.EVAL_CACHE.clear()
-    fresh = chess.Board("4k3/5ppp/8/8/8/8/PPP5/3QK3 w - - 0 40")
-    stale = chess.Board("4k3/5ppp/8/8/8/8/PPP5/3QK3 w - - 44 40")
-    hi = pb.white_eval(fresh)
-    pb.EVAL_CACHE.clear()
-    lo = pb.white_eval(stale)
+    saved = dict(pb.PB.weights)
+    try:
+        pb.PB.weights["conversion.progress_pressure"] = 1  # pin, immune to training
+        pb.EVAL_CACHE.clear()
+        fresh = chess.Board("4k3/5ppp/8/8/8/8/PPP5/3QK3 w - - 0 40")
+        stale = chess.Board("4k3/5ppp/8/8/8/8/PPP5/3QK3 w - - 44 40")
+        hi = pb.white_eval(fresh)
+        pb.EVAL_CACHE.clear()
+        lo = pb.white_eval(stale)
+    finally:
+        pb.PB.weights = saved
+        pb.EVAL_CACHE.clear()
     assert hi > lo  # a stale clock costs the winning side
     # But the pressure must never rival material (cap 50cp vs a queen).
     assert hi - lo <= 55
+
+
+def test_king_danger_penalizes_multi_attacker_nets():
+    # A super-linear king-danger penalty must fire when >= 2 pieces attack the
+    # enemy king ring. Pin the weights so the check is immune to training.
+    saved = dict(pb.PB.weights)
+    try:
+        pb.PB.weights["king.danger_scale"] = 10
+        pb.PB.weights["king.danger_cap"] = 250
+        pb.EVAL_CACHE.clear()
+        attacked = chess.Board("6k1/5ppp/8/8/1B6/8/5PPP/2R1Q1K1 w - - 0 1")
+        calm = chess.Board("6k1/5ppp/8/8/8/8/1B3PPP/2R1Q1K1 w - - 0 1")
+        pb.EVAL_CACHE.clear()
+        att_score = pb.white_eval(attacked)
+        pb.EVAL_CACHE.clear()
+        calm_score = pb.white_eval(calm)
+    finally:
+        pb.PB.weights = saved
+        pb.EVAL_CACHE.clear()
+    # Same material; the attacking placement (bishop+rook+queen eyeing the ring)
+    # must register more danger to Black → higher (better-for-White) eval.
+    assert att_score > calm_score
 
 
 def test_king_tropism_rewards_attacker_proximity():

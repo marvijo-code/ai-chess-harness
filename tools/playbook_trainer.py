@@ -59,6 +59,7 @@ BOUNDS: dict[str, tuple[float, float, float]] = {
     "king.open_file_penalty": (10, 40, 3),
     "king.ring_attack_penalty": (6, 24, 2),
     "king.tropism": (1, 6, 1),
+    "king.danger_scale": (4, 30, 3),
     "pawns.passed_base": (10, 32, 2),
     "pawns.passed_per_rank": (8, 24, 2),
     "conversion.simplify_bonus": (2, 10, 1),
@@ -83,7 +84,7 @@ CLASS_ADJUSTMENTS: dict[str, tuple[list[str], list[str]]] = {
         ["development_edge"],
     ),
     "king_collapse": (
-        ["king.ring_attack_penalty", "king.shield_pawn", "king.open_file_penalty", "development.castle_urgency"],
+        ["king.danger_scale", "king.ring_attack_penalty", "king.shield_pawn", "king.open_file_penalty", "development.castle_urgency"],
         ["king_attack"],
     ),
     "failed_conversion": (
