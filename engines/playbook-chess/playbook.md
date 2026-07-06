@@ -12,13 +12,14 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 ## Search discipline
 
-- meta.version = 11
+- meta.version = 18
 - search.min_depth = 6 — always finish at least this depth before honoring the clock; shallow moves lose to one-ply tactics.
-- search.base_movetime_ms = 18000
+- search.base_movetime_ms = 24000
 - search.movetime_fraction = 0.90
 - search.draw_contempt = 80 — TWIC: 97.4% of decisive games contain a material swing; when we are ahead, a draw is a failed conversion, so repeated positions score negative for the side that is better.
 - search.equal_draw_aversion = 30 — the depth-2 gate drew by repetition from an equal position; win-gated ladders require playing on at equality, so even an equal draw scores mildly negative.
 - search.aspiration_window = 40
+- search.root_variety = 0 — rotates which equal-best root move is tried first; the trainer bumps this every round so a saturated playbook still produces a different game against a deterministic fixed-depth opponent.
 
 ## Material
 
@@ -40,14 +41,14 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 - development.undeveloped_minor_penalty = 12 — TWIC: a development edge shows up in 28.0% of decisive games (174,628/623,110).
 - development.uncastled_penalty = 18 — winners castle and connect rooks before starting operations.
-- development.castle_urgency = 6 — the depth-4 losses were pawn grabs with a central king (castled at move 27, already lost); every move past move 8 without castling costs more. TWIC: development edge decides 28.0% of games.
+- development.castle_urgency = 8 — the depth-4 losses were pawn grabs with a central king (castled at move 27, already lost); every move past move 8 without castling costs more. TWIC: development edge decides 28.0% of games.
 - development.early_queen_penalty = 10 — queen raids before castling won pawns and lost the king in the depth-4 gates; penalty scales with how far the queen has wandered while the king is unsafe.
 
 ## King safety
 
-- king.shield_pawn = 14
-- king.open_file_penalty = 27 — an open or half-open file next to the king is the highway every TWIC king attack uses.
-- king.ring_attack_penalty = 14 — TWIC: king attacks decide 50.0% of games (311,632/623,110); count every enemy attack touching the king ring.
+- king.shield_pawn = 16
+- king.open_file_penalty = 30 — an open or half-open file next to the king is the highway every TWIC king attack uses.
+- king.ring_attack_penalty = 16 — TWIC: king attacks decide 50.0% of games (311,632/623,110); count every enemy attack touching the king ring.
 
 ## Pawns
 
@@ -62,7 +63,7 @@ no opening-book move lists, no external-engine variations (PRD 166).
 - conversion.simplify_bonus = 7 — TWIC: queen trades while ahead appear in 18.5% of wins (115,121); trade pieces, not pawns, when up material.
 - conversion.king_activity = 18 — TWIC: king activation decides 18.0% of games (111,993); in simplified positions the king is a fighting piece.
 - conversion.keep_pawns = 12 — the depth-4 gate ended as a bare rook-vs-bishop book draw after trading every pawn while ahead; TWIC: passed pawns convert 52.0% of wins, and passers require keeping pawns on the board.
-- conversion.greed_damping = 25 — every depth-4 loss harvested material into a mating attack; centipawns beyond the winning edge are discounted 25% so safety outbids one more pawn grab.
+- conversion.greed_damping = 35 — every depth-4 loss harvested material into a mating attack; centipawns beyond the winning edge are discounted 25% so safety outbids one more pawn grab.
 - tempo.bonus = 12
 
 ## Principles (prose for humans and the trainer)
@@ -185,5 +186,101 @@ Games: `playbook-vs-stockfish-depth-4-20260706-080613.pgn` (1/2-1/2, draw).
 Diagnosis: repetition_draw x1. draw by threefold repetition.
 
 Adjustments: search.equal_draw_aversion 24 -> 30.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 08:41 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-5-20260706-082347.pgn` (1/2-1/2, draw).
+
+Diagnosis: blunder_swing x1, repetition_draw x1. eval fell -78 -> -351 around move 36; draw by threefold repetition.
+
+Adjustments: conversion.greed_damping 25 -> 35; search.base_movetime_ms 18000 -> 20000.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 08:56 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-5-20260706-084101.pgn` (1/2-1/2, draw).
+
+Diagnosis: blunder_swing x1, repetition_draw x1. eval fell +30 -> -393 around move 52; draw by threefold repetition.
+
+Adjustments: conversion.greed_damping 35 -> 45; search.base_movetime_ms 20000 -> 22000.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 09:19 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-5-20260706-085639.pgn` (0-1, loss).
+
+Diagnosis: blunder_swing x1. eval fell -203 -> -612 around move 67.
+
+Adjustments: conversion.greed_damping 45 -> 55; search.base_movetime_ms 22000 -> 24000.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 09:20 — Manual correction: greed damping rollback
+
+Rolled conversion.greed_damping 55 -> 35. The 45/55 bumps were misattributed:
+the depth-5 blunder swings started from LEVEL positions (tactical misses),
+not from winning ones, so damping the winning margin does not address them
+and 55% weakens conversion. The trainer now separates greed_blunder
+(drop from >= +300, steps damping) from blunder_swing (steps depth/time only).
+
+### 2026-07-06 09:47 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-5-20260706-091910.pgn` (1/2-1/2, draw).
+
+Diagnosis: blunder_swing x1, repetition_draw x1. eval fell +80 -> -755 around move 62; draw by threefold repetition.
+
+Adjustments: conversion.greed_damping 35 -> 45; search.base_movetime_ms 24000 -> 26000.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 10:23 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-5-20260706-094700.pgn` (0-1, loss).
+
+Diagnosis: blunder_swing x1, king_collapse x1. eval fell +80 -> -196 around move 43; mated shortly after a roughly level self-eval.
+
+Adjustments: conversion.greed_damping 45 -> 55; development.castle_urgency 6 -> 8; king.open_file_penalty 27 -> 30; king.ring_attack_penalty 14 -> 16; king.shield_pawn 14 -> 16; search.base_movetime_ms 26000 -> 28000.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); king_attack 311,632 games (50.0%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 10:24 — Manual correction: damping re-rollback and movetime reset
+
+conversion.greed_damping 55 -> 35 again (the pre-fix trainer re-stepped it from
+level-position blunders before the greed_blunder split was loaded), and
+search.base_movetime_ms 28000 -> 20000: 20s is where the depth-4 win and the
+clean depth-5 draws happened; 80-minute games starve the learn-quick loop.
+Trainer movetime cap lowered to 24000 so this lever saturates sanely.
+
+### 2026-07-06 10:44 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-5-20260706-102454.pgn` (1/2-1/2, draw).
+
+Diagnosis: blunder_swing x1, repetition_draw x1. eval fell -133 -> -552 around move 24; draw by threefold repetition.
+
+Adjustments: search.base_movetime_ms 20000 -> 22000.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 11:12 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-5-20260706-104457.pgn` (1/2-1/2, draw).
+
+Diagnosis: blunder_swing x1, repetition_draw x1. eval fell +222 -> -54 around move 20; draw by threefold repetition.
+
+Adjustments: search.base_movetime_ms 22000 -> 24000.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 11:31 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-5-20260706-111231.pgn` (1-0, loss).
+
+Diagnosis: blunder_swing x1. eval fell -72 -> -346 around move 49.
+
+Adjustments: no weight headroom left inside safety bounds.
 
 Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.

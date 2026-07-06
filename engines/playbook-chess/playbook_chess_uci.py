@@ -46,6 +46,7 @@ DEFAULT_PLAYBOOK: dict[str, float] = {
     "search.draw_contempt": 30,
     "search.equal_draw_aversion": 12,
     "search.aspiration_window": 40,
+    "search.root_variety": 0,
     "material.pawn": 100,
     "material.knight": 320,
     "material.bishop": 330,
@@ -812,6 +813,15 @@ def search_root(board: chess.Board, depth: int, alpha: int, beta: int) -> tuple[
     tt_move = entry[3] if entry else None
     prefer = STATE.best_root or tt_move
     moves = order_moves(board, list(board.legal_moves), 0, prefer)
+    if depth == 1 and prefer is None:
+        # Root variety: rotate which equal-best move is tried first so a
+        # saturated (unchanged) playbook still produces a different game
+        # against a deterministic fixed-depth opponent. Ties at the root are
+        # broken by order; deeper iterations inherit the depth-1 winner.
+        variety = int(PB["search.root_variety"])
+        if variety and len(moves) > 1:
+            shift = variety % len(moves)
+            moves = moves[shift:] + moves[:shift]
     best_score = -INF
     best_move: chess.Move | None = None
     for i, move in enumerate(moves):

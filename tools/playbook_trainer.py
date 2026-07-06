@@ -44,9 +44,10 @@ WEIGHT_LINE_RE = re.compile(r"^(\s*-\s*)([a-z][a-z0-9_.]*)(\s*=\s*)(-?\d+(?:\.\d
 # key -> (min, max, step per training round)
 BOUNDS: dict[str, tuple[float, float, float]] = {
     "search.min_depth": (3, 6, 1),
-    "search.base_movetime_ms": (4000, 30000, 2000),
+    "search.base_movetime_ms": (4000, 24000, 2000),
     "search.draw_contempt": (10, 80, 10),
     "search.equal_draw_aversion": (6, 30, 6),
+    "search.root_variety": (0, 999_999, 1),
     "mobility.per_square": (1, 6, 1),
     "pieces.rook_open_file": (10, 32, 2),
     "pieces.rook_seventh": (10, 36, 2),
@@ -68,7 +69,11 @@ BOUNDS: dict[str, tuple[float, float, float]] = {
 # failure class -> (weights to bump, supporting TWIC themes)
 CLASS_ADJUSTMENTS: dict[str, tuple[list[str], list[str]]] = {
     "blunder_swing": (
-        ["search.base_movetime_ms", "search.min_depth", "conversion.greed_damping"],
+        ["search.base_movetime_ms", "search.min_depth"],
+        ["material_swing"],
+    ),
+    "greed_blunder": (
+        ["conversion.greed_damping"],
         ["material_swing"],
     ),
     "opening_blunder": (
@@ -151,6 +156,12 @@ def diagnose_game(game: chess.pgn.Game) -> GameDiagnosis | None:
         drop = e1 - e2
         if drop >= 250:
             diag.classes.append("blunder_swing")
+            if e1 >= 300:
+                # Blundering FROM a winning position is greed; a drop from a
+                # level position is a plain tactical miss and must not push
+                # conversion.greed_damping (it was mis-stepped toward its cap
+                # by level-position losses at depth 5).
+                diag.classes.append("greed_blunder")
             if m2 <= 12:
                 diag.classes.append("opening_blunder")
             diag.notes.append(f"eval fell {e1:+d} -> {e2:+d} around move {m2}")
@@ -384,6 +395,12 @@ def train_round(
             targets[key] = min(hi, max(lo, cur + step))
 
     targets = {k: v for k, v in targets.items() if weights.get(k) != v}
+    # Always rotate root variety: even when every implicated weight sits at
+    # its safety cap, the next attempt must not replay the previous game
+    # against a deterministic fixed-depth opponent.
+    variety = weights.get("search.root_variety")
+    if variety is not None:
+        targets["search.root_variety"] = min(BOUNDS["search.root_variety"][1], variety + 1)
     new_text, applied = apply_adjustments(text, targets)
 
     version = int(weights.get("meta.version", 1))

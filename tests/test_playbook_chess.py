@@ -204,19 +204,23 @@ def test_trainer_ignores_wins(tmp_path):
     assert "- search.draw_contempt = 30" in playbook.read_text(encoding="utf-8")
 
 
-def test_trainer_respects_bounds_cap(tmp_path):
+def test_trainer_respects_bounds_cap_but_rotates_variety(tmp_path):
     playbook = tmp_path / "playbook.md"
     playbook.write_text(
-        "- meta.version = 3\n- search.draw_contempt = 80\n\n## Training log\n",
+        "- meta.version = 3\n- search.draw_contempt = 80\n- search.root_variety = 4\n\n## Training log\n",
         encoding="utf-8",
     )
     pgn = tmp_path / "game3.pgn"
     _write_gate_pgn(pgn, "1/2-1/2", "THREEFOLD REPETITION", [200, 200, 200])
     progress = _fake_progress(tmp_path / "progress.json")
     summary = trainer.train_round([pgn], playbook, fresh_sample=0, twic_progress_path=progress)
-    # Already at the cap: no draw_contempt change is possible.
+    # Already at the cap: no draw_contempt change is possible...
     assert "search.draw_contempt" not in summary["adjustments"]
-    assert "- search.draw_contempt = 80" in playbook.read_text(encoding="utf-8")
+    text = playbook.read_text(encoding="utf-8")
+    assert "- search.draw_contempt = 80" in text
+    # ...but every round still rotates root variety so the next game differs.
+    assert summary["adjustments"].get("search.root_variety") == (4.0, 5.0)
+    assert "- search.root_variety = 5" in text
 
 
 def test_climb_state_roundtrip(tmp_path, monkeypatch):
