@@ -15,3 +15,15 @@
 ### 2026-07-06 06:46 — Depth 2 attempt 2 (WIN)
 
 **Result:** 0-1 (CHECKMATE) as Black, playbook v2 — `playbook-vs-stockfish-depth-2-20260706-064313.pgn`
+
+**Gate passed.** Checkpoint: c23bab7. Advancing to depth 3.
+
+### 2026-07-06 06:53 — Depth 3 attempt 1 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as White, playbook v2 — `playbook-vs-stockfish-depth-3-20260706-064616.pgn`
+
+**Training:** classes {'failed_conversion': 1, 'repetition_draw': 1}, adjustments {'search.draw_contempt': (40.0, 50.0), 'pawns.passed_per_rank': (14.0, 16.0), 'conversion.simplify_bonus': (4.0, 5.0), 'conversion.king_activity': (12.0, 14.0)}.
+
+### 2026-07-06 06:57 — Depth 3 attempt 2 (WIN)
+
+**Result:** 0-1 (CHECKMATE) as Black, playbook v3 — `playbook-vs-stockfish-depth-3-20260706-065307.pgn`

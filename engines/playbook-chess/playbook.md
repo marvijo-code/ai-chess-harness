@@ -12,11 +12,11 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 ## Search discipline
 
-- meta.version = 2
+- meta.version = 3
 - search.min_depth = 4 — always finish at least this depth before honoring the clock; shallow moves lose to one-ply tactics.
 - search.base_movetime_ms = 8000
 - search.movetime_fraction = 0.90
-- search.draw_contempt = 40 — TWIC: 97.4% of decisive games contain a material swing; when we are ahead, a draw is a failed conversion, so repeated positions score negative for the side that is better.
+- search.draw_contempt = 50 — TWIC: 97.4% of decisive games contain a material swing; when we are ahead, a draw is a failed conversion, so repeated positions score negative for the side that is better.
 - search.equal_draw_aversion = 12 — the depth-2 gate drew by repetition from an equal position; win-gated ladders require playing on at equality, so even an equal draw scores mildly negative.
 - search.aspiration_window = 40
 
@@ -50,15 +50,15 @@ no opening-book move lists, no external-engine variations (PRD 166).
 ## Pawns
 
 - pawns.passed_base = 18
-- pawns.passed_per_rank = 14 — TWIC: passed-pawn conversion appears in 52.0% of decisive wins (324,194/623,110); each rank of advance matters more than the last.
+- pawns.passed_per_rank = 16 — TWIC: passed-pawn conversion appears in 52.0% of decisive wins (324,194/623,110); each rank of advance matters more than the last.
 - pawns.doubled_penalty = 12
 - pawns.isolated_penalty = 12
 
 ## Conversion (winning technique)
 
 - conversion.edge_threshold = 250
-- conversion.simplify_bonus = 4 — TWIC: queen trades while ahead appear in 18.5% of wins (115,121); trade pieces, not pawns, when up material.
-- conversion.king_activity = 12 — TWIC: king activation decides 18.0% of games (111,993); in simplified positions the king is a fighting piece.
+- conversion.simplify_bonus = 5 — TWIC: queen trades while ahead appear in 18.5% of wins (115,121); trade pieces, not pawns, when up material.
+- conversion.king_activity = 14 — TWIC: king activation decides 18.0% of games (111,993); in simplified positions the king is a fighting piece.
 - tempo.bonus = 12
 
 ## Principles (prose for humans and the trainer)
@@ -93,3 +93,13 @@ Diagnosis: repetition_draw x1. draw by threefold repetition.
 Adjustments: search.draw_contempt 30 -> 40.
 
 Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 06:53 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-3-20260706-064616.pgn` (1/2-1/2, draw).
+
+Diagnosis: failed_conversion x1, repetition_draw x1. held >= +300cp for 6+ own moves without winning; draw by threefold repetition.
+
+Adjustments: conversion.king_activity 12 -> 14; conversion.simplify_bonus 4 -> 5; pawns.passed_per_rank 14 -> 16; search.draw_contempt 40 -> 50.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; passed_pawn 324,194 games (52.0%); queen_trade_ahead 115,121 games (18.5%); king_activation 111,993 games (18.0%); material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): passed_pawn proxy 59.3%.
