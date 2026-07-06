@@ -66,6 +66,42 @@ def test_draw_contempt_sign():
     assert pb.draw_score(equal) < 0
 
 
+def test_greed_damping_discounts_excess_material():
+    # Up a queen: with damping the advantage must read smaller than without,
+    # but must stay clearly winning.
+    board = chess.Board("4k3/8/8/8/8/8/8/Q3K3 w - - 0 40")
+    saved = dict(pb.PB.weights)
+    try:
+        pb.PB.weights["conversion.greed_damping"] = 0
+        undamped = pb.white_eval(board)
+        pb.EVAL_CACHE.clear()
+        pb.PB.weights["conversion.greed_damping"] = 25
+        damped = pb.white_eval(board)
+    finally:
+        pb.PB.weights = saved
+        pb.EVAL_CACHE.clear()
+    assert damped < undamped
+    assert damped > 400
+
+
+def test_castle_urgency_and_queen_adventures():
+    # Same material, move 14: uncastled king with a wandering queen must score
+    # notably worse than the castled equivalent (depth-4 loss pattern).
+    adventurous = chess.Board("r1b1k2r/pppp1ppp/2n2n2/4p3/4P3/2N2N2/PPPP1PPP/R1B1K2R w KQkq - 0 14")
+    castled = chess.Board("r1b1k2r/pppp1ppp/2n2n2/4p3/4P3/2N2N2/PPPP1PPP/R1B2RK1 w kq - 0 14")
+    assert pb.white_eval(castled) > pb.white_eval(adventurous) + 40
+
+
+def test_keep_pawns_while_ahead():
+    # Up a rook with own pawns must evaluate better than up a rook with all
+    # pawns traded (bare R vs B drifts toward a book draw).
+    with_pawns = chess.Board("4k3/5b2/8/8/8/8/5PPP/4K2R w K - 0 40")
+    bare = chess.Board("4k3/5b2/8/8/8/8/8/4K2R w K - 0 40")
+    diff_with = pb.white_eval(with_pawns)
+    diff_bare = pb.white_eval(bare)
+    assert diff_with > diff_bare + 200  # pawns worth more than material alone
+
+
 def test_static_exchange_free_and_defended():
     free = chess.Board("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1")
     assert pb.static_exchange(free, chess.Move.from_uci("e4d5")) > 0

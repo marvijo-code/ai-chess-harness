@@ -58,6 +58,8 @@ DEFAULT_PLAYBOOK: dict[str, float] = {
     "pieces.rook_seventh": 24,
     "development.undeveloped_minor_penalty": 12,
     "development.uncastled_penalty": 18,
+    "development.castle_urgency": 6,
+    "development.early_queen_penalty": 10,
     "king.shield_pawn": 12,
     "king.open_file_penalty": 24,
     "king.ring_attack_penalty": 12,
@@ -68,6 +70,8 @@ DEFAULT_PLAYBOOK: dict[str, float] = {
     "conversion.edge_threshold": 250,
     "conversion.simplify_bonus": 4,
     "conversion.king_activity": 12,
+    "conversion.keep_pawns": 6,
+    "conversion.greed_damping": 25,
     "tempo.bonus": 12,
 }
 
@@ -275,88 +279,149 @@ def white_eval(board: chess.Board) -> int:
     phase = game_phase(board)
     mg = 1.0 - phase
     score = 0.0
+    weights = PB.weights
+    get = weights.get
+    defaults = DEFAULT_PLAYBOOK
 
-    mobility_w = PB["mobility.per_square"]
+    mobility_w = get("mobility.per_square", defaults["mobility.per_square"])
+    ring_w = get("king.ring_attack_penalty", defaults["king.ring_attack_penalty"]) * mg
     pawns_w = board.pieces_mask(chess.PAWN, chess.WHITE)
     pawns_b = board.pieces_mask(chess.PAWN, chess.BLACK)
     all_pawns = pawns_w | pawns_b
+    wk = board.king(chess.WHITE)
+    bk = board.king(chess.BLACK)
+    w_ring = chess.BB_KING_ATTACKS[wk] | chess.BB_SQUARES[wk] if wk is not None else 0
+    b_ring = chess.BB_KING_ATTACKS[bk] | chess.BB_SQUARES[bk] if bk is not None else 0
 
-    file_counts = {chess.WHITE: [0] * 8, chess.BLACK: [0] * 8}
+    file_counts_w = [0] * 8
+    file_counts_b = [0] * 8
     for sq in chess.scan_forward(pawns_w):
-        file_counts[chess.WHITE][chess.square_file(sq)] += 1
+        file_counts_w[sq & 7] += 1
     for sq in chess.scan_forward(pawns_b):
-        file_counts[chess.BLACK][chess.square_file(sq)] += 1
+        file_counts_b[sq & 7] += 1
 
-    for sq, piece in board.piece_map().items():
-        color = piece.color
+    popcount = chess.popcount
+    scan_forward = chess.scan_forward
+    square_mirror = chess.square_mirror
+    attacks_mask = board.attacks_mask
+    pieces_mask = board.pieces_mask
+
+    passed_base = get("pawns.passed_base", defaults["pawns.passed_base"])
+    passed_per_rank = get("pawns.passed_per_rank", defaults["pawns.passed_per_rank"])
+    doubled_pen = get("pawns.doubled_penalty", defaults["pawns.doubled_penalty"])
+    isolated_pen = get("pawns.isolated_penalty", defaults["pawns.isolated_penalty"])
+    rook_open = get("pieces.rook_open_file", defaults["pieces.rook_open_file"])
+    rook_semi = get("pieces.rook_semi_open_file", defaults["pieces.rook_semi_open_file"])
+    rook_seventh = get("pieces.rook_seventh", defaults["pieces.rook_seventh"])
+
+    for color in (chess.WHITE, chess.BLACK):
         sign = 1 if color == chess.WHITE else -1
-        pt = piece.piece_type
-        if pt == chess.KING:
-            idx = sq if color == chess.WHITE else chess.square_mirror(sq)
-            score += sign * (PST_KING_MG[idx] * mg + PST_KING_EG[idx] * phase)
-            continue
-        idx = sq if color == chess.WHITE else chess.square_mirror(sq)
-        score += sign * (PV[pt] + PST[pt][idx])
-        if pt != chess.PAWN:
-            score += sign * mobility_w * chess.popcount(board.attacks_mask(sq))
-        if pt == chess.ROOK:
-            f = chess.square_file(sq)
-            if not (all_pawns & chess.BB_FILES[f]):
-                score += sign * PB["pieces.rook_open_file"]
-            elif not ((pawns_w if color == chess.WHITE else pawns_b) & chess.BB_FILES[f]):
-                score += sign * PB["pieces.rook_semi_open_file"]
-            rank = chess.square_rank(sq)
-            if (color == chess.WHITE and rank == 6) or (color == chess.BLACK and rank == 1):
-                score += sign * PB["pieces.rook_seventh"]
-        elif pt == chess.PAWN:
-            enemy_pawns = pawns_b if color == chess.WHITE else pawns_w
-            if not (enemy_pawns & PASSED_MASK[color][sq]):
-                advance = chess.square_rank(sq) if color == chess.WHITE else 7 - chess.square_rank(sq)
-                score += sign * (PB["pawns.passed_base"] + advance * PB["pawns.passed_per_rank"])
-            f = chess.square_file(sq)
-            counts = file_counts[color]
+        own_pawns = pawns_w if color == chess.WHITE else pawns_b
+        enemy_pawns = pawns_b if color == chess.WHITE else pawns_w
+        counts = file_counts_w if color == chess.WHITE else file_counts_b
+        enemy_ring = b_ring if color == chess.WHITE else w_ring
+        passed_masks = PASSED_MASK[color]
+
+        # Pawns: material, PST, structure, passers.
+        pawn_val = PV[chess.PAWN]
+        pawn_pst = PST_PAWN
+        for sq in scan_forward(own_pawns):
+            idx = sq if color == chess.WHITE else square_mirror(sq)
+            score += sign * (pawn_val + pawn_pst[idx])
+            if not (enemy_pawns & passed_masks[sq]):
+                advance = sq >> 3 if color == chess.WHITE else 7 - (sq >> 3)
+                score += sign * (passed_base + advance * passed_per_rank)
+            f = sq & 7
             if counts[f] > 1:
-                score -= sign * PB["pawns.doubled_penalty"]
-            left = counts[f - 1] if f > 0 else 0
-            right = counts[f + 1] if f < 7 else 0
-            if left == 0 and right == 0:
-                score -= sign * PB["pawns.isolated_penalty"]
+                score -= sign * doubled_pen
+            if (counts[f - 1] if f > 0 else 0) == 0 and (counts[f + 1] if f < 7 else 0) == 0:
+                score -= sign * isolated_pen
+
+        # Pieces: material, PST, mobility, and king-ring pressure in one pass.
+        for pt in (chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN):
+            bb = pieces_mask(pt, color)
+            if not bb:
+                continue
+            val = PV[pt]
+            table = PST[pt]
+            for sq in scan_forward(bb):
+                idx = sq if color == chess.WHITE else square_mirror(sq)
+                att = attacks_mask(sq)
+                score += sign * (val + table[idx] + mobility_w * popcount(att))
+                if enemy_ring:
+                    score += sign * ring_w * popcount(att & enemy_ring)
+                if pt == chess.ROOK:
+                    f = sq & 7
+                    if not (all_pawns & chess.BB_FILES[f]):
+                        score += sign * rook_open
+                    elif not (own_pawns & chess.BB_FILES[f]):
+                        score += sign * rook_semi
+                    rank = sq >> 3
+                    if (color == chess.WHITE and rank == 6) or (color == chess.BLACK and rank == 1):
+                        score += sign * rook_seventh
+
+        # King: tapered PST.
+        ksq = wk if color == chess.WHITE else bk
+        if ksq is not None:
+            idx = ksq if color == chess.WHITE else square_mirror(ksq)
+            score += sign * (PST_KING_MG[idx] * mg + PST_KING_EG[idx] * phase)
 
     # Bishop pair.
-    if chess.popcount(board.pieces_mask(chess.BISHOP, chess.WHITE)) >= 2:
-        score += PB["pieces.bishop_pair"]
-    if chess.popcount(board.pieces_mask(chess.BISHOP, chess.BLACK)) >= 2:
-        score -= PB["pieces.bishop_pair"]
+    if popcount(pieces_mask(chess.BISHOP, chess.WHITE)) >= 2:
+        score += get("pieces.bishop_pair", defaults["pieces.bishop_pair"])
+    if popcount(pieces_mask(chess.BISHOP, chess.BLACK)) >= 2:
+        score -= get("pieces.bishop_pair", defaults["pieces.bishop_pair"])
 
     # Development discipline (opening only).
-    if board.fullmove_number <= 14 and mg > 0.5:
+    fullmove = board.fullmove_number
+    if fullmove <= 20 and mg > 0.5:
+        minor_pen = get(
+            "development.undeveloped_minor_penalty", defaults["development.undeveloped_minor_penalty"]
+        )
+        uncastled_pen = get("development.uncastled_penalty", defaults["development.uncastled_penalty"])
+        # Castling urgency grows every move past move 8 while the king still
+        # sits uncastled: pawn grabs must not outbid king safety forever.
+        urgency = get("development.castle_urgency", defaults["development.castle_urgency"])
+        queen_pen = get("development.early_queen_penalty", defaults["development.early_queen_penalty"])
         for color, back_rank_bb, sign in (
             (chess.WHITE, chess.BB_RANK_1, 1),
             (chess.BLACK, chess.BB_RANK_8, -1),
         ):
-            minors_home = chess.popcount(
-                (board.pieces_mask(chess.KNIGHT, color) | board.pieces_mask(chess.BISHOP, color))
-                & back_rank_bb
+            if fullmove <= 14:
+                minors_home = popcount(
+                    (pieces_mask(chess.KNIGHT, color) | pieces_mask(chess.BISHOP, color)) & back_rank_bb
+                )
+                score -= sign * minors_home * minor_pen
+            king_sq = wk if color == chess.WHITE else bk
+            uncastled = board.has_castling_rights(color) or (
+                king_sq is not None and (king_sq & 7) in (3, 4)
             )
-            score -= sign * minors_home * PB["development.undeveloped_minor_penalty"]
-            if board.has_castling_rights(color):
-                # Still able to castle but has not: mild nudge to finish development.
-                score -= sign * PB["development.uncastled_penalty"] * 0.5
-            else:
-                king_sq = board.king(color)
-                if king_sq is not None and chess.square_file(king_sq) in (3, 4):
-                    score -= sign * PB["development.uncastled_penalty"]
+            if uncastled:
+                base = 0.5 if board.has_castling_rights(color) else 1.0
+                score -= sign * uncastled_pen * base
+                if fullmove > 8:
+                    score -= sign * urgency * min(fullmove - 8, 12)
+                # Queen adventures before the king is safe are how the
+                # depth-4 games were lost: material greed with a central king.
+                qbb = pieces_mask(chess.QUEEN, color)
+                if qbb:
+                    qsq = chess.lsb(qbb)
+                    qrank = qsq >> 3 if color == chess.WHITE else 7 - (qsq >> 3)
+                    if qrank >= 3:
+                        score -= sign * queen_pen * qrank
 
-    # King safety (midgame-scaled).
+    # King safety: pawn shield and open files (ring pressure is scored in the
+    # piece pass above via attack coverage of the enemy king ring).
     if mg > 0.15:
+        shield_w = get("king.shield_pawn", defaults["king.shield_pawn"]) * mg
+        open_file_w = get("king.open_file_penalty", defaults["king.open_file_penalty"]) * mg
         for color in (chess.WHITE, chess.BLACK):
-            king_sq = board.king(color)
+            king_sq = wk if color == chess.WHITE else bk
             if king_sq is None:
                 continue
             sign = 1 if color == chess.WHITE else -1
-            enemy = not color
-            kf = chess.square_file(king_sq)
-            kr = chess.square_rank(king_sq)
+            kf = king_sq & 7
+            kr = king_sq >> 3
             own_pawns = pawns_w if color == chess.WHITE else pawns_b
             shield = 0
             ranks = (kr + 1, kr + 2) if color == chess.WHITE else (kr - 1, kr - 2)
@@ -365,17 +430,12 @@ def white_eval(board: chess.Board) -> int:
                 if not 0 <= nf <= 7:
                     continue
                 if not (all_pawns & chess.BB_FILES[nf]):
-                    score -= sign * PB["king.open_file_penalty"] * mg
+                    score -= sign * open_file_w
                 for nr in ranks:
                     if 0 <= nr <= 7 and own_pawns & chess.BB_SQUARES[chess.square(nf, nr)]:
                         shield += 1
                         break
-            score += sign * shield * PB["king.shield_pawn"] * mg
-            ring = chess.BB_KING_ATTACKS[king_sq]
-            attacks = 0
-            for rsq in chess.scan_forward(ring):
-                attacks += chess.popcount(board.attackers_mask(enemy, rsq))
-            score -= sign * attacks * PB["king.ring_attack_penalty"] * mg
+            score += sign * shield * shield_w
 
     # Conversion discipline: when clearly ahead, reward trading and king activity.
     matdiff = material_diff_white(board)
@@ -385,14 +445,34 @@ def white_eval(board: chess.Board) -> int:
         enemy_men = chess.popcount(board.occupied_co[not ahead])
         score += sign * PB["conversion.simplify_bonus"] * (16 - enemy_men)
         score += sign * PB["conversion.king_activity"] * king_centralization(board, ahead) * phase
+        # Winning endings need pawns: a material edge with no own pawns left
+        # (e.g. bare R vs B) is often a book draw, so keep pawns while ahead.
+        own_pawns = chess.popcount(board.pieces_mask(chess.PAWN, ahead))
+        score -= sign * PB["conversion.keep_pawns"] * max(0, 4 - own_pawns) * 2
+        score += sign * PB["conversion.keep_pawns"] * min(own_pawns, 4)
+        # Greed damping: extra loot beyond a winning edge is discounted so
+        # king safety and conversion terms can outbid one more pawn grab
+        # (every depth-4 loss came from harvesting material into an attack).
+        excess = abs(matdiff) - PB["conversion.edge_threshold"]
+        if excess > 0:
+            score -= sign * excess * PB["conversion.greed_damping"] / 100.0
 
     score += PB["tempo.bonus"] if board.turn == chess.WHITE else -PB["tempo.bonus"]
     return int(score)
 
 
-def evaluate(board: chess.Board) -> int:
+def pos_key(board: chess.Board):
+    """Cheap position key for TT/eval caching (falls back to zobrist)."""
+    try:
+        return board._transposition_key()
+    except AttributeError:
+        return chess.polyglot.zobrist_hash(board)
+
+
+def evaluate(board: chess.Board, key=None) -> int:
     """Static eval from the side-to-move perspective (negamax convention)."""
-    key = chess.polyglot.zobrist_hash(board)
+    if key is None:
+        key = pos_key(board)
     cached = EVAL_CACHE.get(key)
     if cached is None:
         if len(EVAL_CACHE) > 2_000_000:
@@ -525,11 +605,35 @@ def quiescence(board: chess.Board, alpha: int, beta: int, ply: int, qdepth: int 
             alpha = stand
         if qdepth >= QS_CAP:
             return alpha
-        moves = [
-            m
-            for m in board.legal_moves
-            if board.is_capture(m) or m.promotion == chess.QUEEN
-        ]
+        ek = board.king(not board.turn) if qdepth == 0 and stand + 350 > alpha else None
+        if ek is not None:
+            # First quiescence ply near alpha also examines quiet direct
+            # checks so mating nets and perpetuals surface one ply earlier.
+            # Direct-check target masks come from the enemy king square once
+            # per node (discovered checks ignored; gives_check per move is too
+            # slow at leaf volume).
+            occ = board.occupied
+            diag = chess.BB_DIAG_ATTACKS[ek][chess.BB_DIAG_MASKS[ek] & occ]
+            line = (
+                chess.BB_RANK_ATTACKS[ek][chess.BB_RANK_MASKS[ek] & occ]
+                | chess.BB_FILE_ATTACKS[ek][chess.BB_FILE_MASKS[ek] & occ]
+            )
+            targets = [0, chess.BB_PAWN_ATTACKS[not board.turn][ek], chess.BB_KNIGHT_ATTACKS[ek], diag, line, diag | line, 0]
+            bb_squares = chess.BB_SQUARES
+            piece_type_at = board.piece_type_at
+            moves = [
+                m
+                for m in board.legal_moves
+                if board.is_capture(m)
+                or m.promotion == chess.QUEEN
+                or bb_squares[m.to_square] & targets[piece_type_at(m.from_square) or 0]
+            ]
+        else:
+            moves = [
+                m
+                for m in board.legal_moves
+                if board.is_capture(m) or m.promotion == chess.QUEEN
+            ]
     else:
         if qdepth >= QS_CAP:
             return evaluate(board)
@@ -586,7 +690,7 @@ def alpha_beta(
     if depth <= 0:
         depth = 1
 
-    key = chess.polyglot.zobrist_hash(board)
+    key = pos_key(board)
     tt_move: chess.Move | None = None
     entry = TT.get(key)
     if entry is not None:
@@ -703,7 +807,7 @@ def alpha_beta(
 
 
 def search_root(board: chess.Board, depth: int, alpha: int, beta: int) -> tuple[int, chess.Move | None]:
-    key = chess.polyglot.zobrist_hash(board)
+    key = pos_key(board)
     entry = TT.get(key)
     tt_move = entry[3] if entry else None
     prefer = STATE.best_root or tt_move

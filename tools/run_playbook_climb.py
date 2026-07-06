@@ -482,7 +482,7 @@ def main() -> None:
         "--playbook-ms", type=int, default=0, help="0 = use search.base_movetime_ms from the playbook"
     )
     parser.add_argument("--max-plies", type=int, default=240)
-    parser.add_argument("--resign-threshold", type=int, default=900)
+    parser.add_argument("--resign-threshold", type=int, default=700)
     parser.add_argument("--resign-moves", type=int, default=6)
     parser.add_argument("--max-attempts", type=int, default=0, help="stop after N games this run")
     parser.add_argument("--budget-minutes", type=float, default=0, help="wall-clock budget for this run")

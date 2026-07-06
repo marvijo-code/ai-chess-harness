@@ -52,6 +52,8 @@ BOUNDS: dict[str, tuple[float, float, float]] = {
     "pieces.rook_seventh": (10, 36, 2),
     "development.undeveloped_minor_penalty": (6, 25, 2),
     "development.uncastled_penalty": (8, 32, 3),
+    "development.castle_urgency": (3, 14, 2),
+    "development.early_queen_penalty": (5, 24, 3),
     "king.shield_pawn": (6, 24, 2),
     "king.open_file_penalty": (10, 40, 3),
     "king.ring_attack_penalty": (6, 24, 2),
@@ -59,24 +61,26 @@ BOUNDS: dict[str, tuple[float, float, float]] = {
     "pawns.passed_per_rank": (8, 24, 2),
     "conversion.simplify_bonus": (2, 10, 1),
     "conversion.king_activity": (6, 24, 2),
+    "conversion.keep_pawns": (3, 16, 3),
+    "conversion.greed_damping": (10, 60, 10),
 }
 
 # failure class -> (weights to bump, supporting TWIC themes)
 CLASS_ADJUSTMENTS: dict[str, tuple[list[str], list[str]]] = {
     "blunder_swing": (
-        ["search.base_movetime_ms", "search.min_depth"],
+        ["search.base_movetime_ms", "search.min_depth", "conversion.greed_damping"],
         ["material_swing"],
     ),
     "opening_blunder": (
-        ["development.undeveloped_minor_penalty", "development.uncastled_penalty"],
+        ["development.undeveloped_minor_penalty", "development.uncastled_penalty", "development.castle_urgency", "development.early_queen_penalty"],
         ["development_edge"],
     ),
     "king_collapse": (
-        ["king.ring_attack_penalty", "king.shield_pawn", "king.open_file_penalty"],
+        ["king.ring_attack_penalty", "king.shield_pawn", "king.open_file_penalty", "development.castle_urgency"],
         ["king_attack"],
     ),
     "failed_conversion": (
-        ["conversion.simplify_bonus", "conversion.king_activity", "pawns.passed_per_rank", "search.draw_contempt"],
+        ["conversion.simplify_bonus", "conversion.king_activity", "conversion.keep_pawns", "pawns.passed_per_rank", "search.draw_contempt"],
         ["passed_pawn", "queen_trade_ahead", "king_activation"],
     ),
     "repetition_draw": (
