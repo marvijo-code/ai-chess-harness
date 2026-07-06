@@ -51,14 +51,19 @@ BOUNDS: dict[str, tuple[float, float, float]] = {
     "mobility.per_square": (1, 6, 1),
     "pieces.rook_open_file": (10, 32, 2),
     "pieces.rook_seventh": (10, 36, 2),
-    "development.undeveloped_minor_penalty": (6, 25, 2),
-    "development.uncastled_penalty": (8, 32, 3),
-    "development.castle_urgency": (3, 14, 2),
-    "development.early_queen_penalty": (5, 24, 3),
-    "king.shield_pawn": (6, 24, 2),
-    "king.open_file_penalty": (10, 40, 3),
-    "king.ring_attack_penalty": (6, 24, 2),
-    "king.tropism": (1, 6, 1),
+    # Caps lowered after the depth-8 monotonic-ratchet regression: crude linear
+    # king-safety/development weights inflated to distortion (shield 24, open 40,
+    # ring 24, castle-urgency 14) and made the engine play passively (manual king
+    # walks instead of castling). The structural king.danger_scale is the proper
+    # response to collapses, so it keeps its range; the crude terms are bounded.
+    "development.undeveloped_minor_penalty": (6, 18, 2),
+    "development.uncastled_penalty": (8, 24, 3),
+    "development.castle_urgency": (3, 10, 2),
+    "development.early_queen_penalty": (5, 16, 3),
+    "king.shield_pawn": (6, 18, 2),
+    "king.open_file_penalty": (10, 32, 3),
+    "king.ring_attack_penalty": (6, 18, 2),
+    "king.tropism": (1, 4, 1),
     "king.danger_scale": (4, 30, 3),
     "pawns.passed_base": (10, 32, 2),
     "pawns.passed_per_rank": (8, 24, 2),
@@ -83,8 +88,13 @@ CLASS_ADJUSTMENTS: dict[str, tuple[list[str], list[str]]] = {
         ["development.undeveloped_minor_penalty", "development.uncastled_penalty", "development.castle_urgency", "development.early_queen_penalty"],
         ["development_edge"],
     ),
+    # Root-cause fix for the monotonic-ratchet regression: a king collapse steps
+    # ONLY the structural, bounded king.danger_scale (super-linear, capped at
+    # king.danger_cap cp). The crude linear king-safety weights are NOT stepped
+    # here, so repeated (often unavoidable vs SF depth 8) collapses can no longer
+    # inflate them into passive-play distortion.
     "king_collapse": (
-        ["king.danger_scale", "king.ring_attack_penalty", "king.shield_pawn", "king.open_file_penalty", "development.castle_urgency"],
+        ["king.danger_scale"],
         ["king_attack"],
     ),
     "failed_conversion": (

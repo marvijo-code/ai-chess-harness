@@ -255,6 +255,32 @@ def test_trainer_ignores_wins(tmp_path):
     assert "- search.draw_contempt = 30" in playbook.read_text(encoding="utf-8")
 
 
+def test_king_collapse_steps_only_structural_danger(tmp_path):
+    # A king-collapse mate must step ONLY king.danger_scale (bounded structural
+    # term), NOT the crude linear king-safety weights — that monotonic ratchet
+    # inflated them into passive-play distortion at depth 8.
+    playbook = tmp_path / "playbook.md"
+    playbook.write_text(
+        "- meta.version = 1\n"
+        "- king.danger_scale = 10\n"
+        "- king.shield_pawn = 14\n"
+        "- king.open_file_penalty = 26\n"
+        "- king.ring_attack_penalty = 14\n"
+        "- search.root_variety = 1\n"
+        "\n## Training log\n",
+        encoding="utf-8",
+    )
+    pgn = tmp_path / "mate.pgn"
+    _write_gate_pgn(pgn, "0-1", "CHECKMATE", [40, 30, 20, 10, 0, -10, -20, -30])
+    progress = _fake_progress(tmp_path / "progress.json")
+    summary = trainer.train_round([pgn], playbook, fresh_sample=0, twic_progress_path=progress)
+    adj = summary["adjustments"]
+    assert "king.danger_scale" in adj  # structural term steps
+    assert "king.shield_pawn" not in adj  # crude terms do NOT re-inflate
+    assert "king.open_file_penalty" not in adj
+    assert "king.ring_attack_penalty" not in adj
+
+
 def test_adjudicated_edge_is_not_a_win(tmp_path):
     # A ply-cap material adjudication where PB (White) is ahead must NOT read as
     # a win — it is a failure to convert, so the trainer keeps learning from it.

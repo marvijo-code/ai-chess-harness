@@ -12,14 +12,14 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 ## Search discipline
 
-- meta.version = 37
+- meta.version = 42
 - search.min_depth = 6 — always finish at least this depth before honoring the clock; shallow moves lose to one-ply tactics.
 - search.base_movetime_ms = 24000
 - search.movetime_fraction = 0.90
 - search.draw_contempt = 80 — TWIC: 97.4% of decisive games contain a material swing; when we are ahead, a draw is a failed conversion, so repeated positions score negative for the side that is better.
 - search.equal_draw_aversion = 30 — the depth-2 gate drew by repetition from an equal position; win-gated ladders require playing on at equality, so even an equal draw scores mildly negative.
 - search.aspiration_window = 40
-- search.root_variety = 19 — rotates which equal-best root move is tried first; the trainer bumps this every round so a saturated playbook still produces a different game against a deterministic fixed-depth opponent.
+- search.root_variety = 24 — rotates which equal-best root move is tried first; the trainer bumps this every round so a saturated playbook still produces a different game against a deterministic fixed-depth opponent.
 
 ## Material
 
@@ -39,18 +39,18 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 ## Development and castling
 
-- development.undeveloped_minor_penalty = 14 — TWIC: a development edge shows up in 28.0% of decisive games (174,628/623,110).
-- development.uncastled_penalty = 21 — winners castle and connect rooks before starting operations.
-- development.castle_urgency = 14 — the depth-4 losses were pawn grabs with a central king (castled at move 27, already lost); every move past move 8 without castling costs more. TWIC: development edge decides 28.0% of games.
-- development.early_queen_penalty = 13 — queen raids before castling won pawns and lost the king in the depth-4 gates; penalty scales with how far the queen has wandered while the king is unsafe.
+- development.undeveloped_minor_penalty = 12 — TWIC: a development edge shows up in 28.0% of decisive games (174,628/623,110).
+- development.uncastled_penalty = 18 — winners castle and connect rooks before starting operations.
+- development.castle_urgency = 8 — the depth-4 losses were pawn grabs with a central king (castled at move 27, already lost); every move past move 8 without castling costs more. TWIC: development edge decides 28.0% of games.
+- development.early_queen_penalty = 10 — queen raids before castling won pawns and lost the king in the depth-4 gates; penalty scales with how far the queen has wandered while the king is unsafe.
 
 ## King safety
 
-- king.shield_pawn = 22
-- king.open_file_penalty = 39 — an open or half-open file next to the king is the highway every TWIC king attack uses.
-- king.ring_attack_penalty = 22 — TWIC: king attacks decide 50.0% of games (311,632/623,110); count every enemy attack touching the king ring.
-- king.tropism = 5 — TWIC: king attacks decide 50.0% of games (311,632/623,110); attacking pieces gain value standing near the enemy king, which turns drawn-level shuffling into attack building.
-- king.danger_scale = 10 — depth-8 losses included king-collapse mates; danger grows with the SQUARE of accumulated attack units (piece-weighted) once >= 2 enemy pieces hit the king ring, so mating nets are foreseen a ply earlier and defended. TWIC: king attacks decide 50.0% of games.
+- king.shield_pawn = 14
+- king.open_file_penalty = 26 — an open or half-open file next to the king is the highway every TWIC king attack uses.
+- king.ring_attack_penalty = 14 — TWIC: king attacks decide 50.0% of games (311,632/623,110); count every enemy attack touching the king ring.
+- king.tropism = 3 — TWIC: king attacks decide 50.0% of games (311,632/623,110); attacking pieces gain value standing near the enemy king, which turns drawn-level shuffling into attack building.
+- king.danger_scale = 16 — depth-8 losses included king-collapse mates; danger grows with the SQUARE of accumulated attack units (piece-weighted) once >= 2 enemy pieces hit the king ring, so mating nets are foreseen a ply earlier and defended. TWIC: king attacks decide 50.0% of games.
 - king.danger_cap = 250 — caps the super-linear king-danger penalty so a heavy but survivable attack cannot read as a full piece down.
 
 ## Pawns
@@ -499,3 +499,64 @@ mg-scaled), so mating nets are foreseen a ply earlier and defended instead of wa
 into. Per-node cost is negligible (attack units piggyback on the ring-pressure
 popcount already computed); the back-rank mate and Qxg6 sac still solve. Wired into
 the trainer king_collapse lever set. 18 focused tests green.
+
+### 2026-07-06 21:36 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260706-212501.pgn` (1-0, loss).
+
+Diagnosis: blunder_swing x1, king_collapse x1. eval fell -115 -> -99994 around move 44; mated shortly after a roughly level self-eval.
+
+Adjustments: king.danger_scale 10 -> 13; king.open_file_penalty 39 -> 40; king.ring_attack_penalty 22 -> 24; king.shield_pawn 22 -> 24; search.root_variety 19 -> 20.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; king_attack 311,632 games (50.0%); material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): king_attack proxy 48.7%.
+
+### 2026-07-06 22:22 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260706-221748.pgn` (1-0, loss).
+
+Diagnosis: blunder_swing x1, king_collapse x1. eval fell -201 -> -910 around move 16; mated shortly after a roughly level self-eval.
+
+Adjustments: king.danger_scale 13 -> 16; search.root_variety 20 -> 21.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; king_attack 311,632 games (50.0%); material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): king_attack proxy 48.7%.
+
+### 2026-07-06 22:53 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260706-222227.pgn` (1/2-1/2, draw).
+
+Diagnosis: blunder_swing x1, repetition_draw x1. eval fell +80 -> -365 around move 60; draw by threefold repetition.
+
+Adjustments: search.root_variety 21 -> 22.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 23:14 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260706-225302.pgn` (1-0, loss).
+
+Diagnosis: blunder_swing x1. eval fell +30 -> -740 around move 72.
+
+Adjustments: search.root_variety 22 -> 23.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 23:37 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260706-231455.pgn` (0-1, loss).
+
+Diagnosis: blunder_swing x1. eval fell -157 -> -462 around move 30.
+
+Adjustments: search.root_variety 23 -> 24.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 23:40 — Correction: undo depth-8 king-safety over-tuning
+
+The trainer only steps weights UP toward a failure class, so repeated (often
+unavoidable) king collapses vs SF depth 8 monotonically ratcheted the crude linear
+king-safety + development weights to distortion (shield 24, open_file 40, ring 24,
+castle_urgency 14). Symptom: attempt-15 White loss where the engine played d3 then
+manually walked its king Kd1..Kc1 instead of castling (+88 -> -968). Rolled those
+back to moderate values, lowered their trainer caps, and narrowed the king_collapse
+response to ONLY the structural king.danger_scale (super-linear, capped at
+king.danger_cap) so collapses can no longer re-inflate the crude terms into passivity.
