@@ -174,6 +174,17 @@ def playbook_version() -> int:
         return 0
 
 
+def playbook_movetime_ms(default: int = 8000) -> int:
+    """Movetime from the playbook so trainer time-budget bumps reach the gates."""
+    try:
+        match = re.search(
+            r"-\s*search\.base_movetime_ms\s*=\s*(\d+)", PLAYBOOK_FILE.read_text(encoding="utf-8")
+        )
+        return int(match.group(1)) if match else default
+    except OSError:
+        return default
+
+
 def default_state() -> dict:
     return {
         "engine": ENGINE_NAME,
@@ -386,7 +397,7 @@ def run_climb(args: argparse.Namespace) -> dict:
         attempt = per_depth["attempts"] + 1
         playbook_white = attempt % 2 == 1
         color = "White" if playbook_white else "Black"
-        movetime = args.playbook_ms
+        movetime = args.playbook_ms or playbook_movetime_ms()
         print(f"=== depth {depth} attempt {attempt} as {color} (playbook v{playbook_version()}) ===", flush=True)
 
         result, termination, archive_path = play_game(
@@ -467,7 +478,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start-depth", type=int, default=0, help="override resume depth")
     parser.add_argument("--target-depth", type=int, default=8)
-    parser.add_argument("--playbook-ms", type=int, default=8000)
+    parser.add_argument(
+        "--playbook-ms", type=int, default=0, help="0 = use search.base_movetime_ms from the playbook"
+    )
     parser.add_argument("--max-plies", type=int, default=240)
     parser.add_argument("--resign-threshold", type=int, default=900)
     parser.add_argument("--resign-moves", type=int, default=6)

@@ -44,6 +44,7 @@ DEFAULT_PLAYBOOK: dict[str, float] = {
     "search.base_movetime_ms": 8000,
     "search.movetime_fraction": 0.90,
     "search.draw_contempt": 30,
+    "search.equal_draw_aversion": 12,
     "search.aspiration_window": 40,
     "material.pawn": 100,
     "material.knight": 320,
@@ -410,7 +411,9 @@ def draw_score(board: chess.Board) -> int:
         return -contempt
     if stm_diff <= -150:
         return contempt // 2
-    return 0
+    # Equal material: win-gated ladders reward playing on, so a draw is still
+    # mildly undesirable (search.equal_draw_aversion, PRD 169).
+    return -int(PB["search.equal_draw_aversion"])
 
 
 def static_exchange(board: chess.Board, move: chess.Move) -> int:

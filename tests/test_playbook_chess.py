@@ -61,6 +61,9 @@ def test_draw_contempt_sign():
     assert pb.draw_score(board) < 0
     board_black_turn = chess.Board("4k3/8/8/8/8/8/8/R3K3 b - - 0 1")
     assert pb.draw_score(board_black_turn) >= 0
+    # Equal material: win-gated play still mildly avoids the draw (PRD 169).
+    equal = chess.Board()
+    assert pb.draw_score(equal) < 0
 
 
 def test_static_exchange_free_and_defended():

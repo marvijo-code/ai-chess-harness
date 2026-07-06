@@ -46,6 +46,7 @@ BOUNDS: dict[str, tuple[float, float, float]] = {
     "search.min_depth": (3, 6, 1),
     "search.base_movetime_ms": (4000, 30000, 2000),
     "search.draw_contempt": (10, 80, 10),
+    "search.equal_draw_aversion": (6, 30, 6),
     "mobility.per_square": (1, 6, 1),
     "pieces.rook_open_file": (10, 32, 2),
     "pieces.rook_seventh": (10, 36, 2),
@@ -79,7 +80,7 @@ CLASS_ADJUSTMENTS: dict[str, tuple[list[str], list[str]]] = {
         ["passed_pawn", "queen_trade_ahead", "king_activation"],
     ),
     "repetition_draw": (
-        ["search.draw_contempt"],
+        ["search.draw_contempt", "search.equal_draw_aversion"],
         ["material_swing"],
     ),
     "slow_outplay": (

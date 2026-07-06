@@ -12,11 +12,12 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 ## Search discipline
 
-- meta.version = 1
+- meta.version = 2
 - search.min_depth = 4 — always finish at least this depth before honoring the clock; shallow moves lose to one-ply tactics.
 - search.base_movetime_ms = 8000
 - search.movetime_fraction = 0.90
-- search.draw_contempt = 30 — TWIC: 97.4% of decisive games contain a material swing; when we are ahead, a draw is a failed conversion, so repeated positions score negative for the side that is better.
+- search.draw_contempt = 40 — TWIC: 97.4% of decisive games contain a material swing; when we are ahead, a draw is a failed conversion, so repeated positions score negative for the side that is better.
+- search.equal_draw_aversion = 12 — the depth-2 gate drew by repetition from an equal position; win-gated ladders require playing on at equality, so even an equal draw scores mildly negative.
 - search.aspiration_window = 40
 
 ## Material
@@ -82,3 +83,13 @@ decisive games): king-attack rate 50.0%, passed-pawn rate 52.0%, seventh-rank
 rate 41.3%, development-edge rate 28.0%, queen-trade-ahead rate 18.5%,
 king-activation rate 18.0%. Search discipline seeded from the wisdom-chess
 depth-1 failure analysis (no legal-move filtering, draw contempt when ahead).
+
+### 2026-07-06 06:43 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-2-20260706-063920.pgn` (1/2-1/2, draw).
+
+Diagnosis: repetition_draw x1. draw by threefold repetition.
+
+Adjustments: search.draw_contempt 30 -> 40.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
