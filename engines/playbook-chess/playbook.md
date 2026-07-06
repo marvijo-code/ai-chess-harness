@@ -12,14 +12,14 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 ## Search discipline
 
-- meta.version = 26
+- meta.version = 28
 - search.min_depth = 6 — always finish at least this depth before honoring the clock; shallow moves lose to one-ply tactics.
 - search.base_movetime_ms = 24000
 - search.movetime_fraction = 0.90
 - search.draw_contempt = 80 — TWIC: 97.4% of decisive games contain a material swing; when we are ahead, a draw is a failed conversion, so repeated positions score negative for the side that is better.
 - search.equal_draw_aversion = 30 — the depth-2 gate drew by repetition from an equal position; win-gated ladders require playing on at equality, so even an equal draw scores mildly negative.
 - search.aspiration_window = 40
-- search.root_variety = 8 — rotates which equal-best root move is tried first; the trainer bumps this every round so a saturated playbook still produces a different game against a deterministic fixed-depth opponent.
+- search.root_variety = 10 — rotates which equal-best root move is tried first; the trainer bumps this every round so a saturated playbook still produces a different game against a deterministic fixed-depth opponent.
 
 ## Material
 
@@ -54,18 +54,18 @@ no opening-book move lists, no external-engine variations (PRD 166).
 ## Pawns
 
 - pawns.passed_base = 18
-- pawns.passed_per_rank = 22 — TWIC: passed-pawn conversion appears in 52.0% of decisive wins (324,194/623,110); each rank of advance matters more than the last.
+- pawns.passed_per_rank = 24 — TWIC: passed-pawn conversion appears in 52.0% of decisive wins (324,194/623,110); each rank of advance matters more than the last.
 - pawns.doubled_penalty = 12
 - pawns.isolated_penalty = 12
 
 ## Conversion (winning technique)
 
 - conversion.edge_threshold = 250
-- conversion.simplify_bonus = 8 — TWIC: queen trades while ahead appear in 18.5% of wins (115,121); trade pieces, not pawns, when up material.
-- conversion.king_activity = 20 — TWIC: king activation decides 18.0% of games (111,993); in simplified positions the king is a fighting piece.
-- conversion.keep_pawns = 15 — the depth-4 gate ended as a bare rook-vs-bishop book draw after trading every pawn while ahead; TWIC: passed pawns convert 52.0% of wins, and passers require keeping pawns on the board.
-- conversion.greed_damping = 35 — every depth-4 loss harvested material into a mating attack; centipawns beyond the winning edge are discounted 25% so safety outbids one more pawn grab.
-- conversion.progress_pressure = 1 — the depth-6 losses included 100+ move king shuffles while materially ahead; the rising 50-move clock costs the winning side (capped 50cp) so a clock-resetting pawn move or capture beats an aimless shuffle, never enough to sacrifice material.
+- conversion.simplify_bonus = 9 — TWIC: queen trades while ahead appear in 18.5% of wins (115,121); trade pieces, not pawns, when up material.
+- conversion.king_activity = 22 — TWIC: king activation decides 18.0% of games (111,993); in simplified positions the king is a fighting piece.
+- conversion.keep_pawns = 16 — the depth-4 gate ended as a bare rook-vs-bishop book draw after trading every pawn while ahead; TWIC: passed pawns convert 52.0% of wins, and passers require keeping pawns on the board.
+- conversion.greed_damping = 45 — every depth-4 loss harvested material into a mating attack; centipawns beyond the winning edge are discounted 25% so safety outbids one more pawn grab.
+- conversion.progress_pressure = 2 — the depth-6 losses included 100+ move king shuffles while materially ahead; the rising 50-move clock costs the winning side (capped 50cp) so a clock-resetting pawn move or capture beats an aimless shuffle, never enough to sacrifice material.
 - tempo.bonus = 12
 
 ## Principles (prose for humans and the trainer)
@@ -376,3 +376,23 @@ Diagnosis: slow_outplay x1. gradual decline with no single 250cp swing.
 Adjustments: king.tropism 2 -> 3; mobility.per_square 4 -> 5; pieces.rook_open_file 24 -> 26; search.root_variety 7 -> 8.
 
 Evidence: TWIC issues 1549-1647, 623,110 decisive games; development_edge 174,628 games (28.0%); seventh_rank 257,522 games (41.3%); king_attack 311,632 games (50.0%); fresh sample (twic1647g.zip, 150 decisive games): development_edge proxy 84.7%.
+
+### 2026-07-06 18:19 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-7-20260706-180303.pgn` (0-1, loss).
+
+Diagnosis: blunder_swing x1, failed_conversion x1, greed_blunder x1. eval fell +702 -> +100 around move 20; held >= +300cp for 6+ own moves without winning.
+
+Adjustments: conversion.greed_damping 35 -> 45; conversion.keep_pawns 15 -> 16; conversion.king_activity 20 -> 22; conversion.progress_pressure 1 -> 2; conversion.simplify_bonus 8 -> 9; pawns.passed_per_rank 22 -> 24; search.root_variety 8 -> 9.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); passed_pawn 324,194 games (52.0%); queen_trade_ahead 115,121 games (18.5%); king_activation 111,993 games (18.0%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 18:26 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-7-20260706-181934.pgn` (1-0, loss).
+
+Diagnosis: blunder_swing x1. eval fell -407 -> -667 around move 18.
+
+Adjustments: search.root_variety 9 -> 10.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.

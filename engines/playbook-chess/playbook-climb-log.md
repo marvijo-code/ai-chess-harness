@@ -189,3 +189,21 @@
 ### 2026-07-06 18:03 — Depth 6 attempt 9 (WIN)
 
 **Result:** 1-0 (CHECKMATE) as White, playbook v26 — `playbook-vs-stockfish-depth-6-20260706-173739.pgn`
+
+**Gate passed.** Checkpoint: f39573b. Advancing to depth 7.
+
+### 2026-07-06 18:19 — Depth 7 attempt 1 (LOSS)
+
+**Result:** 0-1 (resignation (playbook self-eval hopeless)) as White, playbook v26 — `playbook-vs-stockfish-depth-7-20260706-180303.pgn`
+
+**Training:** classes {'greed_blunder': 1, 'blunder_swing': 1, 'failed_conversion': 1}, adjustments {'search.root_variety': (8.0, 9.0), 'pawns.passed_per_rank': (22.0, 24), 'conversion.simplify_bonus': (8.0, 9.0), 'conversion.king_activity': (20.0, 22.0), 'conversion.keep_pawns': (15.0, 16), 'conversion.greed_damping': (35.0, 45.0), 'conversion.progress_pressure': (1.0, 2.0)}.
+
+### 2026-07-06 18:26 — Depth 7 attempt 2 (LOSS)
+
+**Result:** 1-0 (resignation (playbook self-eval hopeless)) as Black, playbook v27 — `playbook-vs-stockfish-depth-7-20260706-181934.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (9.0, 10.0)}.
+
+### 2026-07-06 18:35 — Depth 7 attempt 3 (WIN)
+
+**Result:** 1-0 (CHECKMATE) as White, playbook v28 — `playbook-vs-stockfish-depth-7-20260706-182616.pgn`
