@@ -220,3 +220,8 @@
 - [x] Protect Zero value mobility from inverted self-play weights.
 - [x] Make Zero's alpha-beta final arbiter fast enough for full local Stockfish gate batches without changing gate criteria.
 - [ ] Validate the convergence fixes with focused tests, compile checks, and bounded Stockfish depth gates through depth 8.
+- [ ] Create Playbook-chess as a deterministic UCI engine driven by the runtime-parsed human-readable `playbook.md`, with sound unfiltered alpha-beta search (PRD 165, 167).
+- [ ] Seed `playbook.md` weights with cited TWIC decisive-game evidence (PRD 166).
+- [ ] Build the playbook trainer that turns gate-loss diagnostics plus TWIC measurements into bounded, cited instruction updates (PRD 168).
+- [ ] Build the win-gated Stockfish depth 1-8 playbook climb loop with fail-early handling and scoped checkpoint commit+push (PRD 169, 170, 171).
+- [ ] Validate Playbook-chess with focused tests including the undefended-capture anti-regression, then run the climb from depth 1 pushing improving checkpoints (Validation 77).
