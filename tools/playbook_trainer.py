@@ -58,6 +58,7 @@ BOUNDS: dict[str, tuple[float, float, float]] = {
     "king.shield_pawn": (6, 24, 2),
     "king.open_file_penalty": (10, 40, 3),
     "king.ring_attack_penalty": (6, 24, 2),
+    "king.tropism": (1, 6, 1),
     "pawns.passed_base": (10, 32, 2),
     "pawns.passed_per_rank": (8, 24, 2),
     "conversion.simplify_bonus": (2, 10, 1),
@@ -93,8 +94,8 @@ CLASS_ADJUSTMENTS: dict[str, tuple[list[str], list[str]]] = {
         ["material_swing"],
     ),
     "slow_outplay": (
-        ["mobility.per_square", "pieces.rook_open_file", "search.base_movetime_ms"],
-        ["development_edge", "seventh_rank"],
+        ["mobility.per_square", "pieces.rook_open_file", "king.tropism", "search.base_movetime_ms"],
+        ["development_edge", "seventh_rank", "king_attack"],
     ),
 }
 

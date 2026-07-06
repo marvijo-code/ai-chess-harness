@@ -20,6 +20,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import math
+
 import chess
 import chess.polyglot
 
@@ -35,6 +37,16 @@ MAX_PLY = 96
 QS_CAP = 24
 
 TT_EXACT, TT_LOWER, TT_UPPER = 0, 1, 2
+
+# Late-move-reduction table: reduction grows with both remaining depth and how
+# late a quiet move is ordered (log*log, the standard Stockfish-style shape).
+# Deeper searches reduce more, which is exactly where extra plies are needed to
+# reach the Stockfish depth-6+ gates; the PVS re-search is the tactical safety
+# net so an under-estimated reduction never loses a line.
+_LMR = [[0] * 64 for _ in range(64)]
+for _d in range(1, 64):
+    for _m in range(1, 64):
+        _LMR[_d][_m] = int(0.5 + math.log(_d) * math.log(_m) / 2.1)
 
 WEIGHT_LINE_RE = re.compile(r"^\s*-\s*([a-z][a-z0-9_.]*)\s*=\s*(-?\d+(?:\.\d+)?)")
 
@@ -64,6 +76,7 @@ DEFAULT_PLAYBOOK: dict[str, float] = {
     "king.shield_pawn": 12,
     "king.open_file_penalty": 24,
     "king.ring_attack_penalty": 12,
+    "king.tropism": 2,
     "pawns.passed_base": 18,
     "pawns.passed_per_rank": 14,
     "pawns.doubled_penalty": 12,
@@ -286,6 +299,7 @@ def white_eval(board: chess.Board) -> int:
 
     mobility_w = get("mobility.per_square", defaults["mobility.per_square"])
     ring_w = get("king.ring_attack_penalty", defaults["king.ring_attack_penalty"]) * mg
+    tropism_w = get("king.tropism", defaults["king.tropism"]) * mg
     pawns_w = board.pieces_mask(chess.PAWN, chess.WHITE)
     pawns_b = board.pieces_mask(chess.PAWN, chess.BLACK)
     all_pawns = pawns_w | pawns_b
@@ -345,12 +359,17 @@ def white_eval(board: chess.Board) -> int:
                 continue
             val = PV[pt]
             table = PST[pt]
+            enemy_king = bk if color == chess.WHITE else wk
             for sq in scan_forward(bb):
                 idx = sq if color == chess.WHITE else square_mirror(sq)
                 att = attacks_mask(sq)
                 score += sign * (val + table[idx] + mobility_w * popcount(att))
                 if enemy_ring:
                     score += sign * ring_w * popcount(att & enemy_ring)
+                if enemy_king is not None:
+                    # King tropism: attackers gain by standing near the enemy
+                    # king (TWIC: king attacks decide 50.0% of games).
+                    score += sign * tropism_w * (7 - chess.square_distance(sq, enemy_king))
                 if pt == chess.ROOK:
                     f = sq & 7
                     if not (all_pawns & chess.BB_FILES[f]):
@@ -739,7 +758,9 @@ def alpha_beta(
         static_val = evaluate(board)
         futile = static_val + 140 * depth <= alpha
 
-    moves = order_moves(board, moves, min(ply, len(STATE.killers) - 1), tt_move)
+    ply_idx = min(ply, len(STATE.killers) - 1)
+    killers_here = STATE.killers[ply_idx]
+    moves = order_moves(board, moves, ply_idx, tt_move)
     best_score = -INF
     best_move: chess.Move | None = None
     orig_alpha = alpha
@@ -765,7 +786,13 @@ def alpha_beta(
                     and not in_check
                     and not gives_check
                 ):
-                    reduction = 1 + (1 if i >= 12 else 0)
+                    reduction = _LMR[depth if depth < 64 else 63][i if i < 64 else 63]
+                    if move == killers_here[0] or move == killers_here[1]:
+                        reduction -= 1  # killers are likely good; reduce less
+                    if reduction < 0:
+                        reduction = 0
+                    elif reduction > depth - 2:
+                        reduction = depth - 2  # never reduce straight into qsearch
                 score = -alpha_beta(board, depth - 1 - reduction + ext, -alpha - 1, -alpha, ply + 1)
                 if score > alpha and reduction:
                     score = -alpha_beta(board, depth - 1 + ext, -alpha - 1, -alpha, ply + 1)

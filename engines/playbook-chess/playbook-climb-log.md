@@ -135,3 +135,41 @@
 ### 2026-07-06 12:01 — Depth 5 attempt 9 (WIN)
 
 **Result:** 1-0 (CHECKMATE) as White, playbook v18 — `playbook-vs-stockfish-depth-5-20260706-113340.pgn`
+
+**Gate passed.** Checkpoint: ee70757. Advancing to depth 6.
+
+### 2026-07-06 12:15 — Depth 6 attempt 1 (LOSS)
+
+**Result:** 0-1 (resignation (playbook self-eval hopeless)) as White, playbook v18 — `playbook-vs-stockfish-depth-6-20260706-120145.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (0.0, 1.0)}.
+
+### 2026-07-06 12:30 — Depth 6 attempt 2 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as Black, playbook v19 — `playbook-vs-stockfish-depth-6-20260706-121554.pgn`
+
+**Training:** classes {'failed_conversion': 1, 'repetition_draw': 1}, adjustments {'search.root_variety': (1.0, 2.0), 'pawns.passed_per_rank': (20.0, 22.0), 'conversion.simplify_bonus': (7.0, 8.0), 'conversion.king_activity': (18.0, 20.0), 'conversion.keep_pawns': (12.0, 15.0)}.
+
+### 2026-07-06 12:39 — Depth 6 attempt 3 (LOSS)
+
+**Result:** 0-1 (resignation (playbook self-eval hopeless)) as White, playbook v20 — `playbook-vs-stockfish-depth-6-20260706-123045.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (2.0, 3.0)}.
+
+### 2026-07-06 13:11 — Depth 6 attempt 4 (LOSS)
+
+**Result:** 1-0 (resignation (playbook self-eval hopeless)) as Black, playbook v21 — `playbook-vs-stockfish-depth-6-20260706-123945.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (3.0, 4.0)}.
+
+### 2026-07-06 13:39 — Depth 6 attempt 5 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as White, playbook v22 — `playbook-vs-stockfish-depth-6-20260706-131121.pgn`
+
+**Training:** classes {'blunder_swing': 1, 'repetition_draw': 1}, adjustments {'search.root_variety': (4.0, 5.0)}.
+
+### 2026-07-06 13:57 — Depth 6 attempt 6 (LOSS)
+
+**Result:** 1-0 (resignation (playbook self-eval hopeless)) as Black, playbook v23 — `playbook-vs-stockfish-depth-6-20260706-133939.pgn`
+
+**Training:** classes {'slow_outplay': 1}, adjustments {'search.root_variety': (5.0, 6.0), 'mobility.per_square': (3.0, 4.0), 'pieces.rook_open_file': (22.0, 24.0)}.

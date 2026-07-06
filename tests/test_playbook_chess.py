@@ -66,6 +66,15 @@ def test_draw_contempt_sign():
     assert pb.draw_score(equal) < 0
 
 
+def test_king_tropism_rewards_attacker_proximity():
+    # Same material: knight near the enemy king must evaluate better than the
+    # same knight far away (midgame-scaled attack building).
+    near = chess.Board("6k1/8/5N2/8/8/8/PPP5/1K6 w - - 0 20")
+    far = chess.Board("6k1/8/8/8/8/8/PPP4N/1K6 w - - 0 20")
+    pb.EVAL_CACHE.clear()
+    assert pb.white_eval(near) > pb.white_eval(far)
+
+
 def test_greed_damping_discounts_excess_material():
     # Up a queen: with damping the advantage must read smaller than without,
     # but must stay clearly winning.
