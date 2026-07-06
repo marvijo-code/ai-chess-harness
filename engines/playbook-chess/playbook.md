@@ -12,14 +12,14 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 ## Search discipline
 
-- meta.version = 24
+- meta.version = 26
 - search.min_depth = 6 — always finish at least this depth before honoring the clock; shallow moves lose to one-ply tactics.
 - search.base_movetime_ms = 24000
 - search.movetime_fraction = 0.90
 - search.draw_contempt = 80 — TWIC: 97.4% of decisive games contain a material swing; when we are ahead, a draw is a failed conversion, so repeated positions score negative for the side that is better.
 - search.equal_draw_aversion = 30 — the depth-2 gate drew by repetition from an equal position; win-gated ladders require playing on at equality, so even an equal draw scores mildly negative.
 - search.aspiration_window = 40
-- search.root_variety = 6 — rotates which equal-best root move is tried first; the trainer bumps this every round so a saturated playbook still produces a different game against a deterministic fixed-depth opponent.
+- search.root_variety = 8 — rotates which equal-best root move is tried first; the trainer bumps this every round so a saturated playbook still produces a different game against a deterministic fixed-depth opponent.
 
 ## Material
 
@@ -31,9 +31,9 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 ## Mobility and piece activity
 
-- mobility.per_square = 4 — winners restrict losers: piece scope is worth paying small material-free costs for.
+- mobility.per_square = 5 — winners restrict losers: piece scope is worth paying small material-free costs for.
 - pieces.bishop_pair = 30
-- pieces.rook_open_file = 24 — TWIC: seventh-rank and file invasion themes appear in 41.3% of decisive games (257,522/623,110).
+- pieces.rook_open_file = 26 — TWIC: seventh-rank and file invasion themes appear in 41.3% of decisive games (257,522/623,110).
 - pieces.rook_semi_open_file = 10
 - pieces.rook_seventh = 24 — same seventh-rank evidence as above.
 
@@ -49,7 +49,7 @@ no opening-book move lists, no external-engine variations (PRD 166).
 - king.shield_pawn = 16
 - king.open_file_penalty = 30 — an open or half-open file next to the king is the highway every TWIC king attack uses.
 - king.ring_attack_penalty = 16 — TWIC: king attacks decide 50.0% of games (311,632/623,110); count every enemy attack touching the king ring.
-- king.tropism = 2 — TWIC: king attacks decide 50.0% of games (311,632/623,110); attacking pieces gain value standing near the enemy king, which turns drawn-level shuffling into attack building.
+- king.tropism = 3 — TWIC: king attacks decide 50.0% of games (311,632/623,110); attacking pieces gain value standing near the enemy king, which turns drawn-level shuffling into attack building.
 
 ## Pawns
 
@@ -65,6 +65,7 @@ no opening-book move lists, no external-engine variations (PRD 166).
 - conversion.king_activity = 20 — TWIC: king activation decides 18.0% of games (111,993); in simplified positions the king is a fighting piece.
 - conversion.keep_pawns = 15 — the depth-4 gate ended as a bare rook-vs-bishop book draw after trading every pawn while ahead; TWIC: passed pawns convert 52.0% of wins, and passers require keeping pawns on the board.
 - conversion.greed_damping = 35 — every depth-4 loss harvested material into a mating attack; centipawns beyond the winning edge are discounted 25% so safety outbids one more pawn grab.
+- conversion.progress_pressure = 1 — the depth-6 losses included 100+ move king shuffles while materially ahead; the rising 50-move clock costs the winning side (capped 50cp) so a clock-resetting pawn move or capture beats an aimless shuffle, never enough to sacrifice material.
 - tempo.bonus = 12
 
 ## Principles (prose for humans and the trainer)
@@ -355,3 +356,23 @@ from ~40k to ~12k nodes (deeper reach per second at the same NPS ~24k), and the 
 re-search keeps tactics: the Qxg6 sac and both mates in the check suite still solve.
 Eval: added king.tropism (attackers gain value near the enemy king; TWIC king-attack
 rate 50.0%) to convert drawn-level shuffling into attack building at the depth-6 gate.
+
+### 2026-07-06 16:58 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-6-20260706-162651.pgn` (0-1, loss).
+
+Diagnosis: blunder_swing x1. eval fell +80 -> -403 around move 100.
+
+Adjustments: search.root_variety 6 -> 7.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-06 17:30 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-6-20260706-165857.pgn` (1-0, loss).
+
+Diagnosis: slow_outplay x1. gradual decline with no single 250cp swing.
+
+Adjustments: king.tropism 2 -> 3; mobility.per_square 4 -> 5; pieces.rook_open_file 24 -> 26; search.root_variety 7 -> 8.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; development_edge 174,628 games (28.0%); seventh_rank 257,522 games (41.3%); king_attack 311,632 games (50.0%); fresh sample (twic1647g.zip, 150 decisive games): development_edge proxy 84.7%.

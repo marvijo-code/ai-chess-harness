@@ -86,6 +86,7 @@ DEFAULT_PLAYBOOK: dict[str, float] = {
     "conversion.king_activity": 12,
     "conversion.keep_pawns": 6,
     "conversion.greed_damping": 25,
+    "conversion.progress_pressure": 1,
     "tempo.bonus": 12,
 }
 
@@ -476,6 +477,11 @@ def white_eval(board: chess.Board) -> int:
         excess = abs(matdiff) - PB["conversion.edge_threshold"]
         if excess > 0:
             score -= sign * excess * PB["conversion.greed_damping"] / 100.0
+        # Progress pressure: while ahead, the rising 50-move clock costs the
+        # winning side, so a pawn move or capture (which resets it) beats an
+        # aimless king shuffle. Capped at 50cp — a strong tie-break toward
+        # making progress, never enough to justify sacrificing material.
+        score -= sign * PB["conversion.progress_pressure"] * min(board.halfmove_clock, 50)
 
     score += PB["tempo.bonus"] if board.turn == chess.WHITE else -PB["tempo.bonus"]
     return int(score)

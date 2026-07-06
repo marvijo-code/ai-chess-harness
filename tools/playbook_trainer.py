@@ -65,6 +65,7 @@ BOUNDS: dict[str, tuple[float, float, float]] = {
     "conversion.king_activity": (6, 24, 2),
     "conversion.keep_pawns": (3, 16, 3),
     "conversion.greed_damping": (10, 60, 10),
+    "conversion.progress_pressure": (1, 4, 1),
 }
 
 # failure class -> (weights to bump, supporting TWIC themes)
@@ -86,7 +87,7 @@ CLASS_ADJUSTMENTS: dict[str, tuple[list[str], list[str]]] = {
         ["king_attack"],
     ),
     "failed_conversion": (
-        ["conversion.simplify_bonus", "conversion.king_activity", "conversion.keep_pawns", "pawns.passed_per_rank", "search.draw_contempt"],
+        ["conversion.simplify_bonus", "conversion.king_activity", "conversion.keep_pawns", "conversion.progress_pressure", "pawns.passed_per_rank", "search.draw_contempt"],
         ["passed_pawn", "queen_trade_ahead", "king_activation"],
     ),
     "repetition_draw": (

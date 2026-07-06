@@ -66,6 +66,20 @@ def test_draw_contempt_sign():
     assert pb.draw_score(equal) < 0
 
 
+def test_progress_pressure_breaks_shuffle_when_ahead():
+    # Up a queen, a high 50-move clock must score worse than a fresh clock for
+    # the winning side, nudging it toward a clock-resetting pawn move/capture.
+    pb.EVAL_CACHE.clear()
+    fresh = chess.Board("4k3/5ppp/8/8/8/8/PPP5/3QK3 w - - 0 40")
+    stale = chess.Board("4k3/5ppp/8/8/8/8/PPP5/3QK3 w - - 44 40")
+    hi = pb.white_eval(fresh)
+    pb.EVAL_CACHE.clear()
+    lo = pb.white_eval(stale)
+    assert hi > lo  # a stale clock costs the winning side
+    # But the pressure must never rival material (cap 50cp vs a queen).
+    assert hi - lo <= 55
+
+
 def test_king_tropism_rewards_attacker_proximity():
     # Same material: knight near the enemy king must evaluate better than the
     # same knight far away (midgame-scaled attack building).
