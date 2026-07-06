@@ -255,6 +255,35 @@ def test_trainer_ignores_wins(tmp_path):
     assert "- search.draw_contempt = 30" in playbook.read_text(encoding="utf-8")
 
 
+def test_adjudicated_edge_is_not_a_win(tmp_path):
+    # A ply-cap material adjudication where PB (White) is ahead must NOT read as
+    # a win — it is a failure to convert, so the trainer keeps learning from it.
+    pgn = tmp_path / "adj.pgn"
+    _write_gate_pgn(
+        pgn, "1-0", "max plies 240 material adjudication (+200cp white)",
+        [120, 150, 180, 200, 210, 220, 230, 240],
+    )
+    game = chess.pgn.read_game(pgn.open(encoding="utf-8"))
+    diag = trainer.diagnose_game(game)
+    assert diag.outcome != "win"  # adjudication is non-decisive
+    assert diag.classes  # something to learn (conversion/slow-outplay)
+
+
+def test_variety_rotates_when_no_game_parses(tmp_path):
+    # If no gate PGN parses (empty/unreadable), the trainer must still rotate
+    # root variety so a deterministic opponent cannot replay the same game.
+    playbook = tmp_path / "playbook.md"
+    playbook.write_text(
+        "- meta.version = 2\n- search.root_variety = 7\n\n## Training log\n", encoding="utf-8"
+    )
+    progress = _fake_progress(tmp_path / "progress.json")
+    summary = trainer.train_round(
+        [tmp_path / "does-not-exist.pgn"], playbook, fresh_sample=0, twic_progress_path=progress
+    )
+    assert summary["adjustments"].get("search.root_variety") == (7.0, 8.0)
+    assert "- search.root_variety = 8" in playbook.read_text(encoding="utf-8")
+
+
 def test_trainer_respects_bounds_cap_but_rotates_variety(tmp_path):
     playbook = tmp_path / "playbook.md"
     playbook.write_text(

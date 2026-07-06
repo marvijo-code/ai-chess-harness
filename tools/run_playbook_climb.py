@@ -413,7 +413,10 @@ def run_climb(args: argparse.Namespace) -> dict:
         per_depth["attempts"] = attempt
         state["attempts_total"] += 1
         won = gate_won(result, termination, playbook_white)
-        drew = result == "1/2-1/2"
+        # An adjudicated ply-cap result is non-decisive (no checkmate either
+        # way and it never passes the gate), so record it as a draw rather than
+        # a loss — counting a PB-ahead adjudication as a loss misreports it.
+        drew = result == "1/2-1/2" or "adjudication" in termination.lower()
         if won:
             per_depth["wins"] += 1
         elif drew:

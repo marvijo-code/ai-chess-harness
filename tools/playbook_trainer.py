@@ -135,12 +135,19 @@ def diagnose_game(game: chess.pgn.Game) -> GameDiagnosis | None:
     result = game.headers.get("Result", "*")
     if result == "*":
         return None
+    adjudicated = "ADJUDICATION" in game.headers.get("Termination", "").upper()
     if result == "1/2-1/2":
         outcome = "draw"
     elif (result == "1-0") == playbook_white:
         outcome = "win"
     else:
         outcome = "loss"
+    # An adjudicated material edge is NOT a real win: PB was ahead but could
+    # not finish inside the ply cap (gates never pass on adjudication either).
+    # Treat it as a non-decisive failure-to-convert so the trainer keeps
+    # improving conversion instead of learning nothing from the game.
+    if outcome == "win" and adjudicated:
+        outcome = "draw"
     diag = GameDiagnosis(
         pgn_name="",
         result=result,
@@ -376,7 +383,11 @@ def train_round(
         for cls in set(diag.classes):
             class_counts[cls] = class_counts.get(cls, 0) + 1
     summary["classes"] = class_counts
-    if not class_counts:
+    # A clean win (every parsed game is a win) changes nothing — return early.
+    # But a real non-win, OR a PGN the trainer could not parse at all
+    # (diagnoses empty), must fall through so variety still rotates below and
+    # the next attempt can never replay the same game.
+    if diagnoses and not failures:
         return summary
 
     text = playbook_path.read_text(encoding="utf-8")
@@ -424,8 +435,8 @@ def train_round(
             evidence_bits.append(fresh_note)
 
     stamp = time.strftime("%Y-%m-%d %H:%M")
-    game_bits = ", ".join(f"`{d.pgn_name}` ({d.result}, {d.outcome})" for d in failures)
-    class_bits = ", ".join(f"{cls} x{n}" for cls, n in sorted(class_counts.items()))
+    game_bits = ", ".join(f"`{d.pgn_name}` ({d.result}, {d.outcome})" for d in failures) or "no parseable gate PGN"
+    class_bits = ", ".join(f"{cls} x{n}" for cls, n in sorted(class_counts.items())) or "none (undiagnosed non-win — rotated variety only)"
     note_bits = "; ".join(note for d in failures for note in d.notes[:2])
     adj_bits = (
         "; ".join(
