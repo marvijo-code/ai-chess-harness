@@ -12,14 +12,14 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 ## Search discipline
 
-- meta.version = 42
+- meta.version = 51
 - search.min_depth = 6 — always finish at least this depth before honoring the clock; shallow moves lose to one-ply tactics.
 - search.base_movetime_ms = 24000
 - search.movetime_fraction = 0.90
 - search.draw_contempt = 80 — TWIC: 97.4% of decisive games contain a material swing; when we are ahead, a draw is a failed conversion, so repeated positions score negative for the side that is better.
 - search.equal_draw_aversion = 30 — the depth-2 gate drew by repetition from an equal position; win-gated ladders require playing on at equality, so even an equal draw scores mildly negative.
 - search.aspiration_window = 40
-- search.root_variety = 24 — rotates which equal-best root move is tried first; the trainer bumps this every round so a saturated playbook still produces a different game against a deterministic fixed-depth opponent.
+- search.root_variety = 33 — rotates which equal-best root move is tried first; the trainer bumps this every round so a saturated playbook still produces a different game against a deterministic fixed-depth opponent.
 
 ## Material
 
@@ -33,7 +33,7 @@ no opening-book move lists, no external-engine variations (PRD 166).
 
 - mobility.per_square = 6 — winners restrict losers: piece scope is worth paying small material-free costs for.
 - pieces.bishop_pair = 30
-- pieces.rook_open_file = 30 — TWIC: seventh-rank and file invasion themes appear in 41.3% of decisive games (257,522/623,110).
+- pieces.rook_open_file = 32 — TWIC: seventh-rank and file invasion themes appear in 41.3% of decisive games (257,522/623,110).
 - pieces.rook_semi_open_file = 10
 - pieces.rook_seventh = 24 — same seventh-rank evidence as above.
 
@@ -49,7 +49,7 @@ no opening-book move lists, no external-engine variations (PRD 166).
 - king.shield_pawn = 14
 - king.open_file_penalty = 26 — an open or half-open file next to the king is the highway every TWIC king attack uses.
 - king.ring_attack_penalty = 14 — TWIC: king attacks decide 50.0% of games (311,632/623,110); count every enemy attack touching the king ring.
-- king.tropism = 3 — TWIC: king attacks decide 50.0% of games (311,632/623,110); attacking pieces gain value standing near the enemy king, which turns drawn-level shuffling into attack building.
+- king.tropism = 4 — TWIC: king attacks decide 50.0% of games (311,632/623,110); attacking pieces gain value standing near the enemy king, which turns drawn-level shuffling into attack building.
 - king.danger_scale = 16 — depth-8 losses included king-collapse mates; danger grows with the SQUARE of accumulated attack units (piece-weighted) once >= 2 enemy pieces hit the king ring, so mating nets are foreseen a ply earlier and defended. TWIC: king attacks decide 50.0% of games.
 - king.danger_cap = 250 — caps the super-linear king-danger penalty so a heavy but survivable attack cannot read as a full piece down.
 
@@ -560,3 +560,93 @@ manually walked its king Kd1..Kc1 instead of castling (+88 -> -968). Rolled thos
 back to moderate values, lowered their trainer caps, and narrowed the king_collapse
 response to ONLY the structural king.danger_scale (super-linear, capped at
 king.danger_cap) so collapses can no longer re-inflate the crude terms into passivity.
+
+### 2026-07-07 00:07 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260706-234113.pgn` (1-0, loss).
+
+Diagnosis: blunder_swing x1. eval fell +80 -> -250 around move 66.
+
+Adjustments: search.root_variety 24 -> 25.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-07 00:20 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260707-000718.pgn` (1/2-1/2, draw).
+
+Diagnosis: blunder_swing x1, repetition_draw x1. eval fell -149 -> -421 around move 35; draw by threefold repetition.
+
+Adjustments: search.root_variety 25 -> 26.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-07 00:49 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260707-002050.pgn` (1/2-1/2, draw).
+
+Diagnosis: repetition_draw x1. draw by threefold repetition.
+
+Adjustments: search.root_variety 26 -> 27.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-07 01:08 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260707-004924.pgn` (0-1, loss).
+
+Diagnosis: slow_outplay x1. gradual decline with no single 250cp swing.
+
+Adjustments: king.tropism 3 -> 4; pieces.rook_open_file 30 -> 32; search.root_variety 27 -> 28.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; development_edge 174,628 games (28.0%); seventh_rank 257,522 games (41.3%); king_attack 311,632 games (50.0%); fresh sample (twic1647g.zip, 150 decisive games): development_edge proxy 84.7%.
+
+### 2026-07-07 01:30 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260707-010850.pgn` (1-0, loss).
+
+Diagnosis: blunder_swing x1. eval fell -48 -> -330 around move 58.
+
+Adjustments: search.root_variety 28 -> 29.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-07 01:41 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260707-013000.pgn` (1/2-1/2, draw).
+
+Diagnosis: blunder_swing x1, repetition_draw x1. eval fell -73 -> -411 around move 31; draw by threefold repetition.
+
+Adjustments: search.root_variety 29 -> 30.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-07 01:57 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260707-014140.pgn` (1-0, loss).
+
+Diagnosis: blunder_swing x1. eval fell +80 -> -191 around move 24.
+
+Adjustments: search.root_variety 30 -> 31.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.
+
+### 2026-07-07 02:26 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260707-015718.pgn` (0-1, loss).
+
+Diagnosis: slow_outplay x1. gradual decline with no single 250cp swing.
+
+Adjustments: search.root_variety 31 -> 32.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; development_edge 174,628 games (28.0%); seventh_rank 257,522 games (41.3%); king_attack 311,632 games (50.0%); fresh sample (twic1647g.zip, 150 decisive games): development_edge proxy 84.7%.
+
+### 2026-07-07 02:57 — Gate training round
+
+Games: `playbook-vs-stockfish-depth-8-20260707-024111.pgn` (1/2-1/2, draw).
+
+Diagnosis: blunder_swing x1, repetition_draw x1. eval fell +80 -> -217 around move 47; draw by threefold repetition.
+
+Adjustments: search.root_variety 32 -> 33.
+
+Evidence: TWIC issues 1549-1647, 623,110 decisive games; material_swing 606,710 games (97.4%); fresh sample (twic1647g.zip, 150 decisive games): material_swing proxy 84.7%.

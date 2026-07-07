@@ -207,3 +207,153 @@
 ### 2026-07-06 18:35 — Depth 7 attempt 3 (WIN)
 
 **Result:** 1-0 (CHECKMATE) as White, playbook v28 — `playbook-vs-stockfish-depth-7-20260706-182616.pgn`
+
+**Gate passed.** Checkpoint: d497ca5. Advancing to depth 8.
+
+### 2026-07-06 18:52 — Depth 8 attempt 1 (LOSS)
+
+**Result:** 0-1 (resignation (playbook self-eval hopeless)) as White, playbook v28 — `playbook-vs-stockfish-depth-8-20260706-183556.pgn`
+
+**Training:** classes {'slow_outplay': 1}, adjustments {'search.root_variety': (10.0, 11.0), 'mobility.per_square': (5.0, 6), 'pieces.rook_open_file': (26.0, 28.0), 'king.tropism': (3.0, 4.0)}.
+
+### 2026-07-06 19:06 — Depth 8 attempt 2 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as Black, playbook v29 — `playbook-vs-stockfish-depth-8-20260706-185208.pgn`
+
+**Training:** classes {'blunder_swing': 1, 'repetition_draw': 1}, adjustments {'search.root_variety': (11.0, 12.0)}.
+
+### 2026-07-06 19:26 — Depth 8 attempt 3 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as White, playbook v30 — `playbook-vs-stockfish-depth-8-20260706-190646.pgn`
+
+**Training:** classes {'blunder_swing': 1, 'repetition_draw': 1}, adjustments {'search.root_variety': (12.0, 13.0)}.
+
+### 2026-07-06 19:48 — Depth 8 attempt 4 (LOSS)
+
+**Result:** 1-0 (CHECKMATE) as Black, playbook v31 — `playbook-vs-stockfish-depth-8-20260706-192647.pgn`
+
+**Training:** classes {'blunder_swing': 1, 'king_collapse': 1}, adjustments {'search.root_variety': (13.0, 14.0), 'development.castle_urgency': (8.0, 10.0), 'king.shield_pawn': (16.0, 18.0), 'king.open_file_penalty': (30.0, 33.0), 'king.ring_attack_penalty': (16.0, 18.0)}.
+
+### 2026-07-06 20:20 — Depth 8 attempt 5 (LOSS)
+
+**Result:** 0-1 (max plies 240 material adjudication (-220cp white)) as White, playbook v32 — `playbook-vs-stockfish-depth-8-20260706-194824.pgn`
+
+**Training:** classes {'blunder_swing': 1, 'king_collapse': 1}, adjustments {'search.root_variety': (14.0, 15.0), 'development.castle_urgency': (10.0, 12.0), 'king.shield_pawn': (18.0, 20.0), 'king.open_file_penalty': (33.0, 36.0), 'king.ring_attack_penalty': (18.0, 20.0)}.
+
+### 2026-07-06 20:33 — Depth 8 attempt 6 (LOSS)
+
+**Result:** 1-0 (resignation (playbook self-eval hopeless)) as Black, playbook v33 — `playbook-vs-stockfish-depth-8-20260706-202031.pgn`
+
+**Training:** classes {'slow_outplay': 1}, adjustments {'search.root_variety': (15.0, 16.0), 'pieces.rook_open_file': (28.0, 30.0), 'king.tropism': (4.0, 5.0)}.
+
+### 2026-07-06 20:54 — Depth 8 attempt 7 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as White, playbook v34 — `playbook-vs-stockfish-depth-8-20260706-203325.pgn`
+
+**Training:** classes {'opening_blunder': 1, 'blunder_swing': 1, 'repetition_draw': 1}, adjustments {'search.root_variety': (16.0, 17.0), 'development.undeveloped_minor_penalty': (12.0, 14.0), 'development.uncastled_penalty': (18.0, 21.0), 'development.castle_urgency': (12.0, 14), 'development.early_queen_penalty': (10.0, 13.0)}.
+
+### 2026-07-06 21:07 — Depth 8 attempt 8 (LOSS)
+
+**Result:** 1-0 (resignation (playbook self-eval hopeless)) as Black, playbook v35 — `playbook-vs-stockfish-depth-8-20260706-205409.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (17.0, 18.0)}.
+
+### 2026-07-06 21:16 — Depth 8 attempt 9 (LOSS)
+
+**Result:** 0-1 (CHECKMATE) as White, playbook v36 — `playbook-vs-stockfish-depth-8-20260706-210712.pgn`
+
+**Training:** classes {'blunder_swing': 1, 'king_collapse': 1}, adjustments {'search.root_variety': (18.0, 19.0), 'king.shield_pawn': (20.0, 22.0), 'king.open_file_penalty': (36.0, 39.0), 'king.ring_attack_penalty': (20.0, 22.0)}.
+
+### 2026-07-06 21:36 — Depth 8 attempt 10 (LOSS)
+
+**Result:** 1-0 (CHECKMATE) as Black, playbook v37 — `playbook-vs-stockfish-depth-8-20260706-212501.pgn`
+
+**Training:** classes {'king_collapse': 1, 'blunder_swing': 1}, adjustments {'search.root_variety': (19.0, 20.0), 'king.shield_pawn': (22.0, 24), 'king.open_file_penalty': (39.0, 40), 'king.ring_attack_penalty': (22.0, 24), 'king.danger_scale': (10.0, 13.0)}.
+
+### 2026-07-06 22:10 — Depth 8 attempt 11 (LOSS)
+
+**Result:** 1-0 (max plies 240 material adjudication (+200cp white)) as White, playbook v38 — `playbook-vs-stockfish-depth-8-20260706-213650.pgn`
+
+**Training:** classes {}, adjustments none.
+
+### 2026-07-06 22:22 — Depth 8 attempt 12 (LOSS)
+
+**Result:** 1-0 (CHECKMATE) as Black, playbook v38 — `playbook-vs-stockfish-depth-8-20260706-221748.pgn`
+
+**Training:** classes {'king_collapse': 1, 'blunder_swing': 1}, adjustments {'search.root_variety': (20.0, 21.0), 'king.danger_scale': (13.0, 16.0)}.
+
+### 2026-07-06 22:53 — Depth 8 attempt 13 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as White, playbook v39 — `playbook-vs-stockfish-depth-8-20260706-222227.pgn`
+
+**Training:** classes {'repetition_draw': 1, 'blunder_swing': 1}, adjustments {'search.root_variety': (21.0, 22.0)}.
+
+### 2026-07-06 23:14 — Depth 8 attempt 14 (LOSS)
+
+**Result:** 1-0 (resignation (playbook self-eval hopeless)) as Black, playbook v40 — `playbook-vs-stockfish-depth-8-20260706-225302.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (22.0, 23.0)}.
+
+### 2026-07-06 23:37 — Depth 8 attempt 15 (LOSS)
+
+**Result:** 0-1 (resignation (playbook self-eval hopeless)) as White, playbook v41 — `playbook-vs-stockfish-depth-8-20260706-231455.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (23.0, 24.0)}.
+
+### 2026-07-07 00:07 — Depth 8 attempt 16 (LOSS)
+
+**Result:** 1-0 (resignation (playbook self-eval hopeless)) as Black, playbook v42 — `playbook-vs-stockfish-depth-8-20260706-234113.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (24.0, 25.0)}.
+
+### 2026-07-07 00:20 — Depth 8 attempt 17 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as White, playbook v43 — `playbook-vs-stockfish-depth-8-20260707-000718.pgn`
+
+**Training:** classes {'repetition_draw': 1, 'blunder_swing': 1}, adjustments {'search.root_variety': (25.0, 26.0)}.
+
+### 2026-07-07 00:49 — Depth 8 attempt 18 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as Black, playbook v44 — `playbook-vs-stockfish-depth-8-20260707-002050.pgn`
+
+**Training:** classes {'repetition_draw': 1}, adjustments {'search.root_variety': (26.0, 27.0)}.
+
+### 2026-07-07 01:08 — Depth 8 attempt 19 (LOSS)
+
+**Result:** 0-1 (resignation (playbook self-eval hopeless)) as White, playbook v45 — `playbook-vs-stockfish-depth-8-20260707-004924.pgn`
+
+**Training:** classes {'slow_outplay': 1}, adjustments {'search.root_variety': (27.0, 28.0), 'pieces.rook_open_file': (30.0, 32), 'king.tropism': (3.0, 4)}.
+
+### 2026-07-07 01:29 — Depth 8 attempt 20 (LOSS)
+
+**Result:** 1-0 (resignation (playbook self-eval hopeless)) as Black, playbook v46 — `playbook-vs-stockfish-depth-8-20260707-010850.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (28.0, 29.0)}.
+
+### 2026-07-07 01:41 — Depth 8 attempt 21 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as White, playbook v47 — `playbook-vs-stockfish-depth-8-20260707-013000.pgn`
+
+**Training:** classes {'repetition_draw': 1, 'blunder_swing': 1}, adjustments {'search.root_variety': (29.0, 30.0)}.
+
+### 2026-07-07 01:57 — Depth 8 attempt 22 (LOSS)
+
+**Result:** 1-0 (CHECKMATE) as Black, playbook v48 — `playbook-vs-stockfish-depth-8-20260707-014140.pgn`
+
+**Training:** classes {'blunder_swing': 1}, adjustments {'search.root_variety': (30.0, 31.0)}.
+
+### 2026-07-07 02:26 — Depth 8 attempt 23 (LOSS)
+
+**Result:** 0-1 (resignation (playbook self-eval hopeless)) as White, playbook v49 — `playbook-vs-stockfish-depth-8-20260707-015718.pgn`
+
+**Training:** classes {'slow_outplay': 1}, adjustments {'search.root_variety': (31.0, 32.0)}.
+
+### 2026-07-07 02:57 — Depth 8 attempt 24 (DRAW)
+
+**Result:** 1/2-1/2 (THREEFOLD REPETITION) as Black, playbook v50 — `playbook-vs-stockfish-depth-8-20260707-024111.pgn`
+
+**Training:** classes {'repetition_draw': 1, 'blunder_swing': 1}, adjustments {'search.root_variety': (32.0, 33.0)}.
+
+### 2026-07-07 03:09 — Depth 8 attempt 25 (WIN)
+
+**Result:** 1-0 (CHECKMATE) as White, playbook v51 — `playbook-vs-stockfish-depth-8-20260707-025749.pgn`
