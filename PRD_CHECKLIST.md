@@ -242,6 +242,6 @@
 - [x] Give the LLM match runner a real time control that writes ticking `WhiteClockMs`/`BlackClockMs`/`ClockUpdatedAtEpochMs`/`ClockRunningSide` headers plus `[%clk]` comments (PRD 176).
 - [x] Re-run the deepseek-v4.1-flash vs GLM-5.3-flash live game with the fixed engine and confirm ticks plus a multi-move game (Validation 80).
 - [ ] Move the large board to the far-left column with attached bottom/top player bars, keep player names plus eval-bar analysis on the right rail, and validate the roomy layout (PRD 1, 2, 4, 5, 178).
-- [ ] Put the board alone in the far-left column, move thinking to the middle rail, drop the redundant current-game banner, and validate the cleaner layout.
+- [x] Put the board alone in the far-left column, move thinking to the middle rail, drop the redundant current-game banner, and validate the cleaner layout.
 - [x] Add `run-llm-live-match.ps1` to launch the viewer and match as detached WMI processes that survive console teardown (PRD 177).
 - [x] Give each LLM engine process a PID-suffixed log file (PRD 177).
