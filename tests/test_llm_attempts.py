@@ -122,6 +122,19 @@ class LlmAttemptTests(unittest.TestCase):
         self.assertEqual(client.max_tokens, 2500)
         self.assertEqual(self.llm.clamp_max_tokens("1"), 64)
 
+    def test_openrouter_timeout_is_configurable_by_option_env_and_config(self):
+        client = self.llm.OpenRouterChessClient()
+        self.assertEqual(client.timeout_seconds, self.llm.config_timeout_seconds())
+        client.set_option("Timeout", "180")
+        self.assertEqual(client.timeout_seconds, 180)
+        self.assertEqual(client._timeout_seconds({}, None), 180)
+
+        os.environ["OPENROUTER_TIMEOUT_SECONDS"] = "45"
+        try:
+            self.assertEqual(self.llm.OpenRouterChessClient().timeout_seconds, 45)
+        finally:
+            del os.environ["OPENROUTER_TIMEOUT_SECONDS"]
+
     def test_openrouter_payload_controls_reasoning_and_provider(self):
         client = self.llm.OpenRouterChessClient()
         payload = client._build_payload(chess.Board(), {}, [], ["e2e4", "d2d4"])
@@ -152,7 +165,7 @@ class LlmAttemptTests(unittest.TestCase):
         client._post = fake_post
         move, _ = client.choose_move(chess.Board(), {}, [])
         self.assertEqual(move, "e2e4")
-        self.assertEqual(client.max_tokens, 3000)
+        self.assertEqual(client.max_tokens, self.llm.MAX_TOKENS_CEILING)
 
     def test_openrouter_400_on_reasoning_downgrades_without_spending_attempt(self):
         client = self.llm.OpenRouterChessClient()
@@ -291,6 +304,12 @@ class MatchRunnerAttemptTests(unittest.TestCase):
             self.assertIn("[%clk", pgn_text)
             clocks = re.findall(r"\[%clk [0-9:]+\]", pgn_text)
             self.assertTrue(clocks, "expected clock comments on played moves")
+
+    def test_runner_waits_for_engine_attempt_loop(self):
+        engine = self.runner.UciEngine.__new__(self.runner.UciEngine)
+        engine.movetime_ms = 20000
+        engine.max_attempts = 3
+        self.assertGreaterEqual(engine.move_wait_budget_seconds, 20000 // 1000 * 3)
 
 
 if __name__ == "__main__":

@@ -99,10 +99,18 @@ class UciEngine:
         self.command("isready")
         self.read_until("readyok", 30)
 
+    @property
+    def move_wait_budget_seconds(self) -> int:
+        # Wait for the engine's own attempt loop to finish. The LLM engine can
+        # use up to max_attempts bounded per-attempt deadlines, so the runner
+        # must not cut a move short while attempts remain.
+        movetime_seconds = max(1, int(self.movetime_ms / 1000))
+        return movetime_seconds * max(1, self.max_attempts) + 180
+
     def bestmove(self, board: chess.Board, go_line: str | None = None) -> tuple[chess.Move | None, list[str]]:
         self.command(f"position fen {board.fen()}")
         self.command(go_line or f"go movetime {self.movetime_ms}")
-        read_timeout = max(120, int(self.movetime_ms / 1000) * self.max_attempts + 120)
+        read_timeout = max(180, self.move_wait_budget_seconds)
         lines = self.read_until("bestmove", read_timeout)
         best_line = next(line for line in reversed(lines) if line.startswith("bestmove "))
         uci = best_line.split()[1]

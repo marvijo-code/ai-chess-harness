@@ -19,12 +19,13 @@ LOG_PATH = LOG_DIR / f"llm-chess-engine-{time.strftime('%Y%m%d-%H%M%S')}.log"
 DEFAULT_MODEL = "moonshotai/kimi-k2.6"
 DEFAULT_MAX_ATTEMPTS = 3
 MAX_ATTEMPTS_CEILING = 9
-DEFAULT_MAX_TOKENS = 1500
+DEFAULT_MAX_TOKENS = 4096
 MAX_TOKENS_CEILING = 8192
 DEFAULT_REASONING_EFFORT = "low"
 DEFAULT_PROVIDER_SORT = "throughput"
 DEFAULT_RETRY_BACKOFF_SECONDS = 2.0
 MAX_RETRY_BACKOFF_SECONDS = 20.0
+DEFAULT_TIMEOUT_SECONDS = 180
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 CONFIG_PATH = ROOT / "chess-harness.config.json"
 
@@ -54,6 +55,17 @@ def config_max_tokens(default: int = DEFAULT_MAX_TOKENS) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def config_timeout_seconds(default: int = DEFAULT_TIMEOUT_SECONDS) -> int:
+    for key in ("timeoutSeconds", "timeout_seconds", "timeout"):
+        value = config_openrouter(key)
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        return max(5, parsed)
+    return default
 
 
 def clamp_max_attempts(value: object, default: int = DEFAULT_MAX_ATTEMPTS) -> int:
@@ -170,6 +182,13 @@ class OpenRouterChessClient:
         if schema_setting is None:
             schema_setting = config_openrouter("useJsonSchema")
         self.use_schema = str(schema_setting).strip().lower() in {"1", "true", "yes", "on"}
+        self.timeout_seconds = config_timeout_seconds()
+        timeout_env = os.environ.get("OPENROUTER_TIMEOUT_SECONDS")
+        if timeout_env is not None and timeout_env != "":
+            try:
+                self.timeout_seconds = max(5, int(timeout_env))
+            except ValueError:
+                log(f"invalid OPENROUTER_TIMEOUT_SECONDS option: {timeout_env!r}")
         self.invalid_model_moves = 0
 
     def set_option(self, name: str, value: str) -> None:
@@ -193,6 +212,11 @@ class OpenRouterChessClient:
                 self.max_retries = max(0, self.max_attempts - 1)
             except ValueError:
                 log(f"invalid max retries option: {value!r}")
+        elif lowered in {"timeout", "timeoutseconds", "timeout_seconds"}:
+            try:
+                self.timeout_seconds = max(5, int(value))
+            except ValueError:
+                log(f"invalid Timeout option: {value!r}")
         elif lowered in {"maxtokens", "max_tokens"}:
             self.max_tokens = clamp_max_tokens(value, self.max_tokens)
         elif lowered in {"reasoning", "reasoningeffort", "reasoning_effort"} and value:
@@ -256,7 +280,7 @@ class OpenRouterChessClient:
             except EmptyModelResponse as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 if attempt < self.max_attempts and self.max_tokens < MAX_TOKENS_CEILING:
-                    self.max_tokens = min(MAX_TOKENS_CEILING, self.max_tokens * 2)
+                    self.max_tokens = MAX_TOKENS_CEILING
                     log(f"empty or truncated model response; raising MaxTokens to {self.max_tokens}")
             except Exception as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
@@ -274,7 +298,7 @@ class OpenRouterChessClient:
         self.invalid_model_moves = 0
 
     def _timeout_seconds(self, go_args: dict, remaining: int | None) -> int:
-        configured = int(os.environ.get("OPENROUTER_TIMEOUT_SECONDS", "90"))
+        configured = self.timeout_seconds
         candidates = [configured]
         if go_args.get("movetime"):
             candidates.append(max(5, int(go_args["movetime"] / 1000) + 2))
@@ -500,6 +524,7 @@ def main() -> None:
                 print(f"option name Model type string default {DEFAULT_MODEL}", flush=True)
                 print("option name Temperature type spin default 20 min 0 max 100", flush=True)
                 print("option name MaxAttempts type spin default 3 min 1 max 9", flush=True)
+                print("option name Timeout type spin default 180 min 5 max 600", flush=True)
                 print("option name MaxTokens type spin default 1500 min 64 max 8192", flush=True)
                 print("option name Reasoning type string default low", flush=True)
                 print("option name ProviderSort type string default throughput", flush=True)

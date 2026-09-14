@@ -186,6 +186,7 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 174. The generic UCI match runner must support an OpenRouter model on each side plus an optional live PGN/status sidecar so two OpenRouter LLM engines can play a watched game with clocks and a viewer link.
 175. The OpenRouter engine must send bounded reasoning-effort control and a provider-routing preference, enforce a hard wall-clock deadline per attempt, back off on transient 429/5xx responses, drop a rejected `reasoning`/`json_schema` parameter without spending an attempt, and raise `MaxTokens` when a mandatory-reasoning model truncates before emitting JSON.
 176. LLM live matches must use a real time control: the runner sends `go wtime/btime/winc/binc`, decrements the mover's clock by wall-clock think time, writes `WhiteClockMs`/`BlackClockMs`/`ClockUpdatedAtEpochMs`/`ClockRunningSide` headers plus `[%clk]` comments so the live viewer shows the active side ticking, and records a loss on time at zero.
+177. LLM live matches must keep two separate timeout budgets: the OpenRouter engine must allow a bounded per-attempt deadline plus declared per-attempt retries (default 180s per attempt, `openrouter.timeoutSeconds` / `OPENROUTER_TIMEOUT_SECONDS` / runner movetime), while the UCI match runner must wait for the engine's own 3-attempt forfeit (`bestmove 0000`) before ending the move. The runner must not time out a move while the engine is still using attempts, and per-attempt timeouts must count toward the move's 3-attempt budget.
 
 ## Validation Requirements
 

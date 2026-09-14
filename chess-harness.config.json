@@ -73,10 +73,11 @@
   },
   "openrouter": {
     "maxAttempts": 3,
-    "maxTokens": 1500,
+    "maxTokens": 4096,
     "reasoningEffort": "low",
     "providerSort": "throughput",
     "retryBackoffSeconds": 3,
+    "timeoutSeconds": 180,
     "useJsonSchema": false
   },
   "fastChess": {
