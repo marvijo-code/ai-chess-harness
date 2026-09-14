@@ -122,6 +122,11 @@ def int_env_value(name: str, default: int) -> int:
         return default
 
 
+def max_invalid_attempts() -> int:
+    value = int_env_value("CODEX_CHESS_MAX_ATTEMPTS", int_config_value("codex.maxAttempts", 3))
+    return max(1, min(9, value))
+
+
 def float_env_value(name: str, default: float) -> float:
     value = os.environ.get(name)
     if value is None or value == "":
@@ -451,6 +456,7 @@ class CodexAppServer:
         self.turn_done: dict[str, asyncio.Future] = {}
         self.thread_id: str | None = None
         self.started = False
+        self.max_attempts = max_invalid_attempts()
         self.invalid_model_moves = 0
 
     async def start(self) -> None:
@@ -518,9 +524,14 @@ class CodexAppServer:
         if self.learning_mode:
             developer_instructions += (
                 f" Post-game learning is handled by a local autolearn process that writes {MEMORY_PATH}, {SKILLS_DIR}, {TOOLS_DIR}, and {KNOWLEDGEBASE_DIR}. "
-                "During UCI move selection, use the learner_context included in each prompt and do not spend clock time editing files. "
+                "During UCI move selection you MAY run your own engine-local calculation scripts from "
+                f"{TOOLS_DIR} with the local python (python-chess is installed) to verify candidate moves - "
+                "for example checking every forcing reply to a candidate for material loss or mate before you commit to it. "
+                f"If no suitable verification script exists yet, write a small one into {TOOLS_DIR} once and reuse it on later moves. "
                 "Learner-created skills/tools are allowed only when they are engine-local concept or current-position feature aids, not exact move memory. "
-                "Do not use network access. Return only the required move JSON."
+                "Never call external chess engines (no Stockfish/lc0), never use tablebases, and never use network access. "
+                "Tool output is advisory: the final uci you return is always your own choice, chosen from legal_moves. "
+                "Budget your clock: keep tool runs short, and always return the required move JSON before turn_timeout_seconds."
             )
 
         base_instructions = (
@@ -560,20 +571,42 @@ class CodexAppServer:
     async def _reader(self) -> None:
         try:
             async for raw in self.ws:
-                msg = json.loads(raw)
+                try:
+                    self._handle_message(json.loads(raw))
+                except Exception as exc:
+                    # A malformed or newly-shaped notification must never kill the
+                    # message pump (app-server 0.149.1 sends rateLimits.secondary=null,
+                    # which crashed the old inline handler and silently stopped all
+                    # turn/completed processing -> every move "timed out").
+                    log(f"reader: ignored {type(exc).__name__} while handling message: {exc}; raw={raw[:200]!r}")
+        except ConnectionClosed:
+            return
+
+    def _handle_message(self, msg: dict) -> None:
                 if "id" in msg and msg["id"] in self.pending:
                     fut = self.pending.pop(msg["id"])
                     if "error" in msg:
                         fut.set_exception(RuntimeError(json.dumps(msg["error"])))
                     else:
                         fut.set_result(msg.get("result"))
-                    continue
+                    return
 
                 method = msg.get("method")
                 params = msg.get("params", {})
                 if method in {"item/agentMessage/delta", "item/agent_message/delta"}:
                     turn_id = params["turnId"]
                     self.turn_text[turn_id] = self.turn_text.get(turn_id, "") + params.get("delta", "")
+                elif method == "item/started":
+                    item = params.get("item", {})
+                    itype = str(item.get("type", ""))
+                    if itype in {"commandExecution", "command_execution"}:
+                        log(f"turn activity: commandExecution cmd={str(item.get('command'))[:160]}")
+                    elif itype in {"mcpToolCall", "mcp_tool_call"}:
+                        log(f"turn activity: mcpToolCall {item.get('server')}:{item.get('tool')}")
+                    elif itype in {"fileChange", "file_change"}:
+                        log(f"turn activity: fileChange {str([c.get('path') for c in (item.get('changes') or [])])[:160]}")
+                    elif itype in {"webSearch", "web_search"}:
+                        log(f"turn activity: webSearch {str(item.get('query'))[:120]}")
                 elif method == "item/completed":
                     item = params.get("item", {})
                     if item.get("type") in {"agentMessage", "agent_message", "message"}:
@@ -597,9 +630,9 @@ class CodexAppServer:
                     if fut and not fut.done():
                         fut.set_exception(CodexTurnError(message, code))
                 elif method == "account/rateLimits/updated":
-                    limits = params.get("rateLimits", {})
-                    primary = limits.get("primary", {})
-                    secondary = limits.get("secondary", {})
+                    limits = params.get("rateLimits") or {}
+                    primary = limits.get("primary") or {}
+                    secondary = limits.get("secondary") or {}
                     log(
                         "account: "
                         f"limit={limits.get('limitName')} "
@@ -607,8 +640,6 @@ class CodexAppServer:
                         f"secondary_used={secondary.get('usedPercent')} reset={secondary.get('resetsAt')} "
                         f"planType={limits.get('planType')} credits={limits.get('credits')}"
                     )
-        except ConnectionClosed:
-            return
 
     async def request(self, method: str, params: dict) -> dict:
         request_id = self.next_id
@@ -799,7 +830,7 @@ class CodexAppServer:
         c_puct = max(0.01, float_env_value("CODEX_CHESS_ZERO_C_PUCT", float_config_value("zeroResearch.cPuct", 1.5)))
         try:
             zero_research = load_zero_research_module()
-            result = zero_research.choose_zero_move(board.copy(stack=False), visits=visits, time_limit_ms=time_limit_ms, c_puct=c_puct)
+            result = zero_research.choose_zero_move(board.copy(stack=True), visits=visits, time_limit_ms=time_limit_ms, c_puct=c_puct)
             move = result.move.uci()
         except Exception as exc:
             log(f"zero puct engine failed: {type(exc).__name__}: {exc}; forfeiting with bestmove 0000")
@@ -908,6 +939,26 @@ class CodexAppServer:
                     "policy": "Advisory learner-only pattern warnings. These are not Zero policy/value features and do not choose a move.",
                     "warnings": warnings,
                 }
+            if not critical_clock:
+                prompt["calculation_tools"] = {
+                    "tools_dir": str(TOOLS_DIR),
+                    "policy": (
+                        "REQUIRED workflow while your clock is above 300000ms: 1) pick your top candidate (at most 2); "
+                        "2) run your engine-local verification script on it in ONE quick call (write the script once into "
+                        "tools_dir with python-chess if it does not exist yet, then reuse it every move) to check forcing "
+                        "replies, material swings, and mate threats; 3) return your chosen move immediately after. "
+                        "Spend at most ~30 seconds on tools per move and never exceed turn_timeout_seconds overall - "
+                        "a timed-out turn loses far more than an unverified move. "
+                        "No external engines, no tablebases, no network. Tool output is advisory: the final uci is "
+                        "your own decision from legal_moves. If a tool fails, answer from your own analysis now and "
+                        "fix the tool on a later move."
+                    ),
+                }
+                prompt["time_management"] = (
+                    "Your clock is long. Spend real time on this move: use the calculation_tools workflow to verify "
+                    "candidates before answering, and return strict JSON before turn_timeout_seconds. "
+                    "Only when own_remaining is below 300000ms should you skip tools and answer quickly."
+                )
         context_profile = "none"
         context = {}
         if not critical_clock:
@@ -937,7 +988,7 @@ class CodexAppServer:
         timeout = prompt["turn_timeout_seconds"]
         move_started = time.monotonic()
 
-        while self.invalid_model_moves < 3:
+        while self.invalid_model_moves < self.max_attempts:
             if not self.started:
                 await self.start()
             attempt = self.invalid_model_moves + 1
@@ -975,11 +1026,11 @@ class CodexAppServer:
                 comment = data.get("comment", "")
             except asyncio.TimeoutError:
                 self.invalid_model_moves += 1
-                log(f"Codex app-server turn timed out after {timeout}s; invalid_count={self.invalid_model_moves}/3")
+                log(f"Codex app-server turn timed out after {timeout}s; invalid_count={self.invalid_model_moves}/{self.max_attempts}")
                 emit_uci_line(f"info string Codex app-server turn timed out after {timeout}s", optional=True)
                 await self.close()
-                if self.invalid_model_moves >= 3:
-                    log("Codex app-server timeout streak reached 3; forfeiting with bestmove 0000")
+                if self.invalid_model_moves >= self.max_attempts:
+                    log(f"Codex app-server timeout streak reached {self.max_attempts}; forfeiting with bestmove 0000")
                     emit_uci_line("info string model timeout limit reached; forfeiting game")
                     print_neutral_score_info()
                     return "0000"
@@ -997,10 +1048,10 @@ class CodexAppServer:
                 self.invalid_model_moves += 1
                 log(
                     "invalid Codex response "
-                    f"{self.invalid_model_moves}/3 after {type(exc).__name__}: {exc}"
+                    f"{self.invalid_model_moves}/{self.max_attempts} after {type(exc).__name__}: {exc}"
                 )
-                if self.invalid_model_moves >= 3:
-                    log("invalid Codex response streak reached 3; forfeiting with bestmove 0000")
+                if self.invalid_model_moves >= self.max_attempts:
+                    log(f"invalid Codex response streak reached {self.max_attempts}; forfeiting with bestmove 0000")
                     emit_uci_line("info string invalid model response limit reached; forfeiting game")
                     print_neutral_score_info()
                     return "0000"
@@ -1011,9 +1062,9 @@ class CodexAppServer:
 
             if move not in legal_moves:
                 self.invalid_model_moves += 1
-                log(f"illegal Codex move {move!r}; invalid_count={self.invalid_model_moves}/3")
-                if self.invalid_model_moves >= 3:
-                    log("illegal Codex move streak reached 3; forfeiting with bestmove 0000")
+                log(f"illegal Codex move {move!r}; invalid_count={self.invalid_model_moves}/{self.max_attempts}")
+                if self.invalid_model_moves >= self.max_attempts:
+                    log(f"illegal Codex move streak reached {self.max_attempts}; forfeiting with bestmove 0000")
                     emit_uci_line("info string invalid model move limit reached; forfeiting game")
                     print_neutral_score_info()
                     return "0000"
@@ -1035,7 +1086,7 @@ class CodexAppServer:
                 log(f"decision comment: move={move} comment=")
             return move
 
-        log("invalid response streak reached 3; forfeiting with bestmove 0000")
+        log(f"invalid response streak reached {self.max_attempts}; forfeiting with bestmove 0000")
         emit_uci_line("info string invalid model response limit reached; forfeiting game")
         print_neutral_score_info()
         return "0000"
@@ -1137,6 +1188,11 @@ class CodexChessUci:
             self.codex.force_lean_context = bool_value or DEFAULT_FORCE_LEAN_CONTEXT
         elif name == "zerolocalpuct":
             os.environ["CODEX_CHESS_ZERO_LOCAL_PUCT"] = "true" if bool_value else "false"
+        elif name == "maxattempts":
+            try:
+                self.codex.max_attempts = max(1, min(9, int(value)))
+            except ValueError:
+                log(f"invalid MaxAttempts option: {value!r}")
 
 
 def parse_go_args(tokens: list[str]) -> dict:
@@ -1181,6 +1237,7 @@ async def main() -> None:
                 emit_uci_line(f"option name LearningMode type check default {'true' if DEFAULT_LEARNING_MODE else 'false'}")
                 emit_uci_line(f"option name ZeroMode type check default {'true' if DEFAULT_ZERO_MODE else 'false'}")
                 emit_uci_line(f"option name ZeroLocalPuct type check default {'true' if zero_local_puct_enabled() else 'false'}")
+                emit_uci_line("option name MaxAttempts type spin default 3 min 1 max 9")
                 emit_uci_line("uciok")
             elif command == "isready":
                 emit_uci_line("readyok")

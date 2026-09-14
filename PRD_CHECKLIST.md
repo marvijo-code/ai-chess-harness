@@ -219,9 +219,25 @@
 - [x] Make deterministic first-principles alpha-beta search the final live Zero move arbiter when Stockfish gates expose shallow PUCT failures.
 - [x] Protect Zero value mobility from inverted self-play weights.
 - [x] Make Zero's alpha-beta final arbiter fast enough for full local Stockfish gate batches without changing gate criteria.
+- [x] Penalize queen-led checking replies in Zero's bounded safety scan so depth-8 games do not drift into forced king nets.
+- [x] Penalize attacked loose minors and majors strongly enough for Zero's fast leaf evaluator to avoid simple material loss, with extra queen-pressure debt.
+- [x] Penalize passive edge-trapped bishops in Zero's fast piece-activity evaluator so slow diagonal-clearance tactics are less attractive.
+- [x] Preserve safer material floors in Zero's defensive-mode safety override instead of choosing speculative activity while already worse.
+- [x] Adjudicate non-terminal max-ply external ladder and isolated depth-match caps by deterministic final-board material instead of automatic draws.
+- [x] Add first-principles safety tie-breaks for opening pressure, loose pieces, flank-pawn lunges, defensive near-threshold choices, and material-floor preservation.
+- [ ] Add first-principles attacked-pawn-chain safety debt and wider quiet-defense scan for the current depth-8 pawn-leak failure.
+- [ ] Add general depth-8 convergence guards for latent queen discovered attacks, pawn-push rook skewers, checking knight forks, and late promotion-race floor collapses.
 - [ ] Validate the convergence fixes with focused tests, compile checks, and bounded Stockfish depth gates through depth 8.
-- [ ] Create Playbook-chess as a deterministic UCI engine driven by the runtime-parsed human-readable `playbook.md`, with sound unfiltered alpha-beta search (PRD 165, 167).
-- [ ] Seed `playbook.md` weights with cited TWIC decisive-game evidence (PRD 166).
-- [ ] Build the playbook trainer that turns gate-loss diagnostics plus TWIC measurements into bounded, cited instruction updates (PRD 168).
-- [ ] Build the win-gated Stockfish depth 1-8 playbook climb loop with fail-early handling and scoped checkpoint commit+push (PRD 169, 170, 171).
+- [x] Create Playbook-chess as a deterministic UCI engine driven by the runtime-parsed human-readable `playbook.md`, with sound unfiltered alpha-beta search (PRD 165, 167).
+- [x] Seed `playbook.md` weights with cited TWIC decisive-game evidence (PRD 166).
+- [x] Build the playbook trainer that turns gate-loss diagnostics plus TWIC measurements into bounded, cited instruction updates (PRD 168).
+- [x] Build the win-gated Stockfish depth 1-8 playbook climb loop with fail-early handling and scoped checkpoint commit+push (PRD 169, 170, 171).
 - [ ] Validate Playbook-chess with focused tests including the undefended-capture anti-regression, then run the climb from depth 1 pushing improving checkpoints (Validation 77).
+- [x] Add configurable per-move `MaxAttempts` (default 3) to the OpenRouter `llm-chess-engine` and `codex-chess` engines, via UCI option, config, and environment (PRD 172, 173).
+- [x] Reset the invalid-response streak on a legal move and keep clock-expired/missing-key forfeits from spending an attempt (PRD 173).
+- [x] Extend `tools\play_engine_match.py` to run an OpenRouter model on each side with a live PGN/status sidecar (PRD 174).
+- [x] Add focused LLM-attempt and match-runner tests and validate them (Validation 78, 79).
+- [x] Run and report a watched `deepseek/deepseek-v4.1-flash` vs `z-ai/glm-5.3-flash` live game with ticking clocks, `[%clk]` comments, and a viewer link (Validation 80).
+- [x] Add bounded reasoning-effort control, provider routing, a hard per-attempt deadline, transient-error backoff, parameter downgrade, and MaxTokens escalation to the OpenRouter engine (PRD 175).
+- [x] Give the LLM match runner a real time control that writes ticking `WhiteClockMs`/`BlackClockMs`/`ClockUpdatedAtEpochMs`/`ClockRunningSide` headers plus `[%clk]` comments (PRD 176).
+- [x] Re-run the deepseek-v4.1-flash vs GLM-5.3-flash live game with the fixed engine and confirm ticks plus a multi-move game (Validation 80).

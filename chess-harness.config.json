@@ -2,7 +2,8 @@
   "codex": {
     "model": "gpt-5.3-codex",
     "effort": "high",
-    "learnerMoveEffort": "medium",
+    "maxAttempts": 3,
+    "learnerMoveEffort": "high",
     "criticalMoveEffort": "low",
     "zeroMoveEffort": "low",
     "preflightTimeoutSeconds": 45,
@@ -22,22 +23,22 @@
     "contextLimits": {
       "learner": {
         "full": {
-          "memoryChars": 1200,
-          "fenChars": 700,
-          "strategyChars": 1000,
+          "memoryChars": 2000,
+          "fenChars": 1500,
+          "strategyChars": 3000,
           "knowledgebaseFiles": 2,
-          "knowledgebaseChars": 600,
+          "knowledgebaseChars": 8000,
           "skillFiles": 1,
-          "skillChars": 350,
+          "skillChars": 3000,
           "toolFiles": 1,
-          "toolChars": 500
+          "toolChars": 1000
         },
         "lean": {
-          "memoryChars": 700,
-          "fenChars": 350,
-          "strategyChars": 500,
+          "memoryChars": 1000,
+          "fenChars": 700,
+          "strategyChars": 1000,
           "knowledgebaseFiles": 1,
-          "knowledgebaseChars": 350,
+          "knowledgebaseChars": 2000,
           "skillFiles": 0,
           "skillChars": 0,
           "toolFiles": 0,
@@ -69,6 +70,14 @@
         }
       }
     }
+  },
+  "openrouter": {
+    "maxAttempts": 3,
+    "maxTokens": 1500,
+    "reasoningEffort": "low",
+    "providerSort": "throughput",
+    "retryBackoffSeconds": 3,
+    "useJsonSchema": false
   },
   "fastChess": {
     "games": 10,
