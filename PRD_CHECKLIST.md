@@ -244,5 +244,6 @@
 - [ ] Move the large board to the far-left column with attached bottom/top player bars, keep player names plus eval-bar analysis on the right rail, and validate the roomy layout (PRD 1, 2, 4, 5, 178).
 - [x] Put the board alone in the far-left column, move thinking to the middle rail, drop the redundant current-game banner, and validate the cleaner layout.
 - [x] Drop the board header block so the board fills the full left height, move result/turn into the right-rail Players card, add a match-strip game stepper for multi-game PGNs, and screenshot-verify without regressions.
+- [x] Remove the redundant Players and Current Attempt cards from the board screen, keep one slim slug/result/turn status row, and re-verify with screenshots plus tests.
 - [x] Add `run-llm-live-match.ps1` to launch the viewer and match as detached WMI processes that survive console teardown (PRD 177).
 - [x] Give each LLM engine process a PID-suffixed log file (PRD 177).

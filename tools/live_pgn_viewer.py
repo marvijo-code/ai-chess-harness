@@ -459,17 +459,14 @@ INDEX_HTML = """<!doctype html>
       box-shadow: var(--sh-sm);
       overflow: hidden;
     }
-    .board-players-card .card-body { display: grid; gap: 8px; }
-    .board-players-row {
-      display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px;
-      padding: 8px 10px;
-      background: var(--surface-alt); border: 1px solid var(--line); border-radius: var(--r-md);
-      font-size: 13px; font-weight: 600;
-      min-width: 0;
+    .board-status-line {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 12px;
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .board-players-row .bar-name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .board-players-row .clock { min-width: 76px; max-width: 100%; }
-    .board-players-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+    .board-status-line .status-slug { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .board-status-line .status-sep { flex-shrink: 0; opacity: .5; }
     .card-hd {
       display: flex; align-items: center;
       justify-content: space-between; gap: 10px;
@@ -887,6 +884,13 @@ INDEX_HTML = """<!doctype html>
     <main id="board-view" class="main view-panel">
       <aside class="left-col">
         <section class="board-card">
+          <div class="board-status-line" aria-label="Game status">
+            <span id="board-status-slug" class="status-slug">No game</span>
+            <span class="status-sep">·</span>
+            <span id="board-status-result">—</span>
+            <span class="status-sep">·</span>
+            <span id="board-status-turn">—</span>
+          </div>
           <div class="board-shell">
             <div id="top-player" class="player-bar">
               <div class="player-bar-main">
@@ -964,29 +968,9 @@ INDEX_HTML = """<!doctype html>
         <div class="side-controls">
           <button id="flip-board" type="button" title="Flip board" aria-label="Flip board">Flip Board</button>
         </div>
-        <section class="card board-players-card">
-          <div class="card-hd">
-            <span class="card-title">Players</span>
-            <span id="players-tournament" class="card-sub">Tournament: &#8212;</span>
-          </div>
-          <div class="card-body">
-            <div class="board-players-row">
-              <span id="white-player" class="bar-name"><span class="dot-w"></span>White: &#8212;</span>
-              <span id="white-side-clock" class="clock" aria-label="White clock">--:--</span>
-            </div>
-            <div class="board-players-row">
-              <span id="black-player" class="bar-name"><span class="dot-b"></span>Black: &#8212;</span>
-              <span id="black-side-clock" class="clock" aria-label="Black clock">--:--</span>
-            </div>
-            <div class="board-players-meta">
-              <span id="players-result" class="card-sub">&#42;</span>
-              <span id="players-turn" class="card-sub">&#8212;</span>
-            </div>
-          </div>
-        </section>
         <section class="card analysis-card collapsed">
           <div class="card-hd">
-            <span id="analysis-title" class="card-title">Engine Analysis</span>
+            <span id="analysis-title" class="card-title">Analysis</span>
             <div class="card-tools">
               <label class="pill-toggle" style="font-size:12px;text-transform:none;letter-spacing:0"><input id="analysis-panel-toggle" type="checkbox" checked> On</label>
               <button id="analysis-collapse-toggle" class="card-tool-btn" type="button" aria-expanded="false">Show</button>
@@ -1003,14 +987,6 @@ INDEX_HTML = """<!doctype html>
             <span id="stats-meta" class="card-sub"></span>
           </div>
           <div id="stats" class="card-body"></div>
-        </section>
-
-        <section class="card">
-          <div class="card-hd">
-            <span class="card-title">Current Attempt</span>
-            <span id="master-current-meta" class="card-sub"></span>
-          </div>
-          <div id="master-current-attempt" class="card-body"></div>
         </section>
 
         <section class="card">
@@ -2125,8 +2101,6 @@ INDEX_HTML = """<!doctype html>
     function updateClockDisplays() {
       updateClockElement("black-clock", "Black");
       updateClockElement("white-clock", "White");
-      updateClockElement("black-side-clock", "Black");
-      updateClockElement("white-side-clock", "White");
     }
 
     let viewerVersion = "";
@@ -2169,8 +2143,6 @@ INDEX_HTML = """<!doctype html>
           document.getElementById("top-player").innerHTML = playerBarHtml("Black", black);
           document.getElementById("bottom-player").innerHTML = playerBarHtml("White", white);
         }
-        document.getElementById("white-player").innerHTML = `<span class="dot-w"></span>White: ${escapeHtml(white)}`;
-        document.getElementById("black-player").innerHTML = `<span class="dot-b"></span>Black: ${escapeHtml(black)}`;
       }
       updateClockDisplays();
     }
@@ -2260,15 +2232,15 @@ INDEX_HTML = """<!doctype html>
       };
       viewedPly = ply;
 
-      document.getElementById("players-tournament").textContent = `Tournament: ${data.tournament_slug || "—"}`;
       renderPlayerBars(white, black);
       renderClock(data);
       syncMatchStrip(data);
       const timeoutResult = liveClockTimeoutResult(data, white, black);
-      document.getElementById("players-turn").textContent = followLive
+      document.getElementById("board-status-slug").textContent = data.tournament_slug || "—";
+      document.getElementById("board-status-turn").textContent = followLive
         ? ((data.completed || timeoutResult) ? "Game over" : `${data.turn} to move`)
         : `${ply} / ${data.moves.length} plies`;
-      document.getElementById("players-result").textContent = timeoutResult || formatGameResult(headers);
+      document.getElementById("board-status-result").textContent = timeoutResult || formatGameResult(headers);
       const gameLabel = data.game_count > 1 ? `game ${data.game_index} / ${data.game_count}, ` : "";
       document.getElementById("meta").textContent = followLive
         ? `${gameLabel}${data.moves.length} plies`
@@ -2331,7 +2303,7 @@ INDEX_HTML = """<!doctype html>
       const container = document.getElementById("analysis");
       const meta = document.getElementById("analysis-meta");
       const title = document.getElementById("analysis-title");
-      title.textContent = "Engine Analysis";
+      title.textContent = "Analysis";
       meta.textContent = "Loading";
       container.innerHTML = '<div class="empty">Engine analysis is loading.</div>';
       analysisAvailable = true;
@@ -2441,7 +2413,7 @@ INDEX_HTML = """<!doctype html>
       const container = document.getElementById("analysis");
       const meta = document.getElementById("analysis-meta");
       const title = document.getElementById("analysis-title");
-      title.textContent = analysis && analysis.engine ? `Engine Analysis: ${analysis.engine}` : "Engine Analysis";
+      title.textContent = "Analysis";
       if (!analysis || analysis.enabled === false) {
         renderEvalBar(analysis);
         if (!analysisAvailable) {
@@ -2973,7 +2945,6 @@ INDEX_HTML = """<!doctype html>
       const summary = data.summary || {};
       const latest = (data.ladder && data.ladder.latest_attempt) || {};
       const currentAttempt = data.current_attempt || {};
-      renderMasterCurrentAttempt(currentAttempt, "master-current-attempt", "master-current-meta");
       renderMasterCurrentAttempt(currentAttempt, "master-current-attempt-main", "master-current-main-meta");
       document.getElementById("master-summary").innerHTML = `<div class="learner-summary">
         <div class="summary-row"><span>Context</span><strong>${escapeHtml(data.root || "")}</strong></div>
@@ -3138,12 +3109,12 @@ INDEX_HTML = """<!doctype html>
           latestGame = data;
           syncMatchHash(data);
           setStatus(false, data.exists ? "No game" : "No PGN");
-          document.getElementById("players-tournament").textContent = `Tournament: ${data.tournament_slug || "—"}`;
+          document.getElementById("board-status-slug").textContent = data.tournament_slug || "—";
           latestClock = null;
           renderPlayerBars("—", "—");
           syncMatchStrip(data);
-          document.getElementById("players-turn").textContent = "—";
-          document.getElementById("players-result").textContent = "*";
+          document.getElementById("board-status-turn").textContent = "—";
+          document.getElementById("board-status-result").textContent = "*";
           document.getElementById("meta").textContent = "";
           renderBoard("8/8/8/8/8/8/8/8 w - - 0 1", null);
           renderMoves([]);
