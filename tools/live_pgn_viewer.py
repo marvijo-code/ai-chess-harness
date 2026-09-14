@@ -865,58 +865,10 @@ INDEX_HTML = """<!doctype html>
       </div>
     </header>
 
-    <div id="current-game-title" class="current-game-banner">No game loaded</div>
+    <div id="current-game-title" class="current-game-banner hidden">No game loaded</div>
 
     <main id="board-view" class="main view-panel">
       <aside class="left-col">
-        <section class="card thinking-card collapsed">
-          <div class="card-hd">
-            <span class="card-title">Bot Thinking</span>
-            <button id="thinking-panel-toggle" class="card-tool-btn" type="button" aria-expanded="false">Show</button>
-          </div>
-          <div class="thinking-panel-body">
-          <div class="log-filter-row">
-            <span class="log-filter-label">Side</span>
-            <div class="segmented log-side-filter" role="group" aria-label="Thinking side filter">
-              <button class="active" type="button" data-log-side="all">All</button>
-              <button type="button" data-log-side="white">White</button>
-              <button type="button" data-log-side="black">Black</button>
-            </div>
-          </div>
-          <div class="log-filter-row" aria-label="Thinking message type filter">
-            <span class="log-filter-label">Type</span>
-            <div class="multi-filter log-kind-filter">
-              <button type="button" data-log-kind="all">All</button>
-              <button type="button" data-log-kind="setup">Setup</button>
-              <button type="button" data-log-kind="prompt">Prompt</button>
-              <button type="button" data-log-kind="comment">Comment</button>
-              <button type="button" data-log-kind="move">Move</button>
-              <button type="button" data-log-kind="repair">Repair</button>
-              <button type="button" data-log-kind="account">Account</button>
-              <button type="button" data-log-kind="log">Log</button>
-            </div>
-          </div>
-          <div id="board-thinking-meta" class="card-sub" style="padding:0 16px 8px"></div>
-          <div id="board-thinking-logs" class="card-body"></div>
-          </div>
-        </section>
-
-        <section class="card analysis-card collapsed">
-          <div class="card-hd">
-            <span id="analysis-title" class="card-title">Engine Analysis</span>
-            <div class="card-tools">
-              <label class="pill-toggle" style="font-size:12px;text-transform:none;letter-spacing:0"><input id="analysis-panel-toggle" type="checkbox" checked> On</label>
-              <button id="analysis-collapse-toggle" class="card-tool-btn" type="button" aria-expanded="false">Show</button>
-            </div>
-          </div>
-          <div class="analysis-panel-body">
-          <div id="analysis-meta" class="card-sub" style="padding:5px 16px 0"></div>
-          <div id="analysis" class="card-body" style="padding-top:6px"></div>
-          </div>
-        </section>
-      </aside>
-
-      <div class="center-col">
         <section class="board-card">
           <div class="board-hd">
             <div class="board-hd-row">
@@ -953,6 +905,40 @@ INDEX_HTML = """<!doctype html>
             </div>
           </div>
         </section>
+      </aside>
+
+      <div class="center-col">
+        <section class="card thinking-card collapsed">
+          <div class="card-hd">
+            <span class="card-title">Bot Thinking</span>
+            <button id="thinking-panel-toggle" class="card-tool-btn" type="button" aria-expanded="false">Show</button>
+          </div>
+          <div class="thinking-panel-body">
+          <div class="log-filter-row">
+            <span class="log-filter-label">Side</span>
+            <div class="segmented log-side-filter" role="group" aria-label="Thinking side filter">
+              <button class="active" type="button" data-log-side="all">All</button>
+              <button type="button" data-log-side="white">White</button>
+              <button type="button" data-log-side="black">Black</button>
+            </div>
+          </div>
+          <div class="log-filter-row" aria-label="Thinking message type filter">
+            <span class="log-filter-label">Type</span>
+            <div class="multi-filter log-kind-filter">
+              <button type="button" data-log-kind="all">All</button>
+              <button type="button" data-log-kind="setup">Setup</button>
+              <button type="button" data-log-kind="prompt">Prompt</button>
+              <button type="button" data-log-kind="comment">Comment</button>
+              <button type="button" data-log-kind="move">Move</button>
+              <button type="button" data-log-kind="repair">Repair</button>
+              <button type="button" data-log-kind="account">Account</button>
+              <button type="button" data-log-kind="log">Log</button>
+            </div>
+          </div>
+          <div id="board-thinking-meta" class="card-sub" style="padding:0 16px 8px"></div>
+          <div id="board-thinking-logs" class="card-body"></div>
+          </div>
+        </section>
 
         <section class="card move-list-card">
           <div class="card-hd">
@@ -971,6 +957,35 @@ INDEX_HTML = """<!doctype html>
         <div class="side-controls">
           <button id="flip-board" type="button" title="Flip board" aria-label="Flip board">Flip Board</button>
         </div>
+        <section class="card board-players-card">
+          <div class="card-hd">
+            <span class="card-title">Players</span>
+            <span id="players-tournament" class="card-sub">Tournament: &#8212;</span>
+          </div>
+          <div class="card-body">
+            <div class="board-players-row">
+              <span id="white-player" class="bar-name"><span class="dot-w"></span>White: &#8212;</span>
+              <span id="white-side-clock" class="clock" aria-label="White clock">--:--</span>
+            </div>
+            <div class="board-players-row">
+              <span id="black-player" class="bar-name"><span class="dot-b"></span>Black: &#8212;</span>
+              <span id="black-side-clock" class="clock" aria-label="Black clock">--:--</span>
+            </div>
+          </div>
+        </section>
+        <section class="card analysis-card collapsed">
+          <div class="card-hd">
+            <span id="analysis-title" class="card-title">Engine Analysis</span>
+            <div class="card-tools">
+              <label class="pill-toggle" style="font-size:12px;text-transform:none;letter-spacing:0"><input id="analysis-panel-toggle" type="checkbox" checked> On</label>
+              <button id="analysis-collapse-toggle" class="card-tool-btn" type="button" aria-expanded="false">Show</button>
+            </div>
+          </div>
+          <div class="analysis-panel-body">
+          <div id="analysis-meta" class="card-sub" style="padding:5px 16px 0"></div>
+          <div id="analysis" class="card-body" style="padding-top:6px"></div>
+          </div>
+        </section>
         <section class="card">
           <div class="card-hd">
             <span class="card-title">Leaderboard</span>
@@ -2159,16 +2174,6 @@ INDEX_HTML = """<!doctype html>
       return result;
     }
 
-    function currentGameLabel(data, white, black) {
-      const headers = data.headers || {};
-      const gameNumber = Number(headers.Round || data.game_index || 1);
-      const totalGames = Number(headers.TotalGames || data.total_games || 0);
-      const gameText = Number.isFinite(gameNumber) && gameNumber > 0
-        ? `Game ${gameNumber}${Number.isFinite(totalGames) && totalGames > 0 ? ` / ${totalGames}` : ""}`
-        : "Current game";
-      return `${gameText}: ${white} vs ${black}`;
-    }
-
     function liveClockTimeoutResult(data, white, black) {
       if (!data || data.completed || !latestClock || !latestClock.running_side) return "";
       const side = latestClock.running_side;
@@ -2193,8 +2198,8 @@ INDEX_HTML = """<!doctype html>
       viewedPly = ply;
 
       document.getElementById("players").textContent = `${white} vs ${black}`;
-      document.getElementById("current-game-title").textContent = currentGameLabel(data, white, black);
       document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
+      document.getElementById("players-tournament").textContent = `Tournament: ${data.tournament_slug || "—"}`;
       renderPlayerBars(white, black);
       renderClock(data);
       const timeoutResult = liveClockTimeoutResult(data, white, black);
@@ -3032,8 +3037,8 @@ INDEX_HTML = """<!doctype html>
           syncMatchHash(data);
           setStatus(false, data.exists ? "No game" : "No PGN");
           document.getElementById("players").textContent = "No game loaded";
-          document.getElementById("current-game-title").textContent = "No game loaded";
           document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
+          document.getElementById("players-tournament").textContent = `Tournament: ${data.tournament_slug || "—"}`;
           latestClock = null;
           renderPlayerBars("—", "—");
           document.getElementById("turn").textContent = "—";

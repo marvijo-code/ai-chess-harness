@@ -8,9 +8,9 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 
 0. Future non-trivial chess-harness tasks should update `PRD.md` and `PRD_CHECKLIST.md` before implementation and keep checklist status current while work proceeds.
 1. The board page uses a three-column desktop layout.
-2. The far-left column contains the large board with the bottom/top player bars attached to the board: the bottom bar shows the bottom-side player, the top bar shows the top-side player, each with its clock.
-3. `Bot Thinking` shows observable prompt/comment/bestmove logs, syncs to the replayed move when Follow Live is off, and includes the move number for the selected move/log context.
-4. `Engine Analysis` with the eval bar panel lives on the right rail, stays viewer-only, and must never be sent to Codex-chess or Codex-chess-learner prompts.
+2. The far-left column contains only the large board card: result/turn header, attached bottom/top player bars with clocks, and the eval bar beside the board. No thinking or analysis panels sit in the board column.
+3. `Bot Thinking` lives in the middle rail: observable prompt/comment/bestmove logs, syncs to the replayed move when Follow Live is off, and includes the move number for the selected move/log context.
+4. `Engine Analysis` lives on the right rail, stays viewer-only, and must never be sent to Codex-chess or Codex-chess-learner prompts.
 5. The right column shows player names, then `Leaderboard`, then `Matches`, then `Engine Analysis` with the eval-bar readout, then moves and config.
 6. `Matches` lists in-progress live FastChess games and completed games below the leaderboard, with status labels and 5-row pagination.
 7. Clicking a completed `Matches` row loads that archived game into the board viewer, including its move list, result, analysis position, and matching bot logs.
@@ -186,8 +186,9 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 174. The generic UCI match runner must support an OpenRouter model on each side plus an optional live PGN/status sidecar so two OpenRouter LLM engines can play a watched game with clocks and a viewer link.
 175. The OpenRouter engine must send bounded reasoning-effort control and a provider-routing preference, enforce a hard wall-clock deadline per attempt, back off on transient 429/5xx responses, drop a rejected `reasoning`/`json_schema` parameter without spending an attempt, and raise `MaxTokens` when a mandatory-reasoning model truncates before emitting JSON.
 176. LLM live matches must use a real time control: the runner sends `go wtime/btime/winc/binc`, decrements the mover's clock by wall-clock think time, writes `WhiteClockMs`/`BlackClockMs`/`ClockUpdatedAtEpochMs`/`ClockRunningSide` headers plus `[%clk]` comments so the live viewer shows the active side ticking, and records a loss on time at zero.
+177. `run-llm-live-match.ps1` must start the viewer and match as detached WMI processes (not shell children) so the launching console returns immediately and the game survives console teardown, and each LLM engine process must log to a PID-suffixed file so two engines started in the same second do not share a log.
 177. LLM live matches must keep two separate timeout budgets: the OpenRouter engine must allow a bounded per-attempt deadline plus declared per-attempt retries (default 180s per attempt, `openrouter.timeoutSeconds` / `OPENROUTER_TIMEOUT_SECONDS` / runner movetime), while the UCI match runner must wait for the engine's own 3-attempt forfeit (`bestmove 0000`) before ending the move. The runner must not time out a move while the engine is still using attempts, and per-attempt timeouts must count toward the move's 3-attempt budget.
-178. The board shell must use a roomy layout: the board owns the far-left column at a larger size, top/bottom player bars stay attached to the board with bottom-side player at the bottom, the eval bar stays beside the board, and the right rail keeps player names, leaderboard, matches, and analysis without crowding the board.
+178. The board shell must use a roomy layout: the board owns the far-left column alone at a larger size, top/bottom player bars stay attached to the board with bottom-side player at the bottom, the eval bar stays beside the board, and the middle/right rails keep bot thinking, player names, leaderboard, matches, moves, and analysis without crowding the board. The board view must not render a redundant current-game title banner; the board header result plus right-rail match identity is enough.
 
 ## Validation Requirements
 
