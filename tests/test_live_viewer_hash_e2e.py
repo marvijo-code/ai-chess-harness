@@ -241,8 +241,8 @@ class LiveViewerHashE2ETests(unittest.TestCase):
                     )
                     self.assertEqual(page.locator("#status-text").inner_text(), "Archive")
                     self.assertIn(slug, page.locator("#tournament-chip").inner_text())
-                    self.assertIn("White: Codex-chess-zero", page.locator("#white-player").inner_text())
-                    self.assertIn("Black: Stockfish depth 1", page.locator("#black-player").inner_text())
+                    self.assertIn("White: Codex-chess-zero", page.locator("#top-player").inner_text())
+                    self.assertIn("Black: Stockfish depth 1", page.locator("#bottom-player").inner_text())
                     self.assertEqual(page.locator(".sq").count(), 64)
                     browser.close()
             finally:
@@ -386,12 +386,12 @@ class LiveViewerHashE2ETests(unittest.TestCase):
                         "() => document.querySelector('#current-game-title')?.textContent === 'Game 1 / 2: OldWhite vs OldBlack'",
                         timeout=10000,
                     )
-                    self.assertIn("White: OldWhite", page.locator("#white-player").inner_text())
+                    self.assertIn("White: OldWhite", page.locator("#bottom-player").inner_text())
                     page.keyboard.press("ArrowLeft")
                     page.wait_for_timeout(1500)
                     self.assertEqual(page.evaluate("window.location.hash"), f"#{slug}--game-1")
                     self.assertEqual(page.locator("#current-game-title").inner_text(), "Game 1 / 2: OldWhite vs OldBlack")
-                    self.assertIn("White: OldWhite", page.locator("#white-player").inner_text())
+                    self.assertIn("White: OldWhite", page.locator("#bottom-player").inner_text())
                     browser.close()
             finally:
                 proc.terminate()
@@ -485,8 +485,8 @@ class LiveViewerHashE2ETests(unittest.TestCase):
                     )
                     self.assertIn(active_slug, page.locator("#tournament-chip").inner_text())
                     self.assertEqual(page.locator("#current-game-title").inner_text(), "Game 7 / 7: ActiveWhite vs ActiveBlack")
-                    self.assertIn("White: ActiveWhite", page.locator("#white-player").inner_text())
-                    self.assertIn("Black: ActiveBlack", page.locator("#black-player").inner_text())
+                    self.assertIn("White: ActiveWhite", page.locator("#bottom-player").inner_text())
+                    self.assertIn("Black: ActiveBlack", page.locator("#top-player").inner_text())
                     self.assertEqual(page.locator(".sq").count(), 64)
                     page.keyboard.press("ArrowLeft")
                     page.wait_for_function(
@@ -499,7 +499,7 @@ class LiveViewerHashE2ETests(unittest.TestCase):
                     self.assertIn(active_slug, page.locator("#tournament-chip").inner_text())
                     self.assertIn(active_slug, page.locator("#pgn-path").inner_text())
                     self.assertEqual(page.locator("#current-game-title").inner_text(), "Game 7 / 7: ActiveWhite vs ActiveBlack")
-                    self.assertIn("White: ActiveWhite", page.locator("#white-player").inner_text())
+                    self.assertIn("White: ActiveWhite", page.locator("#bottom-player").inner_text())
                     page.wait_for_timeout(4000)
                     self.assertFalse(page.locator("#follow-toggle").is_checked())
                     self.assertEqual(page.evaluate("window.location.hash"), f"#{active_slug}--live-game-7")

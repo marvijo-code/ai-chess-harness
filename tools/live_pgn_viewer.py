@@ -179,7 +179,10 @@ INDEX_HTML = """<!doctype html>
     }
 
     /* === SHELL === */
-    .app { min-height: 100vh; display: grid; grid-template-rows: auto auto 1fr; }
+    /* App shell: lock to the viewport so the board stays put and each column
+       scrolls on its own instead of the whole page (disabled on mobile below). */
+    .app { height: 100vh; overflow: hidden; display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+    .view-panel { min-height: 0; }
 
     /* === TOPBAR === */
     .topbar {
@@ -273,13 +276,24 @@ INDEX_HTML = """<!doctype html>
     /* === MAIN GRID === */
     .main {
       width: min(1920px, 100%); margin: 0 auto;
-      padding: 20px;
+      padding: 20px 24px;
       display: grid;
-      grid-template-columns: minmax(260px, 320px) minmax(560px, 2.1fr) minmax(260px, 340px);
-      gap: 16px; align-items: start;
+      grid-template-columns: minmax(520px, 1.65fr) minmax(280px, 1fr) minmax(300px, 380px);
+      gap: 20px; align-items: stretch;
+      height: 100%; overflow: hidden; min-height: 0;
     }
-    .left-col, .center-col, .side-col { display: grid; gap: 16px; min-width: 0; }
-    .center-col { container-type: inline-size; container-name: board-col; }
+    .left-col { container-type: inline-size; container-name: board-col; }
+    .left-col, .center-col, .side-col {
+      display: grid; gap: 20px; min-width: 0;
+      height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden;
+      align-content: start; padding-bottom: 8px;
+    }
+    /* thin, unobtrusive scrollbars inside the columns */
+    .left-col::-webkit-scrollbar, .center-col::-webkit-scrollbar, .side-col::-webkit-scrollbar { width: 8px; }
+    .left-col::-webkit-scrollbar-thumb, .center-col::-webkit-scrollbar-thumb, .side-col::-webkit-scrollbar-thumb {
+      background: var(--line); border-radius: 8px;
+    }
+    .center-col { grid-template-rows: auto minmax(0, 1fr); }
     .thinking-card {
       position: sticky; top: 70px;
       display: grid; grid-template-rows: auto minmax(0, 1fr);
@@ -311,6 +325,7 @@ INDEX_HTML = """<!doctype html>
       display: grid;
       grid-template-columns: minmax(320px, 420px) minmax(360px, 1fr);
       gap: 20px; align-items: start;
+      height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden;
     }
     .learner-col { display: grid; gap: 16px; min-width: 0; }
     .learner-summary { display: grid; gap: 0; }
@@ -438,6 +453,16 @@ INDEX_HTML = """<!doctype html>
       box-shadow: var(--sh-sm);
       overflow: hidden;
     }
+    .board-players-card .card-body { display: grid; gap: 10px; }
+    .board-players-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 10px 12px;
+      background: var(--surface-alt); border: 1px solid var(--line); border-radius: var(--r-md);
+      font-size: 13px; font-weight: 600;
+    }
+    .board-players-row .bar-name { font-weight: 700; }
+    .board-players-row .clock { min-width: 84px; }
+    .board-players-meta { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
     .card-hd {
       display: flex; align-items: center;
       justify-content: space-between; gap: 10px;
@@ -492,28 +517,30 @@ INDEX_HTML = """<!doctype html>
     .board-turn { font-size: 12px; color: var(--muted); }
 
     .board-shell {
-      --board-pixel-size: min(78vh, 900px);
-      padding: 14px;
+      /* Large board on the far-left column: keep the player bars, board, and
+         eval bar roomy while the right rails hold players, matches, analysis. */
+      --board-pixel-size: min(78vh, 860px, calc(100cqw - 96px), calc(100vh - 340px));
+      padding: 18px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       width: 100%;
     }
     .board-stage {
       display: flex;
       flex-direction: row;
       align-items: stretch;
-      gap: 6px;
-      width: calc(var(--board-pixel-size) + 28px);
+      gap: 10px;
+      width: calc(var(--board-pixel-size) + 44px);
       max-width: 100%;
       margin: 0 auto;
     }
     .eval-bar {
       position: relative;
-      width: 22px;
-      flex: 0 0 22px;
-      border-radius: 3px;
+      width: 30px;
+      flex: 0 0 30px;
+      border-radius: 4px;
       overflow: hidden;
       border: 1px solid var(--line);
       background: #3a3a3c;
@@ -591,7 +618,7 @@ INDEX_HTML = """<!doctype html>
       box-shadow: var(--sh-board);
     }
     @supports (container-type: inline-size) {
-      .board-shell { --board-pixel-size: min(78vh, calc(100cqw - 56px)); }
+      .board-shell { --board-pixel-size: min(78vh, 860px, calc(100cqw - 96px), calc(100vh - 340px)); }
       .board-stage, .player-bar { max-width: calc(100cqw - 28px); }
     }
     .sq {
@@ -648,20 +675,28 @@ INDEX_HTML = """<!doctype html>
       font-weight: 700;
     }
     .move-list-card.collapsed #moves { display: none; }
+    /* Move list occupies the center column's 1fr track and scrolls internally,
+       so it never steals height from (or pushes) the board card. */
+    .move-list-card { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; overflow: hidden; }
+    #moves { overflow-y: auto; overflow-x: hidden; min-height: 0; }
 
     /* === STATS TABLE === */
-    .stats-tbl { width: 100%; border-collapse: collapse; }
+    /* table-layout:fixed so a long ENGINE name truncates (ellipsis) instead of
+       forcing the table wider than its narrow column; numeric columns get a
+       fixed width that fits 3 digits so W/D/L/G values are never clipped. */
+    .stats-tbl { width: 100%; border-collapse: collapse; table-layout: fixed; }
     .stats-tbl th, .stats-tbl td {
-      padding: 5px 10px; border-bottom: 1px solid var(--line);
+      padding: 5px 4px; border-bottom: 1px solid var(--line);
       text-align: left; font-size: 13px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .stats-tbl th {
       font-size: 11px; font-weight: 600; color: var(--muted);
       text-transform: uppercase; letter-spacing: .04em;
-      background: var(--surface-alt); padding: 7px 10px;
+      background: var(--surface-alt); padding: 7px 4px;
     }
-    .stats-tbl td.n { text-align: right; font-variant-numeric: tabular-nums; }
-    .stats-tbl td.rk { width: 34px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .stats-tbl td.n, .stats-tbl th.n { text-align: right; font-variant-numeric: tabular-nums; width: 32px; text-overflow: clip; }
+    .stats-tbl td.rk, .stats-tbl th.rk { width: 22px; color: var(--muted); font-variant-numeric: tabular-nums; text-overflow: clip; }
     .stats-tbl tbody tr:last-child td { border-bottom: none; }
     .stats-tbl tbody tr:hover td { background: var(--surface-alt); }
     .pager {
@@ -760,24 +795,39 @@ INDEX_HTML = """<!doctype html>
     .hidden { display: none !important; }
 
     /* === RESPONSIVE === */
-    @media (max-width: 860px) {
+    @media (max-width: 720px) {
+      /* mobile: release the viewport lock, let the whole page scroll normally */
+      .app { height: auto; min-height: 100vh; overflow: visible; }
+      .main, .learner-main { height: auto; overflow: visible; }
+      .left-col, .center-col, .side-col { height: auto; overflow: visible; }
       .topbar { flex-direction: column; align-items: flex-start; }
       .brand { width: 100%; }
       .top-right { width: 100%; justify-content: space-between; }
       .brand-meta { max-width: 100%; }
       .brand-path { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
       .main, .learner-main { grid-template-columns: 1fr; padding: 12px; gap: 14px; }
-      .board-shell { padding: 10px; --board-pixel-size: min(72vh, calc(100vw - 28px)); }
+      .board-shell { padding: 10px; --board-pixel-size: min(58vh, calc(100vw - 28px)); }
       .eng-head, .eng-fields, .eng-settings { grid-template-columns: 1fr; }
       .summary-row { grid-template-columns: 1fr; gap: 2px; }
       .summary-row strong, .file-row summary, .log-text { min-width: 0; overflow-wrap: anywhere; }
       .thinking-card { position: static; max-height: none; }
       .thinking-card .card-body { max-height: 420px; }
     }
-    @media (min-width: 861px) and (max-width: 1180px) {
-      .main { grid-template-columns: minmax(280px, 360px) minmax(420px, 1fr); }
+    @media (min-width: 721px) and (max-width: 991px) {
+      .main { grid-template-columns: minmax(440px, 1.5fr) minmax(280px, 1fr); }
       .side-col { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .side-col .card:nth-child(n + 3) { grid-column: span 1; }
+    }
+    /* Short viewport (small windows / embedded preview panel): the viewport
+       lock crams the board below the fold, so release it — let the page scroll
+       normally and size the board by width instead of height. */
+    @media (max-height: 760px) {
+      .app { height: auto; min-height: 100vh; overflow: visible; }
+      .main, .learner-main { height: auto; overflow: visible; }
+      .left-col, .center-col, .side-col { height: auto; overflow: visible; }
+      .board-shell { --board-pixel-size: min(calc(100cqw - 72px), 720px); }
+      .thinking-card { position: static; height: auto; }
+      .thinking-card:not(.collapsed) { height: 420px; }
     }
   </style>
 </head>
@@ -875,8 +925,6 @@ INDEX_HTML = """<!doctype html>
             </div>
             <div class="player-chips">
               <span id="tournament-chip" class="chip">Tournament: &#8212;</span>
-              <span id="white-player" class="chip"><span class="dot-w"></span>White: &#8212;</span>
-              <span id="black-player" class="chip"><span class="dot-b"></span>Black: &#8212;</span>
             </div>
             <div id="turn" class="board-turn">&#8212;</div>
           </div>
@@ -2051,6 +2099,8 @@ INDEX_HTML = """<!doctype html>
     function updateClockDisplays() {
       updateClockElement("black-clock", "Black");
       updateClockElement("white-clock", "White");
+      updateClockElement("black-side-clock", "Black");
+      updateClockElement("white-side-clock", "White");
     }
 
     let viewerVersion = "";
@@ -2093,6 +2143,8 @@ INDEX_HTML = """<!doctype html>
           document.getElementById("top-player").innerHTML = playerBarHtml("Black", black);
           document.getElementById("bottom-player").innerHTML = playerBarHtml("White", white);
         }
+        document.getElementById("white-player").innerHTML = `<span class="dot-w"></span>White: ${escapeHtml(white)}`;
+        document.getElementById("black-player").innerHTML = `<span class="dot-b"></span>Black: ${escapeHtml(black)}`;
       }
       updateClockDisplays();
     }
@@ -2143,8 +2195,6 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("players").textContent = `${white} vs ${black}`;
       document.getElementById("current-game-title").textContent = currentGameLabel(data, white, black);
       document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
-      document.getElementById("white-player").innerHTML = `<span class="dot-w"></span>White: ${escapeHtml(white)}`;
-      document.getElementById("black-player").innerHTML = `<span class="dot-b"></span>Black: ${escapeHtml(black)}`;
       renderPlayerBars(white, black);
       renderClock(data);
       const timeoutResult = liveClockTimeoutResult(data, white, black);
@@ -2984,8 +3034,6 @@ INDEX_HTML = """<!doctype html>
           document.getElementById("players").textContent = "No game loaded";
           document.getElementById("current-game-title").textContent = "No game loaded";
           document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
-          document.getElementById("white-player").innerHTML = '<span class="dot-w"></span>White: —';
-          document.getElementById("black-player").innerHTML = '<span class="dot-b"></span>Black: —';
           latestClock = null;
           renderPlayerBars("—", "—");
           document.getElementById("turn").textContent = "—";
@@ -4488,6 +4536,49 @@ def collect_zero_depth_match_data(match_dir: Path = ZERO_DEPTH_MATCH_DIR) -> dic
     }
 
 
+MATERIAL_ADJUDICATION_CP = 500
+MATERIAL_ADJUDICATION_VALUES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 320,
+    chess.BISHOP: 330,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+}
+
+
+def material_adjudication_balance(board: chess.Board, color: bool) -> int:
+    score = 0
+    for piece in board.piece_map().values():
+        value = MATERIAL_ADJUDICATION_VALUES.get(piece.piece_type, 0)
+        score += value if piece.color == color else -value
+    return score
+
+
+def material_adjudicated_result(board: chess.Board, max_plies: int) -> dict:
+    outcome = board.outcome(claim_draw=True)
+    if outcome:
+        return {
+            "result": board.result(claim_draw=True),
+            "termination": str(outcome.termination.name).replace("_", " ").lower(),
+            "adjudicated": False,
+            "white_material_cp": material_adjudication_balance(board, chess.WHITE),
+        }
+
+    white_material_cp = material_adjudication_balance(board, chess.WHITE)
+    if white_material_cp >= MATERIAL_ADJUDICATION_CP:
+        result = "1-0"
+    elif white_material_cp <= -MATERIAL_ADJUDICATION_CP:
+        result = "0-1"
+    else:
+        result = "1/2-1/2"
+    return {
+        "result": result,
+        "termination": f"max plies {max_plies} material adjudication",
+        "adjudicated": True,
+        "white_material_cp": white_material_cp,
+    }
+
+
 def write_depth_match_live_state(live_pgn_path: Path | None, game: chess.pgn.Game, completed: bool) -> None:
     if live_pgn_path is None:
         return
@@ -4638,15 +4729,13 @@ def write_isolated_zero_stockfish_depth_match(
                 node.comment = str(comment)[:240]
             write_depth_match_live_state(live_pgn_path, game, completed=False)
 
-    outcome = board.outcome(claim_draw=True)
-    if outcome:
-        result = board.result(claim_draw=True)
-        termination = str(outcome.termination.name).replace("_", " ").lower()
-    else:
-        result = "1/2-1/2"
-        termination = f"max plies {max_plies}"
+    adjudication = material_adjudicated_result(board, max_plies)
+    result = adjudication["result"]
+    termination = adjudication["termination"]
     game.headers["Result"] = result
     game.headers["Termination"] = termination
+    game.headers["MaterialAdjudication"] = "true" if adjudication["adjudicated"] else "false"
+    game.headers["WhiteMaterialCp"] = str(adjudication["white_material_cp"])
     pgn_path.write_text(str(game) + "\n\n", encoding="utf-8")
     write_depth_match_live_state(live_pgn_path, game, completed=True)
     return {
@@ -4656,6 +4745,9 @@ def write_isolated_zero_stockfish_depth_match(
         "tournament_slug": tournament_slug(pgn_path),
         "live_tournament_slug": tournament_slug(live_pgn_path) if live_pgn_path else None,
         "result": result,
+        "termination": termination,
+        "adjudicated": adjudication["adjudicated"],
+        "white_material_cp": adjudication["white_material_cp"],
         "moves": board.ply(),
         "white": game.headers["White"],
         "black": game.headers["Black"],

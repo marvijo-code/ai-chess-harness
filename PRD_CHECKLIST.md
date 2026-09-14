@@ -241,3 +241,4 @@
 - [x] Add bounded reasoning-effort control, provider routing, a hard per-attempt deadline, transient-error backoff, parameter downgrade, and MaxTokens escalation to the OpenRouter engine (PRD 175).
 - [x] Give the LLM match runner a real time control that writes ticking `WhiteClockMs`/`BlackClockMs`/`ClockUpdatedAtEpochMs`/`ClockRunningSide` headers plus `[%clk]` comments (PRD 176).
 - [x] Re-run the deepseek-v4.1-flash vs GLM-5.3-flash live game with the fixed engine and confirm ticks plus a multi-move game (Validation 80).
+- [ ] Move the large board to the far-left column with attached bottom/top player bars, keep player names plus eval-bar analysis on the right rail, and validate the roomy layout (PRD 1, 2, 4, 5, 178).

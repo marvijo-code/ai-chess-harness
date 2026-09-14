@@ -8,10 +8,10 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 
 0. Future non-trivial chess-harness tasks should update `PRD.md` and `PRD_CHECKLIST.md` before implementation and keep checklist status current while work proceeds.
 1. The board page uses a three-column desktop layout.
-2. The left column contains fixed-height `Bot Thinking` and `Engine Analysis`.
+2. The far-left column contains the large board with the bottom/top player bars attached to the board: the bottom bar shows the bottom-side player, the top bar shows the top-side player, each with its clock.
 3. `Bot Thinking` shows observable prompt/comment/bestmove logs, syncs to the replayed move when Follow Live is off, and includes the move number for the selected move/log context.
-4. `Engine Analysis` replaces `Stockfish Analysis`, shows the selected local engine name, stays viewer-only, and must never be sent to Codex-chess or Codex-chess-learner prompts.
-5. The right column shows `Leaderboard`, then `Matches`, then moves and config.
+4. `Engine Analysis` with the eval bar panel lives on the right rail, stays viewer-only, and must never be sent to Codex-chess or Codex-chess-learner prompts.
+5. The right column shows player names, then `Leaderboard`, then `Matches`, then `Engine Analysis` with the eval-bar readout, then moves and config.
 6. `Matches` lists in-progress live FastChess games and completed games below the leaderboard, with status labels and 5-row pagination.
 7. Clicking a completed `Matches` row loads that archived game into the board viewer, including its move list, result, analysis position, and matching bot logs.
 8. When Follow Live is off, `Bot Thinking` stays steady unless the user intentionally selects another move, match, side filter, or re-enables live following.
@@ -187,6 +187,7 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 175. The OpenRouter engine must send bounded reasoning-effort control and a provider-routing preference, enforce a hard wall-clock deadline per attempt, back off on transient 429/5xx responses, drop a rejected `reasoning`/`json_schema` parameter without spending an attempt, and raise `MaxTokens` when a mandatory-reasoning model truncates before emitting JSON.
 176. LLM live matches must use a real time control: the runner sends `go wtime/btime/winc/binc`, decrements the mover's clock by wall-clock think time, writes `WhiteClockMs`/`BlackClockMs`/`ClockUpdatedAtEpochMs`/`ClockRunningSide` headers plus `[%clk]` comments so the live viewer shows the active side ticking, and records a loss on time at zero.
 177. LLM live matches must keep two separate timeout budgets: the OpenRouter engine must allow a bounded per-attempt deadline plus declared per-attempt retries (default 180s per attempt, `openrouter.timeoutSeconds` / `OPENROUTER_TIMEOUT_SECONDS` / runner movetime), while the UCI match runner must wait for the engine's own 3-attempt forfeit (`bestmove 0000`) before ending the move. The runner must not time out a move while the engine is still using attempts, and per-attempt timeouts must count toward the move's 3-attempt budget.
+178. The board shell must use a roomy layout: the board owns the far-left column at a larger size, top/bottom player bars stay attached to the board with bottom-side player at the bottom, the eval bar stays beside the board, and the right rail keeps player names, leaderboard, matches, and analysis without crowding the board.
 
 ## Validation Requirements
 
