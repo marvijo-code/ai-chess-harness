@@ -276,27 +276,33 @@ INDEX_HTML = """<!doctype html>
     /* === MAIN GRID === */
     .main {
       width: min(1920px, 100%); margin: 0 auto;
-      padding: 20px 24px;
+      padding: 12px 16px;
       display: grid;
-      grid-template-columns: minmax(520px, 1.65fr) minmax(280px, 1fr) minmax(300px, 380px);
-      gap: 20px; align-items: stretch;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 12px; align-items: stretch;
       height: 100%; overflow: hidden; min-height: 0;
     }
     .left-col { container-type: inline-size; container-name: board-col; }
-    .left-col, .center-col, .side-col {
-      display: grid; gap: 20px; min-width: 0;
+    .left-col {
+      display: grid; min-width: 0;
+      height: 100%; min-height: 0; overflow: hidden;
+      align-content: stretch; padding-bottom: 0;
+    }
+    .center-col, .side-col {
+      display: grid; gap: 16px; min-width: 0;
       height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden;
       align-content: start; padding-bottom: 8px;
     }
     /* thin, unobtrusive scrollbars inside the columns */
-    .left-col::-webkit-scrollbar, .center-col::-webkit-scrollbar, .side-col::-webkit-scrollbar { width: 8px; }
-    .left-col::-webkit-scrollbar-thumb, .center-col::-webkit-scrollbar-thumb, .side-col::-webkit-scrollbar-thumb {
+    .center-col::-webkit-scrollbar, .side-col::-webkit-scrollbar { width: 8px; }
+    .center-col::-webkit-scrollbar-thumb, .side-col::-webkit-scrollbar-thumb {
       background: var(--line); border-radius: 8px;
     }
-    .center-col { grid-template-rows: auto minmax(0, 1fr); }
+    .center-col { display: flex; flex-direction: column; min-height: 0; }
+    .move-list-card { flex: 1; min-height: 0; }
     .thinking-card {
-      position: sticky; top: 70px;
       display: grid; grid-template-rows: auto minmax(0, 1fr);
+      flex: 0 0 auto;
     }
     .thinking-card:not(.collapsed) {
       height: 520px;
@@ -453,16 +459,17 @@ INDEX_HTML = """<!doctype html>
       box-shadow: var(--sh-sm);
       overflow: hidden;
     }
-    .board-players-card .card-body { display: grid; gap: 10px; }
+    .board-players-card .card-body { display: grid; gap: 8px; }
     .board-players-row {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 10px 12px;
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px;
+      padding: 8px 10px;
       background: var(--surface-alt); border: 1px solid var(--line); border-radius: var(--r-md);
       font-size: 13px; font-weight: 600;
+      min-width: 0;
     }
-    .board-players-row .bar-name { font-weight: 700; }
-    .board-players-row .clock { min-width: 84px; }
-    .board-players-meta { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+    .board-players-row .bar-name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .board-players-row .clock { min-width: 76px; max-width: 100%; }
+    .board-players-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
     .card-hd {
       display: flex; align-items: center;
       justify-content: space-between; gap: 10px;
@@ -493,48 +500,51 @@ INDEX_HTML = """<!doctype html>
       border-radius: var(--r-lg);
       box-shadow: var(--sh-sm);
       overflow: hidden;
-    }
-    .board-hd {
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--line);
-      background: var(--surface-alt);
-    }
-    .board-hd-row {
-      display: flex; align-items: center;
-      justify-content: space-between; gap: 8px;
-      margin-bottom: 6px;
-    }
-    .game-title { font-size: 14px; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .game-result { font-size: 14px; font-weight: 700; color: var(--muted); text-align: right; overflow-wrap: anywhere; }
-    .player-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 5px; }
-    .chip {
-      display: inline-flex; align-items: center; gap: 5px;
-      border: 1px solid var(--line); border-radius: 20px;
-      padding: 3px 9px; font-size: 12px; font-weight: 500;
-    }
-    .dot-w { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #fff; border: 1.5px solid #aaa; }
-    .dot-b { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #1C1C1E; border: 1.5px solid #888; }
-    .board-turn { font-size: 12px; color: var(--muted); }
-
-    .board-shell {
-      /* Large board on the far-left column: keep the player bars, board, and
-         eval bar roomy while the right rails hold players, matches, analysis. */
-      --board-pixel-size: min(78vh, 860px, calc(100cqw - 96px), calc(100vh - 340px));
-      padding: 18px;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      gap: 10px;
+      min-height: 0;
+      flex: 1;
+    }
+    .match-strip {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      padding: 8px 16px 0;
+      font-size: 12px; font-weight: 600; color: var(--text);
+    }
+    .match-strip.hidden { display: none; }
+    .match-strip-btn {
+      border: 1px solid var(--line); border-radius: var(--r-sm);
+      background: var(--surface); color: var(--text);
+      width: 30px; height: 26px; font-size: 14px; cursor: pointer;
+    }
+    .match-strip-btn:disabled { opacity: .4; cursor: not-allowed; }
+    .dot-w { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #fff; border: 1.5px solid #aaa; }
+    .dot-b { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #1C1C1E; border: 1.5px solid #888; }
+
+    .board-shell {
+      /* Board fills the full left column height: player bars top/bottom,
+         eval bar beside the board, no header block above. */
+      --board-pixel-size: min(100cqw - 40px, 100vh - 190px, 980px);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: space-between;
+      gap: 8px;
       width: 100%;
+      flex: 1;
+      min-height: 0;
     }
     .board-stage {
       display: flex;
       flex-direction: row;
       align-items: stretch;
+      justify-content: center;
       gap: 10px;
-      width: calc(var(--board-pixel-size) + 44px);
+      width: 100%;
       max-width: 100%;
-      margin: 0 auto;
+      margin: 0;
+      flex: 1;
+      min-height: 0;
     }
     .eval-bar {
       position: relative;
@@ -574,9 +584,9 @@ INDEX_HTML = """<!doctype html>
       text-overflow: ellipsis;
     }
     .player-bar {
-      width: calc(var(--board-pixel-size) + 28px);
+      width: 100%;
       max-width: 100%;
-      margin: 0 auto;
+      margin: 0;
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
       padding: 8px 12px;
       background: var(--surface-alt); border: 1px solid var(--line); border-radius: var(--r-md);
@@ -618,8 +628,8 @@ INDEX_HTML = """<!doctype html>
       box-shadow: var(--sh-board);
     }
     @supports (container-type: inline-size) {
-      .board-shell { --board-pixel-size: min(78vh, 860px, calc(100cqw - 96px), calc(100vh - 340px)); }
-      .board-stage, .player-bar { max-width: calc(100cqw - 28px); }
+      .board-shell { --board-pixel-size: min(100cqw - 40px, 100vh - 190px, 980px); }
+      .board-stage, .player-bar { max-width: 100%; }
     }
     .sq {
       position: relative;
@@ -824,7 +834,8 @@ INDEX_HTML = """<!doctype html>
     @media (max-height: 760px) {
       .app { height: auto; min-height: 100vh; overflow: visible; }
       .main, .learner-main { height: auto; overflow: visible; }
-      .left-col, .center-col, .side-col { height: auto; overflow: visible; }
+      .center-col, .side-col { height: auto; overflow: visible; }
+      .left-col { height: auto; overflow: visible; }
       .board-shell { --board-pixel-size: min(calc(100cqw - 72px), 720px); }
       .thinking-card { position: static; height: auto; }
       .thinking-card:not(.collapsed) { height: 420px; }
@@ -867,19 +878,15 @@ INDEX_HTML = """<!doctype html>
 
     <div id="current-game-title" class="current-game-banner hidden">No game loaded</div>
 
+    <div id="match-strip" class="match-strip hidden" aria-label="Games in this PGN">
+      <button id="match-strip-prev" class="match-strip-btn" type="button" aria-label="Previous game">&#8592;</button>
+      <span id="match-strip-label" class="match-strip-label">Game 1 / 1</span>
+      <button id="match-strip-next" class="match-strip-btn" type="button" aria-label="Next game">&#8594;</button>
+    </div>
+
     <main id="board-view" class="main view-panel">
       <aside class="left-col">
         <section class="board-card">
-          <div class="board-hd">
-            <div class="board-hd-row">
-              <span id="players" class="game-title">No game loaded</span>
-              <span id="result" class="game-result">&#42;</span>
-            </div>
-            <div class="player-chips">
-              <span id="tournament-chip" class="chip">Tournament: &#8212;</span>
-            </div>
-            <div id="turn" class="board-turn">&#8212;</div>
-          </div>
           <div class="board-shell">
             <div id="top-player" class="player-bar">
               <div class="player-bar-main">
@@ -970,6 +977,10 @@ INDEX_HTML = """<!doctype html>
             <div class="board-players-row">
               <span id="black-player" class="bar-name"><span class="dot-b"></span>Black: &#8212;</span>
               <span id="black-side-clock" class="clock" aria-label="Black clock">--:--</span>
+            </div>
+            <div class="board-players-meta">
+              <span id="players-result" class="card-sub">&#42;</span>
+              <span id="players-turn" class="card-sub">&#8212;</span>
             </div>
           </div>
         </section>
@@ -1872,8 +1883,8 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
-    function movesTableHeadHtml(whiteName, blackName) {
-      return `<thead><tr><th>#</th><th>White<br><span style="color:var(--muted);font-size:10px;text-transform:none;letter-spacing:0;font-weight:400">${escapeHtml(whiteName)}</span></th><th>Black<br><span style="color:var(--muted);font-size:10px;text-transform:none;letter-spacing:0;font-weight:400">${escapeHtml(blackName)}</span></th></tr></thead>`;
+    function movesTableHeadHtml() {
+      return `<thead><tr><th>#</th><th>White</th><th>Black</th></tr></thead>`;
     }
 
     function moveRowHtml(w, b, index, active) {
@@ -1884,7 +1895,7 @@ INDEX_HTML = """<!doctype html>
       return `<tr class="${whiteActive || blackActive ? "move-row-active" : ""}"><td>${escapeHtml(w.move_number)}</td><td class="move-cell ${whiteActive ? "move-active" : ""}" data-ply="${escapeHtml(whitePly)}">${escapeHtml(w.san)}</td><td class="move-cell ${blackActive ? "move-active" : ""}" data-ply="${b ? escapeHtml(blackPly) : ""}">${b ? escapeHtml(b.san) : ""}</td></tr>`;
     }
 
-    function appendLiveMoves(tbody, moves, fromCount, whiteName, blackName) {
+    function appendLiveMoves(tbody, moves, fromCount) {
       for (let i = fromCount; i < moves.length; i++) {
         const move = moves[i];
         const isWhite = i % 2 === 0;
@@ -1919,7 +1930,7 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
-    function renderMoves(moves, whiteName = "White", blackName = "Black", activePly = null) {
+    function renderMoves(moves, activePly = null) {
       const container = document.getElementById("moves");
       if (!moves.length) {
         renderedLiveMoveCount = -1;
@@ -1932,7 +1943,7 @@ INDEX_HTML = """<!doctype html>
       if (followLive && !moveListFullHistory && active !== null && active === moves.length) {
         const tbody = container.querySelector("table.moves-tbl tbody");
         if (tbody && renderedLiveMoveCount >= 0 && moves.length > renderedLiveMoveCount && moves.length <= renderedLiveMoveCount + 2) {
-          appendLiveMoves(tbody, moves, renderedLiveMoveCount, whiteName, blackName);
+          appendLiveMoves(tbody, moves, renderedLiveMoveCount);
           renderedLiveMoveCount = moves.length;
           syncMoveListCollapsed();
           syncMoveHistoryToggle();
@@ -1961,7 +1972,7 @@ INDEX_HTML = """<!doctype html>
       }
       const visiblePairs = moveListFullHistory ? pairs : pairs.slice(Math.max(0, end - 5), end);
       const rows = visiblePairs.map(pair => moveRowHtml(pair.w, pair.b, pair.index, active));
-      container.innerHTML = `<table class="moves-tbl">${movesTableHeadHtml(whiteName, blackName)}<tbody>${rows.join("")}</tbody></table>`;
+      container.innerHTML = `<table class="moves-tbl">${movesTableHeadHtml()}<tbody>${rows.join("")}</tbody></table>`;
       if (followLive && !moveListFullHistory && active !== null && active === moves.length) {
         renderedLiveMoveCount = moves.length;
       } else {
@@ -2184,6 +2195,58 @@ INDEX_HTML = """<!doctype html>
       return "";
     }
 
+    function syncMatchStrip(data) {
+      const strip = document.getElementById("match-strip");
+      const label = document.getElementById("match-strip-label");
+      const prev = document.getElementById("match-strip-prev");
+      const next = document.getElementById("match-strip-next");
+      if (!strip || !label || !prev || !next) return;
+      // game_count can lag behind its own game_index on the first load of a
+      // multi-game PGN; trust the larger of the two so the strip appears.
+      const total = Math.max(
+        Number(data && data.game_count ? data.game_count : 1) || 1,
+        Number(data && data.game_index ? data.game_index : 1) || 1,
+      );
+      const current = Number(data && data.game_index ? data.game_index : 1) || 1;
+      if (total < 2) {
+        strip.classList.add("hidden");
+        return;
+      }
+      strip.classList.remove("hidden");
+      label.textContent = `Game ${current} / ${total}`;
+      prev.disabled = current <= 1;
+      next.disabled = current >= total;
+    }
+
+    function navigateMatch(delta) {
+      if (!latestGame || !latestGame.has_game) return;
+      const total = Math.max(
+        Number(latestGame.game_count || 1) || 1,
+        Number(latestGame.game_index || 1) || 1,
+      );
+      if (total < 2) return;
+      const current = Number(latestGame.game_index || 1) || 1;
+      const target = Math.max(1, Math.min(total, current + delta));
+      if (target === current) return;
+      const slug = latestGame.tournament_slug || "";
+      selectedMatch = {
+        kind: "completed",
+        path: latestGame.path || "",
+        file: latestGame.path || "",
+        tournament_slug: slug,
+        game_index: target,
+      };
+      followLive = false;
+      viewedPly = null;
+      replayThinkingKey = "";
+      localStorage.setItem("livePgnFollow", "off");
+      document.getElementById("follow-toggle").checked = false;
+      setMatchHash(slug, target);
+      setActiveMatchUrl(matchUrlFor(slug, target, "archive"));
+      renderPreviousMatches();
+      refresh(true);
+    }
+
     function renderGame(data) {
       latestGame = data;
       const headers = data.headers || {};
@@ -2197,16 +2260,15 @@ INDEX_HTML = """<!doctype html>
       };
       viewedPly = ply;
 
-      document.getElementById("players").textContent = `${white} vs ${black}`;
-      document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
       document.getElementById("players-tournament").textContent = `Tournament: ${data.tournament_slug || "—"}`;
       renderPlayerBars(white, black);
       renderClock(data);
+      syncMatchStrip(data);
       const timeoutResult = liveClockTimeoutResult(data, white, black);
-      document.getElementById("turn").textContent = followLive
+      document.getElementById("players-turn").textContent = followLive
         ? ((data.completed || timeoutResult) ? "Game over" : `${data.turn} to move`)
         : `${ply} / ${data.moves.length} plies`;
-      document.getElementById("result").textContent = timeoutResult || formatGameResult(headers);
+      document.getElementById("players-result").textContent = timeoutResult || formatGameResult(headers);
       const gameLabel = data.game_count > 1 ? `game ${data.game_index} / ${data.game_count}, ` : "";
       document.getElementById("meta").textContent = followLive
         ? `${gameLabel}${data.moves.length} plies`
@@ -2214,7 +2276,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("prev-move").disabled = ply <= 0;
       document.getElementById("next-move").disabled = ply >= data.moves.length;
       renderBoard(position.fen, position.last_move);
-      renderMoves(data.moves, white, black, ply);
+      renderMoves(data.moves, ply);
       requestAnalysisForGame(data);
       renderBoardThinking();
       renderEvalBar(latestAnalysis);
@@ -2566,7 +2628,34 @@ INDEX_HTML = """<!doctype html>
 
     function selectPreviousMatchFromHash() {
       const parsed = parseMatchHash();
-      if (!parsed.slug || !previousMatches.length) return false;
+      if (!parsed.slug) return false;
+      // Direct game links (e.g. a multi-game PGN opened as #slug--game-2)
+      // must resolve even when the Matches panel has no rows yet. Only use
+      // the hash path when the active PGN slug matches; otherwise wait for
+      // the Matches panel so we do not lock the board to a stale path.
+      const activeSlug = latestGame && latestGame.tournament_slug ? latestGame.tournament_slug : "";
+      if ((parsed.gameIndex || parsed.liveGameIndex) && (!previousMatches.length || parsed.slug === activeSlug)) {
+        const wanted = Number(parsed.gameIndex || parsed.liveGameIndex) || 1;
+        const activePath = (latestGame && latestGame.path) || selectedMatch?.path || selectedMatch?.file || activeLivePgnPath || activePgnPath || "";
+        if (!selectedMatch || Number(selectedMatch.game_index || 1) !== wanted || (latestGame && Number(latestGame.game_index || 1) !== wanted)) {
+          selectedMatch = {
+            kind: parsed.liveGameIndex ? "live" : "completed",
+            path: activePath,
+            file: activePath,
+            tournament_slug: parsed.slug,
+            game_index: wanted,
+          };
+          followLive = parsed.liveGameIndex ? followLive : false;
+          if (!followLive) {
+            viewedPly = null;
+            document.getElementById("follow-toggle").checked = false;
+          }
+          replayThinkingKey = "";
+          return true;
+        }
+        return true;
+      }
+      if (!previousMatches.length) return false;
       if (parsed.liveGameIndex) {
         const liveMatch = previousMatches.find(item => {
           if (item.kind !== "live") return false;
@@ -3008,7 +3097,20 @@ INDEX_HTML = """<!doctype html>
           if (!selectedPath.includes("zero-depth-matches")) params.set("logs", "1");
         } else if (!followLive) {
           const replayPath = expectedReplayPath;
-          if (replayPath) params.set("path", replayPath);
+          if (replayPath) {
+            params.set("path", replayPath);
+          } else if (activePgnPath) {
+            // Multi-game archive PGN opened directly (no Matches selection):
+            // keep asking for the same PGN so game_count is known.
+            params.set("path", activePgnPath);
+          }
+          // Keep the game index when stepping inside a multi-game PGN without
+          // a Matches-panel selection: game_count may be 1 on the first load.
+          const parsedHash = parseMatchHash();
+          const hashGame = parsedHash.gameIndex || parsedHash.liveGameIndex || null;
+          const stripGame = Number(latestGame && latestGame.game_index ? latestGame.game_index : 0) || 0;
+          const wantedGame = Math.max(Number(hashGame || 0) || 0, stripGame);
+          if (wantedGame > 1) params.set("game", String(wantedGame));
         } else if (followLive && activeLivePgnPath) {
           params.set("path", activeLivePgnPath);
           params.set("logs", "1");
@@ -3036,13 +3138,12 @@ INDEX_HTML = """<!doctype html>
           latestGame = data;
           syncMatchHash(data);
           setStatus(false, data.exists ? "No game" : "No PGN");
-          document.getElementById("players").textContent = "No game loaded";
-          document.getElementById("tournament-chip").textContent = `Tournament: ${data.tournament_slug || "—"}`;
           document.getElementById("players-tournament").textContent = `Tournament: ${data.tournament_slug || "—"}`;
           latestClock = null;
           renderPlayerBars("—", "—");
-          document.getElementById("turn").textContent = "—";
-          document.getElementById("result").textContent = "*";
+          syncMatchStrip(data);
+          document.getElementById("players-turn").textContent = "—";
+          document.getElementById("players-result").textContent = "*";
           document.getElementById("meta").textContent = "";
           renderBoard("8/8/8/8/8/8/8/8 w - - 0 1", null);
           renderMoves([]);
@@ -3284,6 +3385,8 @@ INDEX_HTML = """<!doctype html>
     document.getElementById("analysis-collapse-toggle").addEventListener("click", () => setAnalysisPanelCollapsed(!analysisPanelCollapsed));
     document.getElementById("prev-move").addEventListener("click", () => navigateMove(-1));
     document.getElementById("next-move").addEventListener("click", () => navigateMove(1));
+    document.getElementById("match-strip-prev").addEventListener("click", () => navigateMatch(-1));
+    document.getElementById("match-strip-next").addEventListener("click", () => navigateMatch(1));
     document.getElementById("flip-board").addEventListener("click", () => setBoardOrientation(boardOrientation === "white" ? "black" : "white"));
     document.getElementById("analysis-toggle").addEventListener("change", e => setAnalysisEnabled(e.target.checked));
     document.getElementById("analysis-panel-toggle").addEventListener("change", e => setAnalysisEnabled(e.target.checked));
