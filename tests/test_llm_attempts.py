@@ -23,6 +23,13 @@ def load_module(name: str, path: Path):
     return module
 
 
+def temp_out_dir(test: unittest.TestCase) -> Path:
+    # Tests must never write into the real out\ folder, which the live viewer scans.
+    tmp = tempfile.TemporaryDirectory()
+    test.addCleanup(tmp.cleanup)
+    return Path(tmp.name)
+
+
 def fake_engine_script() -> str:
     return (
         "import os, sys\n"
@@ -56,6 +63,7 @@ class LlmAttemptTests(unittest.TestCase):
             "llm_chess_uci_attempt_test",
             ROOT / "engines" / "llm-chess-engine" / "llm_chess_uci.py",
         )
+        self.llm.LOG_PATH = temp_out_dir(self) / self.llm.LOG_PATH.name
 
     def test_openrouter_forfeits_only_after_configured_attempts(self):
         client = self.llm.OpenRouterChessClient()
@@ -212,6 +220,7 @@ class CodexAttemptTests(unittest.TestCase):
             "codex_chess_uci_attempt_test",
             ROOT / "engines" / "codex-chess" / "codex_chess_uci.py",
         )
+        self.codex.LOG_PATH = temp_out_dir(self) / self.codex.LOG_PATH.name
 
     def test_codex_default_and_env_attempt_limit(self):
         os.environ.pop("CODEX_CHESS_MAX_ATTEMPTS", None)
@@ -235,6 +244,7 @@ class CodexAttemptTests(unittest.TestCase):
 class MatchRunnerAttemptTests(unittest.TestCase):
     def setUp(self):
         self.runner = load_module("play_engine_match_attempt_test", ROOT / "tools" / "play_engine_match.py")
+        self.runner.OUT_DIR = temp_out_dir(self) / "out"
 
     def _run_match(self, tmp: Path, forfeit_white: bool = False, black_openrouter: bool = False,
                    time_control_ms: int = 0):
