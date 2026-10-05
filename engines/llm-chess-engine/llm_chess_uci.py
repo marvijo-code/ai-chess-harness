@@ -11,16 +11,19 @@ from pathlib import Path
 
 import chess
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from subscription_providers import PROVIDERS, SubscriptionChessClient  # noqa: E402
+
 
 ROOT = Path(__file__).resolve().parents[2]
 LOG_DIR = ROOT / "out" / "llm-chess-engine-logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
-LOG_PATH = LOG_DIR / f"llm-chess-engine-{time.strftime('%Y%m%d-%H%M%S')}.log"
+LOG_PATH = LOG_DIR / f"llm-chess-engine-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
 DEFAULT_MODEL = "moonshotai/kimi-k2.6"
 DEFAULT_MAX_ATTEMPTS = 3
 MAX_ATTEMPTS_CEILING = 9
-DEFAULT_MAX_TOKENS = 4096
-MAX_TOKENS_CEILING = 8192
+DEFAULT_MAX_TOKENS = 8192
+MAX_TOKENS_CEILING = 32768
 DEFAULT_REASONING_EFFORT = "low"
 DEFAULT_PROVIDER_SORT = "throughput"
 DEFAULT_RETRY_BACKOFF_SECONDS = 2.0
@@ -449,7 +452,7 @@ class LlmChessUci:
     def __init__(self) -> None:
         self.board = chess.Board()
         self.history: list[str] = []
-        self.client = OpenRouterChessClient()
+        self.client = make_client(os.environ.get("LLM_PROVIDER", "openrouter"))
 
     def set_position(self, tokens: list[str]) -> None:
         if not tokens:
@@ -484,10 +487,21 @@ class LlmChessUci:
 
     def go(self, tokens: list[str]) -> str:
         go_args = parse_go_args(tokens)
+        if hasattr(self.client, "on_clock_start"):
+            # Live-clock signal for viewers: the model started thinking, `used` ms already spent this move.
+            self.client.on_clock_start = lambda used: print(f"info string clockstart {used}", flush=True)
         move, comment = self.client.choose_move(self.board.copy(), go_args, list(self.history))
+        report = getattr(self.client, "last_report", None) or {}
+        if report.get("tries", 0) > 1 or report.get("illegal"):
+            illegal = ";".join(report.get("illegal") or [])
+            print(f"info string attempts tries={report.get('tries', 0)} illegal={illegal or '-'}", flush=True)
+        if report.get("think_ms") is not None:
+            print(f"info string thinkms {int(report['think_ms'])}", flush=True)
+        if report.get("hurried"):
+            print(f"info string hurried {int(report['hurried'])}", flush=True)
         if comment and re.search(r"[A-Za-z0-9]", comment):
             print(f"info string {' '.join(comment.split())[:240]}", flush=True)
-        log(f"bestmove {move} model={self.client.model} fen={self.board.fen()} go={go_args}")
+        log(f"bestmove {move} provider={getattr(self.client, 'provider', 'openrouter')} model={self.client.model} fen={self.board.fen()} go={go_args}")
         return move
 
     def set_option(self, tokens: list[str]) -> None:
@@ -501,7 +515,23 @@ class LlmChessUci:
         else:
             name = " ".join(tokens[name_start:])
             value = ""
+        if name.strip().lower() == "provider":
+            provider = value.strip().lower() or "openrouter"
+            current = getattr(self.client, "provider", "openrouter")
+            if provider != current:
+                self.client = make_client(provider)
+            return
         self.client.set_option(name, value)
+
+
+def make_client(provider: str):
+    provider = (provider or "openrouter").strip().lower()
+    if provider in PROVIDERS:
+        log(f"provider={provider} (subscription CLI route)")
+        return SubscriptionChessClient(provider, log)
+    if provider != "openrouter":
+        log(f"unknown provider {provider!r}; using openrouter")
+    return OpenRouterChessClient()
 
 
 def main() -> None:
@@ -521,11 +551,12 @@ def main() -> None:
             if command == "uci":
                 print("id name llm-chess-engine", flush=True)
                 print("id author marvijo/OpenRouter", flush=True)
+                print("option name Provider type combo default openrouter var openrouter var codex var claude var openrouter-chat var opencode-go var zai", flush=True)
                 print(f"option name Model type string default {DEFAULT_MODEL}", flush=True)
                 print("option name Temperature type spin default 20 min 0 max 100", flush=True)
                 print("option name MaxAttempts type spin default 3 min 1 max 9", flush=True)
                 print("option name Timeout type spin default 180 min 5 max 600", flush=True)
-                print("option name MaxTokens type spin default 1500 min 64 max 8192", flush=True)
+                print("option name MaxTokens type spin default 8192 min 64 max 32768", flush=True)
                 print("option name Reasoning type string default low", flush=True)
                 print("option name ProviderSort type string default throughput", flush=True)
                 print("option name UseJsonSchema type check default false", flush=True)

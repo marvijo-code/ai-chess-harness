@@ -1,0 +1,20 @@
+{
+  "title": "Chess Tournament but with AI Players",
+  "rounds": 5,
+  "timeControlMs": 600000,
+  "incrementMs": 0,
+  "maxAttempts": 3,
+  "attemptTimeoutSeconds": 300,
+  "maxPlies": 400,
+  "showLegalMoves": true,
+  "startElo": 1500,
+  "eloK": 32,
+  "byePoints": 0.0,
+  "players": [
+    {"name": "Grok 4.7", "provider": "openrouter-chat", "model": "x-ai/grok-4.7", "effort": "high", "route": "OpenRouter (metered)"},
+    {"name": "Opus 5.5", "provider": "claude", "model": "claude-opus-5-5", "effort": "high", "route": "Claude subscription"},
+    {"name": "GPT-6.1 Sol", "provider": "codex", "model": "gpt-6.1-sol", "effort": "high", "route": "ChatGPT subscription"},
+    {"name": "DeepSeek V4.1 Flash", "provider": "opencode-go", "model": "deepseek-v4.1-flash", "effort": "high", "route": "OpenCode Go subscription"},
+    {"name": "GLM 5.3", "provider": "opencode-go", "model": "glm-5.3", "effort": "high", "route": "OpenCode Go subscription"}
+  ]
+}
