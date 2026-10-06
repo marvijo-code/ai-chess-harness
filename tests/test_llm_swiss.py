@@ -105,10 +105,10 @@ class ThinkTimeTest(unittest.TestCase):
         self.assertTrue(seen["payload"]["stream"])
         self.assertEqual(seen["payload"]["messages"][0]["content"], sp.SYSTEM_PROMPT)
         self.assertIn("Time budget for this move: about 14 seconds", seen["payload"]["messages"][1]["content"])
-        self.assertAlmostEqual(seen["cutoff"], 600 / 44 * 1.5, places=3)
+        self.assertAlmostEqual(seen["cutoff"], 2 * 600 / 44, places=3)
         self.assertIn("/zen/go/", seen["url"])
 
-    def test_arbiter_asks_for_the_move_when_thinking_runs_past_the_cutoff(self):
+    def test_referee_plays_the_latest_best_so_far_note_at_the_cap(self):
         import chess
         import os
 
@@ -118,52 +118,113 @@ class ThinkTimeTest(unittest.TestCase):
         calls = []
 
         def fake_stream(url, payload, headers, timeout, cutoff):
-            calls.append((payload, cutoff))
-            if len(calls) == 1:
-                return {"content": "", "reasoning": "Nf3 looks good because ...", "usage": {}, "cut": True}
-            return {"content": '{"move": "Nf3", "comment": "develop"}', "reasoning": "", "usage": {}, "cut": False}
+            calls.append(payload)
+            return {"content": "", "reasoning": "BEST SO FAR: e4 ... hmm BEST SO FAR: **Nf3** because", "usage": {}, "cut": True}
 
         client.http_stream = fake_stream
-        move, _ = client.choose_move(chess.Board(), {"wtime": 600000, "btime": 600000}, [])
+        move, comment = client.choose_move(chess.Board(), {"wtime": 600000, "btime": 600000, "winc": 10000}, [])
         self.assertEqual(move, "g1f3")
+        self.assertEqual(len(calls), 1, "no second, lower-effort request")
         self.assertEqual(client.last_report["hurried"], 1)
-        self.assertEqual(client.last_report["tries"], 1, "a time-up notice is not a rejected reply")
-        follow, limit = calls[1]
-        self.assertIn("time for this move is up", follow["messages"][-1]["content"])
-        self.assertIn("Nf3 looks good", follow["messages"][-1]["content"])
-        self.assertEqual(follow["thinking"], {"type": "enabled"}, "GLM 5.3 cannot turn thinking off")
-        self.assertLessEqual(limit, 15)
+        self.assertEqual(client.last_report["tries"], 1)
+        self.assertEqual(client.last_report["illegal"], [])
+        self.assertIn("BEST SO FAR", comment)
+        self.assertIn("referee plays your latest BEST SO FAR", calls[0]["messages"][1]["content"])
 
-    def test_deepseek_answers_without_thinking_after_time_up(self):
+    def test_every_route_keeps_high_effort_and_openrouter_is_cache_sticky(self):
+        import chess
+        import os
+
+        os.environ.setdefault("OPENROUTER_API_KEY", "test-key")
+        client = sp.SubscriptionChessClient("openrouter-chat", lambda _m: None)
+        seen = {}
+
+        def fake_stream(url, payload, headers, timeout, cutoff):
+            seen.update(payload=payload, headers=headers)
+            return {"content": '{"move": "e4"}', "reasoning": "", "usage": {}, "cut": False}
+
+        client.http_stream = fake_stream
+        client.choose_move(chess.Board(), {"wtime": 600000, "btime": 600000}, [])
+        payload = seen["payload"]
+        self.assertEqual(payload["reasoning"], {"effort": "high"})
+        self.assertEqual(payload["session_id"], client.session_id)
+        self.assertEqual(seen["headers"]["x-session-id"], client.session_id)
+        self.assertNotIn("order", payload.get("provider", {}), "a provider order turns sticky cache routing off")
+
+    def test_prompt_puts_the_append_only_part_first_for_input_caching(self):
+        import chess
+
+        board = chess.Board()
+        first = sp.build_prompt(board, {}, [], [])
+        board.push_san("e4"); board.push_san("c5")
+        later = sp.build_prompt(board, {}, ["e2e4", "c7c5"], [])
+        self.assertTrue(later.startswith("You are playing White.\nMoves so far: 1. e4 c5"))
+        self.assertLess(later.index("Moves so far"), later.index("FEN:"))
+        self.assertTrue(first.startswith("You are playing White.\nMoves so far:"))
+
+    def test_no_note_means_no_cut_and_the_clock_decides(self):
+        import chess
+
+        board = chess.Board()
+        self.assertIsNone(sp.latest_note("thinking about e4 and d4", board))
+        self.assertIsNone(sp.latest_note("BEST SO FAR: Nf6", board), "an illegal latest note is not played")
+        self.assertEqual(sp.latest_note("BEST SO FAR: 1. d4", board), chess.Move.from_uci("d2d4"))
+        client = sp.SubscriptionChessClient("opencode-go", lambda _m: None)
+        move, comment = client.choose_move(board, {"wtime": 0, "btime": 600000}, [])
+        self.assertEqual(move, "0000")
+
+    def test_running_out_of_clock_is_a_flag_not_an_invalid_reply(self):
+        import chess
+        import os
+        import subprocess
+
+        os.environ.setdefault("OPENCODE_GO_API_KEY", "test-key")
+        client = sp.SubscriptionChessClient("opencode-go", lambda _m: None)
+        client.model = "glm-5.3"
+
+        def slow_stream(url, payload, headers, timeout, cutoff):
+            raise subprocess.TimeoutExpired(url, timeout)
+
+        client.http_stream = slow_stream
+        client._add_think = lambda started: client.last_report.__setitem__("think_ms", 30000)
+        move, comment = client.choose_move(chess.Board(), {"wtime": 20000, "btime": 600000}, [])
+        self.assertEqual(move, "0000")
+        self.assertIn("ran out of clock", comment)
+        self.assertEqual(client.last_report["tries"], 2, "stops at once when the clock is gone")
+
+    def test_cap_grows_with_the_budget_and_never_eats_the_clock(self):
+        import chess
+
+        board = chess.Board()
+        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 600000), 2 * 600 / 44)
+        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 600000, 10000), 2 * (600 / 44 + 8))
+        self.assertEqual(sp.arbiter_cutoff_seconds(board, 3_600_000), 90.0)
+        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 30000), 7.5)
+    def test_a_plan_limit_voids_instead_of_forfeiting(self):
         import chess
         import os
 
         os.environ.setdefault("OPENCODE_GO_API_KEY", "test-key")
         client = sp.SubscriptionChessClient("opencode-go", lambda _m: None)
-        client.model = "deepseek-v4.1-flash"
-        calls = []
 
-        def fake_stream(url, payload, headers, timeout, cutoff):
-            calls.append(payload)
-            if len(calls) == 1:
-                return {"content": "", "reasoning": "", "usage": {}, "cut": True}
-            return {"content": '{"move": "e4"}', "usage": {}, "cut": False}
+        def limited(url, payload, headers, timeout, cutoff):
+            raise sp.CliCrash('HTTP 429: {"error":{"type":"GoUsageLimitError","message":"Go usage limit exceeded"}}')
 
-        client.http_stream = fake_stream
-        client.choose_move(chess.Board(), {"wtime": 600000, "btime": 600000}, [])
-        self.assertEqual(calls[0]["reasoning_effort"], "high")
-        self.assertEqual(calls[1]["thinking"], {"type": "disabled"})
-        self.assertNotIn("reasoning_effort", calls[1])
+        client.http_stream = limited
+        move, comment = client.choose_move(chess.Board(), {"wtime": 600000, "btime": 600000}, [])
+        self.assertEqual(move, "0000")
+        self.assertTrue(comment.startswith("provider unavailable"))
+        self.assertEqual(client.last_report["illegal"], [], "not an invalid reply")
+        self.assertFalse(sp.provider_unavailable("HTTP 429: rate limited, retry in 2s"))
 
-    def test_cutoff_shrinks_with_the_clock(self):
+    def test_an_overrun_adds_a_decide_faster_note_to_the_next_prompt(self):
+        self.assertIsNone(sp.overrun_note(20000, 40))
+        self.assertIsNone(sp.overrun_note(90000, None), "CLI routes have no cap")
+        note = sp.overrun_note(95000, 45)
+        self.assertIn("95 seconds", note)
         import chess
 
-        board = chess.Board()
-        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 600000), 600 / 44 * 1.5)
-        self.assertEqual(sp.arbiter_cutoff_seconds(board, 3_600_000), 60.0)
-        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 30000), 7.5)
-        self.assertEqual(sp.answer_now_seconds(40), 15.0)
-        self.assertEqual(sp.answer_now_seconds(8), 6.0)
+        self.assertIn("Decide faster", sp.build_prompt(chess.Board(), {}, [], [], nudge=note))
 
 
 if __name__ == "__main__":
