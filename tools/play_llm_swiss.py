@@ -402,7 +402,10 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
                                       "since_epoch_ms": int(time.time() * 1000) - used_ms}
             ts.save()
 
+        thinking_file = live_pgn.parent / f"{state['id']}-{game_id}-ply{len(history) + 1}.thinking.txt"
         try:
+            if not engine.is_uci:
+                engine.send(f"setoption name ThinkingFile value {thinking_file}")
             engine.send(position)
             engine.send(go_line)
             lines = wait_bestmove(engine, wait, clockstart)
@@ -416,6 +419,10 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
         comment, tries, illegal = parse_info(lines)
         if engine.is_uci and not comment:
             comment = uci_comment(lines, engine.player)
+        if engine.is_uci:
+            # Stockfish's "thinking" is its search: the info lines it printed for this move.
+            search = [line for line in lines if line.startswith("info depth")]
+            write_text_retry(thinking_file, "\n".join(search) + "\n")
         think_ms = parse_think_ms(lines)
         # The chess clock charges model thinking time; wall time only when the engine did not report it.
         elapsed_ms = wall_ms if think_ms is None else min(wall_ms, think_ms)
