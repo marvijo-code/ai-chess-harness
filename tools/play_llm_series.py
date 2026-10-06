@@ -140,6 +140,8 @@ class LlmEngine:
         self.cfg = cfg
         self.is_uci = player.get("provider") == "uci"
         env = os.environ.copy()
+        # The pipe is read as UTF-8: without this a model's dash in a comment arrived as "�" (Windows cp1252).
+        env["PYTHONIOENCODING"] = "utf-8"
         if not self.is_uci:
             env.update(engine_env(player, cfg))
         # A relative engine path is relative to the repo, whatever folder the runner was started from
