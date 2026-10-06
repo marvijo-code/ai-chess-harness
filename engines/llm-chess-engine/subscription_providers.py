@@ -91,6 +91,9 @@ LOWEST_MIN_SECONDS = 5.0
 # or its clock runs out. Run 6 (2026-10-06): a ~6 s hard limit there turned slow first tokens into "invalid
 # replies" and forfeited Muse, Qwen, MiMo and Grok in round 1. Out of clock is a time loss, never invalid.
 ANSWER_MAX_TOKENS = 16000
+# CLI routes (Codex, Claude) have no same-effort answer step: they are stopped at 80% of the cap and asked
+# again at low effort with whatever thinking they revealed (run 7: GPT averaged 30 s a move with no cap and flagged).
+CLI_CUT_SHARE = THINK_SHARE + SAME_SHARE
 THOUGHTS_HEAD_CHARS = 20_000
 THOUGHTS_TAIL_CHARS = 100_000
 # The note the referee plays when a model is still thinking at its move cap (its own latest choice).
@@ -111,6 +114,10 @@ class ProviderError(RuntimeError):
 
 class CliCrash(ProviderError):
     """The CLI exited non-zero without producing an answer."""
+
+
+class CliCut(Exception):
+    """The CLI was still thinking at its move cap and was stopped (not an error, not a rejected reply)."""
 
 
 def resolve_binary(provider: str) -> str:
@@ -419,6 +426,8 @@ class SubscriptionChessClient:
         self._cutoff_s: float | None = None
         self._board: chess.Board | None = None
         self._left_ms: int | None = None
+        self._cli_cut_s: float | None = None
+        self._cli_thoughts: list[str] = []
         self._image: bytes | None = None
         # Live thinking for the viewer: the runner names one file per move (UCI option ThinkingFile).
         self.thinking_file: Path | None = None
@@ -592,8 +601,29 @@ class SubscriptionChessClient:
     def _ask(self, prompt: str, timeout: int) -> str:
         if self.provider in HTTP_ROUTES:
             return self._ask_http(prompt, timeout)
+        started = time.monotonic()
+        self._cli_cut_s = None if self._cutoff_s is None else CLI_CUT_SHARE * self._cutoff_s
+        try:
+            return self._ask_cli(prompt, timeout, self.effort)
+        except CliCut:
+            thoughts = "\n".join(t for t in self._cli_thoughts if t.strip())[-THOUGHTS_TAIL_CHARS:]
+            self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
+            self._think(f"\n[thinking stopped at the move cap - answering at low effort from its revealed thinking]\n")
+            self.log(f"{self.provider} {self.model} stopped at the {self._cli_cut_s:.0f}s cap; "
+                     f"asking at low effort with {len(thoughts)} chars of revealed thinking")
+            follow = (prompt + "\n\nYour thinking on this move so far (stopped at the move cap):\n"
+                      + (thoughts or "(none visible)")
+                      + "\nYour time for this move is up. Reply now with only the JSON object for your move.")
+            self._cli_cut_s = None
+            left = timeout - (time.monotonic() - started)
+            answer = self._ask_cli(follow, max(10, int(left)), "low")
+            self._attempt_think_ms = None  # two calls: charge the wall time (infrastructure crashes still excluded)
+            return answer
+
+    def _ask_cli(self, prompt: str, timeout: int, effort: str) -> str:
         workdir = isolated_workdir()
-        argv, last_message = build_command(self.provider, self.model, self.effort, resolve_binary(self.provider), workdir)
+        self._cli_thoughts = []
+        argv, last_message = build_command(self.provider, self.model, effort, resolve_binary(self.provider), workdir)
         image_file = None
         if self.provider == "codex":
             prompt = SYSTEM_PROMPT + "\n\n" + prompt
@@ -855,6 +885,7 @@ class SubscriptionChessClient:
         times = self._line_times = []
 
         started_signal = False
+        thinking_since = [None]
 
         def pump() -> None:
             nonlocal started_signal
@@ -864,10 +895,12 @@ class SubscriptionChessClient:
                 lines.append(line)
                 visible = cli_visible_thinking(line)
                 if visible:
+                    self._cli_thoughts.append(visible)
                     self._think(visible + "\n")
                 # The model starts thinking here (CLI start-up is over): tell the viewer clock.
                 if not started_signal and ('"turn.started"' in line or '"subtype":"init"' in line):
                     started_signal = True
+                    thinking_since[0] = time.monotonic()
                     self._clock_start()
 
         reader = threading.Thread(target=pump, daemon=True)
@@ -876,7 +909,16 @@ class SubscriptionChessClient:
             assert proc.stdin is not None
             proc.stdin.write(prompt)
             proc.stdin.close()
-            proc.wait(timeout=timeout)
+            deadline = time.monotonic() + timeout
+            while proc.poll() is None:
+                now = time.monotonic()
+                if now > deadline:
+                    raise subprocess.TimeoutExpired(argv[0], timeout)
+                cut = self._cli_cut_s
+                if cut is not None and thinking_since[0] is not None and now - thinking_since[0] > cut:
+                    kill_tree(proc)
+                    raise CliCut()
+                time.sleep(0.2)
         except subprocess.TimeoutExpired:
             kill_tree(proc)
             raise

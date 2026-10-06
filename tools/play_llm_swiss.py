@@ -63,8 +63,15 @@ DEFAULTS = {
     # round robin every player sits out once, so the final order is the same either way (owner 2026-10-06).
     "byePoints": 0.0,
     "seed": None,
+    # "swiss" (default) or "round-robin+knockout": everyone plays everyone once (rounds = players - 1),
+    # then the top knockoutSize play semifinals and a final; a drawn knockout game goes to an Armageddon decider.
+    "format": "swiss",
+    "knockoutSize": 4,
+    "armageddonWhiteMs": 600_000,
+    "armageddonBlackMs": 450_000,
     "players": [],
 }
+KO_STAGES = ("semifinals", "final")
 
 
 def load_config(path: Path) -> dict:
@@ -99,10 +106,12 @@ def compute_standings(state: dict) -> list[dict]:
     rows = {
         p["name"]: {"name": p["name"], "points": 0.0, "elo": float(cfg["startElo"]), "played": 0, "wins": 0, "draws": 0,
                     "losses": 0, "forfeits": 0, "flags": 0, "byes": 0, "whites": 0, "opponents": [], "colors": [],
-                    "invalid_attempts": 0}
+                    "invalid_attempts": 0, "beat": [], "drew": []}
         for p in state["players"]
     }
     for rnd in state["rounds"]:
+        if rnd.get("stage") in KO_STAGES:
+            continue  # knockout games crown the champion; the table is the round robin / Swiss only
         if rnd.get("bye"):
             rows[rnd["bye"]]["points"] += cfg["byePoints"]
             rows[rnd["bye"]]["byes"] += 1
@@ -121,6 +130,8 @@ def compute_standings(state: dict) -> list[dict]:
             game["elo_before"] = {"white": round(white["elo"], 1), "black": round(black["elo"], 1)}
             white["elo"], black["elo"] = elo_update(white["elo"], black["elo"], ws, cfg["eloK"])
             game["elo_after"] = {"white": round(white["elo"], 1), "black": round(black["elo"], 1)}
+            for row, other, score in ((white, black, ws), (black, white, bs)):
+                (row["beat"] if score == 1 else row["drew"] if score == 0.5 else []).append(other["name"])
             for row, score, side in ((white, ws, "white"), (black, bs, "black")):
                 row["points"] += score
                 row["played"] += 1
@@ -134,9 +145,12 @@ def compute_standings(state: dict) -> list[dict]:
                 loser["flags"] += 1
     for row in rows.values():
         row["buchholz"] = sum(rows[name]["points"] for name in row["opponents"])
+    for row in rows.values():
+        # Sonneborn-Berger: points of the players you beat, plus half of those you drew (round-robin tie-break).
+        row["sb"] = sum(rows[n]["points"] for n in row.pop("beat")) + 0.5 * sum(rows[n]["points"] for n in row.pop("drew"))
         row["elo_delta"] = round(row["elo"] - cfg["startElo"], 1)
         row["elo"] = round(row["elo"], 1)
-    ordered = sorted(rows.values(), key=lambda r: (-r["points"], -r["buchholz"], -r["elo"], -r["wins"], r["name"]))
+    ordered = sorted(rows.values(), key=lambda r: (-r["points"], -r["sb"], -r["buchholz"], -r["wins"], -r["elo"], r["name"]))
     for rank, row in enumerate(ordered, start=1):
         row["rank"] = rank
     return ordered
@@ -326,7 +340,7 @@ def kill_engine_tree(engine: LlmEngine) -> None:
 
 
 def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: TournamentState,
-              live_pgn: Path, log, replace_engine) -> None:
+              live_pgn: Path, log, replace_engine, start_ms: dict | None = None) -> None:
     state = ts.state
     record = state["games"][game_id]
     board = chess.Board()
@@ -346,6 +360,11 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
     headers["TimeControl"] = f"{cfg['timeControlMs'] // 1000}+{cfg['incrementMs'] // 1000}"
     headers["GameStartTime"] = iso_now()
     clocks = {chess.WHITE: cfg["timeControlMs"], chess.BLACK: cfg["timeControlMs"]}
+    if start_ms:
+        clocks = {chess.WHITE: int(start_ms["white"]), chess.BLACK: int(start_ms["black"])}
+        headers["WhiteStartMs"], headers["BlackStartMs"] = str(clocks[chess.WHITE]), str(clocks[chess.BLACK])
+    if record.get("armageddon"):
+        headers["Armageddon"] = "Black has draw odds"
     invalid = {chess.WHITE: 0, chess.BLACK: 0}
     increment = cfg["incrementMs"]
     node = game
@@ -477,6 +496,135 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
     log(f"{game_id} finished: {white.name} {result} {black.name} ({termination})")
 
 
+# ---------------------------------------------------------------- knockouts
+
+
+def knockout_seeds(state: dict, size: int) -> list[dict]:
+    return [{"seed": i + 1, "name": r["name"], "points": r["points"]} for i, r in enumerate(compute_standings(state)[:size])]
+
+
+def match_winner(match: dict, games: dict) -> tuple[str | None, str | None]:
+    """(winner, decided_by) from the match's finished games: a decisive game wins; a drawn Armageddon is Black's."""
+    for game_id in match["games"]:
+        game = games.get(game_id) or {}
+        result = game.get("result", "*")
+        if result in ("1-0", "0-1"):
+            return (game["white"] if result == "1-0" else game["black"]), ("armageddon" if game.get("armageddon") else "game")
+        if result == "1/2-1/2" and game.get("armageddon"):
+            return game["black"], "armageddon"
+    return None, None
+
+
+def new_ko_game(state: dict, rnd: dict, match: dict, white: str, black: str, armageddon: bool) -> str:
+    board = len(rnd["pairings"]) + 1
+    game_id = f"r{rnd['round']}b{board}"
+    label = f"{match['label']} - Armageddon decider" if armageddon else (
+        f"{match['label']} - Game 1" if match["stage"] == "semifinals" else match["label"])
+    pairing = {"board": board, "white": white, "black": black, "game_id": game_id, "match": match["id"], "label": label}
+    game = {"id": game_id, "round": rnd["round"], "board": board, "white": white, "black": black, "status": "pending",
+            "result": "*", "moves": [], "match": match["id"], "label": label}
+    if armageddon:
+        pairing["armageddon"] = game["armageddon"] = True
+        game["draw_odds"] = "black"
+    rnd["pairings"].append(pairing)
+    state["games"][game_id] = game
+    match["games"].append(game_id)
+    return game_id
+
+
+def run_knockout_stage(state: dict, ts: "TournamentState", cfg: dict, stage: str, round_number: int, label: str,
+                       matches: list[dict], engine_for, replace_engine, log) -> bool:
+    """Play every match of one stage to a winner (game, then an Armageddon decider after a draw). False = paused."""
+    with ts.lock:
+        rnd = next((r for r in state["rounds"] if r["round"] == round_number), None)
+        if rnd is None:
+            rnd = {"round": round_number, "stage": stage, "label": label, "bye": None, "pairings": [], "status": "live"}
+            state["rounds"].append(rnd)
+        state["current_round"], state["stage"] = round_number, stage
+    ts.save()
+    log(f"{label}: " + ", ".join(f"{m['label']}: {m['a']} - {m['b']}" for m in matches))
+    paused: list[str] = []
+
+    def play_match(match: dict) -> None:
+        while True:
+            winner, decided_by = match_winner(match, state["games"])
+            if winner:
+                with ts.lock:
+                    match["winner"], match["decided_by"] = winner, decided_by
+                ts.save()
+                log(f"{match['label']}: {winner} wins ({decided_by})")
+                return
+            with ts.lock:
+                pending = next((g for g in match["games"] if state["games"][g].get("result", "*") == "*"), None)
+                if pending is None:
+                    if match["games"]:  # the regular game was drawn: Armageddon, colours swapped
+                        first = state["games"][match["games"][0]]
+                        pending = new_ko_game(state, rnd, match, first["black"], first["white"], True)
+                    else:  # higher seed (a) has White in the regular game
+                        pending = new_ko_game(state, rnd, match, match["a"], match["b"], False)
+            game = state["games"][pending]
+            start = {"white": cfg["armageddonWhiteMs"], "black": cfg["armageddonBlackMs"]} if game.get("armageddon") else None
+            live_pgn = LIVE_DIR / f"{state['id']}-{pending}-live.pgn"
+            play_game(pending, engine_for(game["white"]), engine_for(game["black"]), cfg, ts, live_pgn, log,
+                      replace_engine, start)
+            if state["games"][pending].get("end_kind") == "void":
+                paused.append(state["games"][pending].get("termination", "void"))
+                return
+
+    threads = [threading.Thread(target=play_match, args=(m,), daemon=True) for m in matches if not m.get("winner")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    if paused:
+        with ts.lock:
+            state["paused"] = "; ".join(paused)
+        ts.save()
+        return False
+    rnd["status"] = "finished"
+    ts.save()
+    write_archive(state)
+    return True
+
+
+def run_knockouts(state: dict, ts: "TournamentState", cfg: dict, engine_for, replace_engine, log) -> bool:
+    ko = state.setdefault("knockout", {})
+    if not ko.get("seeds"):
+        seeds = knockout_seeds(state, int(cfg.get("knockoutSize", 4)))
+        names = [s["name"] for s in seeds]
+        with ts.lock:
+            ko.update(seeds=seeds, champion=None, runner_up=None, third=None, matches=[
+                {"id": "sf1", "stage": "semifinals", "label": "Semifinal 1", "a": names[0], "b": names[3], "games": [],
+                 "winner": None, "decided_by": None},
+                {"id": "sf2", "stage": "semifinals", "label": "Semifinal 2", "a": names[1], "b": names[2], "games": [],
+                 "winner": None, "decided_by": None}])
+        log("knockout seeds: " + ", ".join(f"{s['seed']}. {s['name']} ({s['points']:g})" for s in seeds))
+    rr = int(cfg["rounds"])
+    semis = [m for m in ko["matches"] if m["stage"] == "semifinals"]
+    if not run_knockout_stage(state, ts, cfg, "semifinals", rr + 1, "Semifinals", semis, engine_for, replace_engine, log):
+        return False
+    if not any(m["stage"] == "final" for m in ko["matches"]):
+        losers = [m["b"] if m["winner"] == m["a"] else m["a"] for m in semis]
+        with ts.lock:
+            ko["matches"] += [
+                {"id": "final", "stage": "final", "label": "Final", "a": semis[0]["winner"], "b": semis[1]["winner"],
+                 "games": [], "winner": None, "decided_by": None},
+                {"id": "third", "stage": "final", "label": "Third place", "a": losers[0], "b": losers[1], "games": [],
+                 "winner": None, "decided_by": None}]
+    finals = [m for m in ko["matches"] if m["stage"] == "final"]
+    if not run_knockout_stage(state, ts, cfg, "final", rr + 2, "Final", finals, engine_for, replace_engine, log):
+        return False
+    final, third = finals
+    with ts.lock:
+        ko["champion"] = final["winner"]
+        ko["runner_up"] = final["b"] if final["winner"] == final["a"] else final["a"]
+        ko["third"] = third["winner"]
+        state["stage"] = "finished"
+    ts.save()
+    log(f"CHAMPION: {ko['champion']} (runner-up {ko['runner_up']}, third {ko['third']})")
+    return True
+
+
 # ---------------------------------------------------------------- preflight
 
 
@@ -544,6 +692,8 @@ def main(argv: list[str] | None = None) -> int:
             cfg["rounds"] = args.rounds
         if args.time_control_ms:
             cfg["timeControlMs"] = args.time_control_ms
+        if cfg.get("format") == "round-robin+knockout":
+            cfg["rounds"] = max_rounds(len(cfg["players"]))  # everyone plays everyone once
         cfg["rounds"] = max(1, min(cfg["rounds"], max_rounds(len(cfg["players"]))))
         stamp = time.strftime("%Y%m%d-%H%M%S")
         slug = args.slug or f"llm-swiss-{stamp}"
@@ -622,6 +772,9 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 rnd = existing
             state["current_round"] = round_number
+            if cfg.get("format") == "round-robin+knockout":
+                state["stage"] = "round-robin"
+                state["format"] = {"type": cfg["format"], "rr_rounds": cfg["rounds"], "ko_size": cfg.get("knockoutSize", 4)}
             ts.save()
             log(f"round {round_number}: " + ", ".join(f"{p['white']} - {p['black']}" for p in rnd["pairings"])
                 + (f"; bye: {rnd['bye']}" if rnd.get("bye") else ""))
@@ -652,8 +805,13 @@ def main(argv: list[str] | None = None) -> int:
             write_archive(state)
             leader = state["standings"][0]
             log(f"round {round_number} done; leader {leader['name']} {leader['points']:g} pts, Elo {leader['elo']:.0f}")
+        if cfg.get("format") == "round-robin+knockout":
+            if not run_knockouts(state, ts, cfg, engine_for, replace_engine, log):
+                log(f"PAUSED in the knockouts: {state.get('paused')}. Fix the provider, then run with --resume {status_path}")
+                return 3
         state["finished"] = True
-        state["winner"] = state["standings"][0]["name"] if state.get("standings") else None
+        champion = (state.get("knockout") or {}).get("champion")
+        state["winner"] = champion or (state["standings"][0]["name"] if state.get("standings") else None)
         ts.save()
         write_archive(state)
         log("final standings: " + "; ".join(f"{r['rank']}. {r['name']} {r['points']:g} pts Elo {r['elo']:.0f}"

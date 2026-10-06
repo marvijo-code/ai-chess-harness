@@ -1,6 +1,10 @@
 {
   "title": "Chess Tournament but with AI Players",
-  "rounds": 5,
+  "format": "round-robin+knockout",
+  "rounds": 9,
+  "knockoutSize": 4,
+  "armageddonWhiteMs": 600000,
+  "armageddonBlackMs": 450000,
   "timeControlMs": 600000,
   "incrementMs": 10000,
   "maxAttempts": 3,

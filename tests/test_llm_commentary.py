@@ -104,6 +104,7 @@ class RoamingTest(unittest.TestCase):
 
     def test_leaders_and_a_blunder_win_the_commentary(self):
         c = self.make(self.state())
+        c._events_done.add("opening")
         clip = c.tick()
         self.assertEqual(c.clips_all(0)[0]["game"], "r1b2")
         context = [b for p, b in c.http.calls if p == "/chat/completions"][0]["messages"][1]["content"]
@@ -130,6 +131,35 @@ class RoamingTest(unittest.TestCase):
         self.assertEqual(c.pick(state, {}), "r1b1")
         c.tick()
         self.assertIsNone(c.pick(state, {}), "result said once, no new moves elsewhere")
+
+
+class EventTest(unittest.TestCase):
+    def test_the_big_moments_are_announced_once_each(self):
+        state = RoamingTest().state()
+        state["format"] = {"type": "round-robin+knockout", "rr_rounds": 9, "ko_size": 4}
+        state["players"] = [{"name": "Grok 4.7"}, {"name": "GPT-6.1 Sol"}]
+        done = set()
+        self.assertEqual(lc.next_event(state, done)["key"], "opening")
+        self.assertIn("round robin of 9 rounds", lc.next_event(state, done)["facts"])
+        done.add("opening")
+        self.assertIsNone(lc.next_event(state, done), "nothing big mid round robin")
+        state["stage"] = "semifinals"
+        state["knockout"] = {"seeds": [{"seed": i + 1, "name": n, "points": 6 - i} for i, n in enumerate("ABCD")],
+                             "matches": [{"id": "sf1", "stage": "semifinals", "label": "Semifinal 1", "a": "A", "b": "D",
+                                          "games": ["r10b1", "r10b3"]}]}
+        state["games"]["r10b1"] = {"id": "r10b1", "white": "A", "black": "D", "status": "finished", "result": "1/2-1/2", "moves": []}
+        state["games"]["r10b3"] = {"id": "r10b3", "white": "D", "black": "A", "status": "live", "result": "*",
+                                   "armageddon": True, "moves": []}
+        event = lc.next_event(state, done)
+        self.assertEqual(event["key"], "arm-r10b3", "a live Armageddon decider beats the knockout intro")
+        done.add(event["key"])
+        self.assertEqual(lc.next_event(state, done)["key"], "knockouts")
+        state["knockout"].update(champion="A", runner_up="B", third="C")
+        state["knockout"]["matches"].append({"id": "final", "stage": "final", "label": "Final", "a": "A", "b": "B",
+                                             "games": ["r11b1"], "decided_by": "game"})
+        event = lc.next_event(state, done)
+        self.assertEqual((event["key"], event["game"]), ("champion", "r11b1"))
+        self.assertIn("outro", event["facts"])
 
 
 class ListenerTest(unittest.TestCase):
