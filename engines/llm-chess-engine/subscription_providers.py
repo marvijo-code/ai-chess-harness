@@ -74,9 +74,17 @@ STRIPPED_ENV = {
 SYSTEM_PROMPT = (
     "You are a strong chess player in a game against another AI. You get the position and must answer "
     'with only one JSON object: {"move": "<a move from the legal list, SAN or UCI>", "comment": "<one or two short sentences about your idea>"}. '
-    "Choose the move with your own reasoning: do not run code, call tools, or write or use a chess engine."
+    "Choose the move with your own reasoning: do not run code, call tools, or write or use a chess engine. "
+    "While you think, write a line `BEST SO FAR: <move>` each time your preferred move changes."
 )
+# The note the referee plays when a model is still thinking at its move cap (its own latest choice).
+BEST_SO_FAR = re.compile(r"BEST\s+SO\s+FAR\s*[:=\-]?\s*[*`\"']*\s*(?:\d+\s*\.+\s*)?([A-Za-z0-9=+#\-]{2,8})", re.I)
 MARKER_UNSAFE = re.compile(r"[\s\[\]{};]+")
+# A plan limit, empty balance or lost login is the provider being unavailable, not a bad move:
+# the game is voided and replayed later, never forfeited (2026-10-06: OpenCode Go hit its monthly limit).
+UNAVAILABLE_MARKERS = ("usagelimit", "usage limit", "usage_limit", "insufficient balance", "insufficient_quota",
+                       "exceeded your current quota", "credit balance", "payment required", "not logged in",
+                       "please run /login", "invalid api key", "unauthorized", "http 401", "http 402", "http 403")
 
 
 class ProviderError(RuntimeError):
@@ -176,13 +184,13 @@ def move_budget_seconds(board: chess.Board, remaining_ms: object, increment_ms: 
 
 
 def arbiter_cutoff_seconds(board: chess.Board, remaining_ms: object, increment_ms: object = 0) -> float:
-    """When a streaming model is told "time is up": 1.5x the budget (10-60 s), never past 25% of its clock.
+    """Move cap for streaming models: 2x the budget (20-90 s), never past 25% of its clock.
 
-    The budget is re-derived from the clock every move, so a model that is always cut still
-    spreads its clock over the game instead of flagging (2026-10-05: at 3x, Grok and DeepSeek
-    were cut 6-7 times per game and still lost on time)."""
+    Past the cap the referee plays the model's own latest `BEST SO FAR` note; with no note yet the
+    model keeps thinking at full effort on its own clock (2026-10-06: the old low-effort "answer now"
+    retry with a 6-8 s limit decided 5 of 10 games by forfeit, owner: "it doesn't look fair")."""
     budget = move_budget_seconds(board, remaining_ms, increment_ms)
-    cutoff = min(60.0, max(10.0, 1.5 * budget))
+    cutoff = min(90.0, max(20.0, 2.0 * budget))
     try:
         cutoff = min(cutoff, max(4.0, 0.25 * float(remaining_ms) / 1000))  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -190,20 +198,38 @@ def arbiter_cutoff_seconds(board: chess.Board, remaining_ms: object, increment_m
     return cutoff
 
 
-def answer_now_seconds(cutoff: float | None) -> float:
-    """Hard limit for the reply after the time-up notice."""
-    return 15.0 if cutoff is None else max(6.0, min(15.0, cutoff / 2))
+def provider_unavailable(error: str) -> bool:
+    lowered = (error or "").lower()
+    return any(marker in lowered for marker in UNAVAILABLE_MARKERS)
 
 
-def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejections: list[str], show_legal: bool = True) -> str:
+def overrun_note(think_ms: int | None, cap_seconds: float | None) -> str | None:
+    """Kaggle Game Arena style nudge for the next prompt after a move ran past its cap."""
+    if not think_ms or cap_seconds is None or think_ms / 1000 <= cap_seconds:
+        return None
+    return (f"Your previous move took {think_ms / 1000:.0f} seconds, past its {cap_seconds:.0f}-second cap. "
+            "Decide faster this move.")
+
+
+def latest_note(text: str, board: chess.Board) -> chess.Move | None:
+    """The model's latest `BEST SO FAR` note when it names a legal move (an illegal latest note = keep thinking)."""
+    notes = BEST_SO_FAR.findall(text or "")
+    return move_from_text(notes[-1].rstrip(".,;"), board) if notes else None
+
+
+def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejections: list[str], show_legal: bool = True,
+                 cap_seconds: float | None = None, nudge: str | None = None) -> str:
     side = "White" if board.turn == chess.WHITE else "Black"
     own, opp = ("wtime", "btime") if board.turn == chess.WHITE else ("btime", "wtime")
+    # Stable, append-only text first (side, then the game so far) so input caching reuses the
+    # longest prefix from the previous move; the parts that change every move come after it.
     lines = [
-        f"You are playing {side}. It is your move.",
+        f"You are playing {side}.",
+        f"Moves so far: {san_history(history)}",
+        "It is your move.",
         f"FEN: {board.fen()}",
         "Board (White pieces are uppercase, White plays up the board):",
         str(board),
-        f"Moves so far: {san_history(history)}",
     ]
     if go_args.get(own) is not None:
         inc = go_args.get("winc" if side == "White" else "binc", 0) or 0
@@ -211,8 +237,14 @@ def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejectio
         budget = move_budget_seconds(board, go_args.get(own), inc)
         lines.append(
             f"Time budget for this move: about {budget:.0f} seconds of thinking. Your clock only counts your thinking time; "
-            "if it reaches 0:00 you lose, so keep your reasoning short and decide."
+            "if it reaches 0:00 you lose on time."
         )
+        if cap_seconds is not None:
+            lines.append(f"If you are still thinking after about {cap_seconds:.0f} seconds, the referee plays your latest "
+                         "BEST SO FAR move. So in the first lines of your thinking write `BEST SO FAR: <move>` for your "
+                         "first instinct, then write a new BEST SO FAR line after each candidate you check.")
+    if nudge:
+        lines.append(nudge)
     if board.is_check():
         lines.append("You are in check.")
     if show_legal:
@@ -291,6 +323,8 @@ class SubscriptionChessClient:
         self.http_post: Callable[[str, dict, dict, int], dict] = self._http_post
         self.http_stream: Callable[[str, dict, dict, int, float | None], dict] = self._http_stream
         self._cutoff_s: float | None = None
+        self._board: chess.Board | None = None
+        self._nudge: str | None = None
         self._infra_ms = 0
         self.on_clock_start: Callable[[int], None] | None = None
         self.session_id = str(uuid.uuid4())
@@ -319,6 +353,7 @@ class SubscriptionChessClient:
 
     def new_game(self) -> None:
         self.invalid_model_moves = 0
+        self._nudge = None
 
     def choose_move(self, board: chess.Board, go_args: dict, history: list[str]) -> tuple[str, str]:
         self.last_report = {"tries": 0, "illegal": []}
@@ -334,11 +369,17 @@ class SubscriptionChessClient:
         self.last_report["think_ms"] = 0
         for attempt in range(1, self.max_attempts + 1):
             self.last_report["tries"] = attempt
-            prompt = build_prompt(board, go_args, history, rejections, self.show_legal)
             left = None if remaining is None else remaining - self.last_report["think_ms"]
+            if left is not None and left <= 0:
+                # Out of clock: report the time used so the arbiter flags it; never a forfeit.
+                return "0000", f"{self.provider} {self.model} ran out of clock while thinking"
             timeout = self._attempt_timeout(left)
             inc = go_args.get("winc" if board.turn == chess.WHITE else "binc", 0)
             self._cutoff_s = arbiter_cutoff_seconds(board, left, inc) if left is not None else None
+            self._board = board
+            # Only streaming routes show their thinking live, so only they get the BEST SO FAR cap.
+            cap = self._cutoff_s if self.provider in HTTP_ROUTES else None
+            prompt = build_prompt(board, go_args, history, rejections, self.show_legal, cap, self._nudge)
             started = time.monotonic()
             self._attempt_think_ms = None
             self._infra_ms = 0
@@ -354,6 +395,7 @@ class SubscriptionChessClient:
                     f"{self.provider} {self.model} attempt {attempt}/{self.max_attempts} ok "
                     f"move={move.uci()} secs={time.monotonic() - started:.1f} think_ms={self.last_report['think_ms']}{usage}"
                 )
+                self._nudge = overrun_note(self.last_report["think_ms"], cap)
                 return move.uci(), comment
             except ValueError as exc:
                 self._add_think(started)
@@ -362,6 +404,9 @@ class SubscriptionChessClient:
                 bad = re.search(r"'([^']{1,24})' is not a legal move", last_error)
                 self.last_report["illegal"].append(marker_text(bad.group(1)) if bad else "invalid")
             except Exception as exc:  # timeouts and CLI failures spend an attempt too
+                if isinstance(exc, ProviderError) and provider_unavailable(str(exc)):
+                    self.log(f"{self.provider} {self.model} provider unavailable: {str(exc)[:300]}")
+                    return "0000", f"provider unavailable: {str(exc)[:200]}"
                 self._attempt_think_ms = None  # a timed-out or failed call is charged in full
                 self._add_think(started)
                 last_error = f"{type(exc).__name__}: {exc}"
@@ -450,7 +495,11 @@ class SubscriptionChessClient:
             style = "thinking"
         if style == "openrouter":
             payload["reasoning"] = {"effort": effort or "high"}
-            payload["provider"] = {"sort": "throughput", "allow_fallbacks": True}
+            # Input cache: one session per engine keeps OpenRouter's sticky routing on the same
+            # provider (cache reads bill at 0.25x input for Grok). No provider order/sort: an order
+            # turns sticky routing off.
+            payload["session_id"] = self.session_id
+            payload["prompt_cache_key"] = self.session_id
         elif style == "effort":
             payload["reasoning_effort"] = effort or "high"
         elif style == "thinking":
@@ -460,47 +509,32 @@ class SubscriptionChessClient:
             headers["x-opencode-session"] = self.session_id
         if self.provider == "openrouter-chat":
             headers["X-Title"] = "ai-chess-harness"
+            headers["x-session-id"] = self.session_id
         started = time.monotonic()
         self._clock_start()
         streamed = self.http_stream(route["url"], {**payload, "stream": True, "stream_options": {"include_usage": True}},
                                     headers, timeout, self._cutoff_s)
         self.usage_log.append(streamed.get("usage") or {})
         content = streamed.get("content") or ""
-        if content.strip() or not streamed.get("cut"):
-            if not content.strip():
-                raise ValueError(f"the reply was empty (finish_reason={streamed.get('finish')}, "
-                                 f"reasoning_chars={len(streamed.get('reasoning') or '')})")
-            return content
-        # Arbiter: the model thought past its cut-off without answering. Tell it time is up and
-        # show it the end of its own reasoning; it still chooses the move itself.
-        used = time.monotonic() - started
-        tail = (streamed.get("reasoning") or "")[-1500:]
-        hurry = "Your thinking time for this move is up."
-        if tail.strip():
-            hurry += " The last part of your own thinking was:\n" + tail
-        hurry += "\nReply NOW with only the JSON object. Do not think any further."
-        self.log(f"{self.provider} {self.model} arbiter: time is up after {used:.1f}s "
-                 f"(cutoff {self._cutoff_s:.0f}s, reasoning_chars={len(streamed.get('reasoning') or '')}); asking for the move now")
-        self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
-        follow = {**payload, "max_tokens": 4000, "stream": True, "stream_options": {"include_usage": True},
-                  "messages": payload["messages"] + [{"role": "user", "content": hurry}]}
-        # The answer-now reply uses the least reasoning each route allows (GLM 5.3 cannot turn it off).
-        if style == "openrouter":
-            follow["reasoning"] = {"effort": "low"}
-        elif style == "effort":
-            follow.pop("reasoning_effort", None)
-            follow["thinking"] = {"type": "disabled"}
-        limit = answer_now_seconds(self._cutoff_s)
-        answer = self.http_stream(route["url"], follow, headers, max(10, int(limit) + 5), limit)
-        self.usage_log.append(answer.get("usage") or {})
-        content = answer.get("content") or ""
+        if streamed.get("cut") and not content.strip():
+            # Referee: still thinking at the move cap, so its own latest BEST SO FAR note is played.
+            board = self._board or chess.Board()
+            note = latest_note((streamed.get("reasoning") or "") + "\n" + content, board)
+            if note is None:
+                raise ProviderError("cut at the move cap without a legal BEST SO FAR note")
+            self.log(f"{self.provider} {self.model} referee: still thinking after {time.monotonic() - started:.1f}s "
+                     f"(cap {self._cutoff_s:.0f}s); playing its latest BEST SO FAR note {note.uci()}")
+            self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
+            return json.dumps({"move": note.uci(), "comment": "Still thinking at the move cap; the referee played its latest BEST SO FAR move."})
         if not content.strip():
-            raise ValueError(f"time was up and no move arrived within {limit:.0f}s of the time-up notice")
+            raise ValueError(f"the reply was empty (finish_reason={streamed.get('finish')}, "
+                             f"reasoning_chars={len(streamed.get('reasoning') or '')})")
         return content
 
     def _http_stream(self, url: str, payload: dict, headers: dict, timeout: int, cutoff: float | None) -> dict:
-        """Stream a chat completion. Returns content/reasoning/usage plus `cut` when the cutoff
-        passed before any answer text. No bytes for STALL_SECONDS = gateway stall (infrastructure)."""
+        """Stream a chat completion at full effort. Past the cutoff, with no answer text yet, the stream is
+        `cut` only once the thinking holds a legal BEST SO FAR note; without one the model keeps thinking
+        on its own clock. No bytes for STALL_SECONDS = gateway stall (infrastructure)."""
         body = json.dumps(payload).encode("utf-8")
         state = {"content": "", "reasoning": "", "usage": {}, "finish": None, "done": False, "error": None,
                  "last": time.monotonic(), "resp": None}
@@ -542,7 +576,8 @@ class SubscriptionChessClient:
         worker.start()
         while not state["done"]:
             now = time.monotonic()
-            if cutoff is not None and now - started > cutoff and not state["content"].strip():
+            if (cutoff is not None and now - started > cutoff and not state["content"].strip()
+                    and latest_note(state["reasoning"], self._board or chess.Board()) is not None):
                 _close_quietly(state.get("resp"))
                 return {**state, "cut": True}
             if now - state["last"] > STALL_SECONDS:

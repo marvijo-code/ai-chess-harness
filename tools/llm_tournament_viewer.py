@@ -243,7 +243,7 @@ function gameCard(game) {
   const ev = analysisOn && data.analysis_engine ? evalFor(game, ply, moves.length) : undefined;
   const commentWho = shownMove ? `${esc(game[shownMove.side])} - ${Math.ceil(shownMove.ply / 2)}${shownMove.side === "white" ? "." : "..."} ${esc(shownMove.san)}`
     + (shownMove.tries > 1 ? ` (try ${shownMove.tries})` : "") + ` - ${(shownMove.elapsed_ms / 1000).toFixed(0)}s`
-    + (shownMove.hurried ? ` - arbiter: time up` : "") : "No moves yet";
+    + (shownMove.hurried ? ` - referee played its BEST SO FAR` : "") : "No moves yet";
   const moveText = moves.map((m, i) => {
     const num = m.side === "white" ? `${Math.ceil(m.ply / 2)}.` : "";
     const cls = (i + 1 === ply ? "cur" : "") + (m.tries > 1 ? " bad" : "");
@@ -273,7 +273,8 @@ function render() {
   const finished = data.finished;
   document.getElementById("chips").innerHTML = [
     finished ? `<span class="chip done">Finished - winner <b>${esc(data.winner || "")}</b></span>` : `<span class="chip live">Round <b>${data.current_round}</b> of ${cfg.rounds}</span>`,
-    `<span class="chip"><b>${Math.round((cfg.timeControlMs || 0) / 60000)} min</b> per player</span>`,
+    data.paused ? `<span class="chip" title="${esc(data.paused)}">Paused: a provider is unavailable; the game will be replayed</span>` : "",
+    `<span class="chip"><b>${Math.round((cfg.timeControlMs || 0) / 60000)} min${cfg.incrementMs ? " + " + Math.round(cfg.incrementMs / 1000) + " s" : ""}</b> per player</span>`,
     `<span class="chip"><b>${cfg.maxAttempts}</b> tries per move, then forfeit</span>`,
     `<span class="chip">Swiss, Elo start <b>${cfg.startElo}</b>, K=${cfg.eloK}</span>`,
     data.analysis_engine ? `<span class="chip btn ${analysisOn ? "on" : ""}" data-toggle-analysis title="Viewer-only engine analysis; the AI players never see it">${esc(data.analysis_engine)} analysis: <b>${analysisOn ? "on" : "off"}</b></span>` : "",
@@ -304,8 +305,8 @@ function render() {
   document.getElementById("rules").innerHTML = [
     "Each AI picks every move itself: no tools, no code, no chess engine.",
     `${cfg.maxAttempts} replies per move; an illegal or broken reply is rejected with the reason, the third one forfeits the game.`,
-    `${Math.round((cfg.timeControlMs || 0) / 60000)} minutes of model thinking time per player, no increment; the clock runs out = loss.`,
-    "Every prompt states the clocks and a time budget for the move. A model that thinks past 1.5x that budget is told \"time is up, move now\" and still picks the move itself.",
+    `${Math.round((cfg.timeControlMs || 0) / 60000)} minutes of model thinking time per player, ${cfg.incrementMs ? "+" + Math.round(cfg.incrementMs / 1000) + " s per move" : "no increment"}; the clock runs out = loss on time.`,
+    "Every model thinks at High effort on every move. While thinking it writes BEST SO FAR: <move>; past the move cap the referee plays its own latest note. Running out of time is never an invalid reply.",
     "Points: 1 for a win, 0.5 for a draw, 0 for a loss or a bye.",
     "Swiss pairing: same score meets same score, no rematches, one bye each.",
     "Stockfish analysis is for viewers only: the AI players never see it.",

@@ -8,7 +8,7 @@ same prompt and the same rules:
 - the model picks every move itself (no tools, no code, no engine, no fallback move);
 - MaxAttempts replies per move, each retry says why the last one was rejected, then
   `bestmove 0000` = forfeit, recorded as a loss;
-- each player has its own game clock (default 10 minutes, no increment); a flag is a loss.
+- each player has its own game clock (default 10 minutes, optional increment); a flag is a loss.
 
 Pairing is Swiss: score groups first, then Elo, no rematches, one bye per player at
 most (a bye scores `byePoints`, default 0, and leaves Elo unchanged), and a look-ahead that keeps the
@@ -413,6 +413,10 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
             if uci == "flag":
                 replace_engine(engine)  # still thinking: restart it so the next game starts clean
             break
+        if uci == "0000" and comment.startswith("provider unavailable"):
+            # A plan limit or lost login is not chess: void the game; --resume replays it from move 1.
+            result, termination, end_kind = "*", f"void: {engine.name} {comment}"[:200], "void"
+            break
         if uci == "0000":
             invalid[side] += cfg["maxAttempts"]
             result = "0-1" if side == chess.WHITE else "1-0"
@@ -445,8 +449,8 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
     headers["Termination"] = termination
     headers["GameEndTime"] = iso_now()
     with ts.lock:
-        record.update({"status": "finished", "result": result, "termination": termination, "end_kind": end_kind,
-                       "end": iso_now(), "pgn": str(game)})
+        record.update({"status": "void" if end_kind == "void" else "finished", "result": result,
+                       "termination": termination, "end_kind": end_kind, "end": iso_now(), "pgn": str(game)})
     publish(None)
     log(f"{game_id} finished: {white.name} {result} {black.name} ({termination})")
 
@@ -511,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
                 if game.get("result", "*") == "*":
                     game.update({"status": "pending", "moves": [], "result": "*", "termination": "", "end_kind": ""})
         state["finished"] = False
+        state.pop("paused", None)
     else:
         cfg = load_config(args.config)
         if args.rounds:
@@ -613,6 +618,13 @@ def main(argv: list[str] | None = None) -> int:
                 threads.append(thread)
             for thread in threads:
                 thread.join()
+            void = [state["games"][p["game_id"]] for p in rnd["pairings"] if state["games"][p["game_id"]].get("end_kind") == "void"]
+            if void:
+                with ts.lock:
+                    state["paused"] = "; ".join(g["termination"] for g in void)
+                ts.save()
+                log(f"PAUSED in round {round_number}: {state['paused']}. Fix the provider, then run with --resume {status_path}")
+                return 3
             rnd["status"] = "finished"
             ts.save()
             write_archive(state)
