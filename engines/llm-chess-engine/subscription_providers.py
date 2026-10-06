@@ -138,6 +138,8 @@ def build_command(provider: str, model: str, effort: str, binary: str, workdir: 
             "--sandbox", "read-only",
             "-m", model,
             "-c", f"model_reasoning_effort={effort}",
+            # Reasoning summaries in the JSON stream, for the viewer's live Thinking panel.
+            "-c", "model_reasoning_summary=detailed",
             "-c", "project_doc_max_bytes=0",
             "-c", "web_search=disabled",
         ]
@@ -408,6 +410,10 @@ class SubscriptionChessClient:
         self._cutoff_s: float | None = None
         self._board: chess.Board | None = None
         self._image: bytes | None = None
+        # Live thinking for the viewer: the runner names one file per move (UCI option ThinkingFile).
+        self.thinking_file: Path | None = None
+        self._think_handle = None
+        self._think_lock = threading.Lock()
         self._image_board: str | None = None
         self._nudge: str | None = None
         self._infra_ms = 0
@@ -433,6 +439,9 @@ class SubscriptionChessClient:
                 self.timeout_seconds = max(10, int(value))
             except ValueError:
                 self.log(f"invalid Timeout option: {value!r}")
+        elif lowered == "thinkingfile":
+            self._think_close()
+            self.thinking_file = Path(value.strip()) if value.strip() else None
         elif lowered in {"showlegalmoves", "show_legal_moves"}:
             self.show_legal = value.strip().lower() in {"1", "true", "yes", "on"}
 
@@ -486,6 +495,8 @@ class SubscriptionChessClient:
                     f"move={move.uci()} secs={time.monotonic() - started:.1f} think_ms={self.last_report['think_ms']}{usage}"
                 )
                 self._nudge = overrun_note(self.last_report["think_ms"], cap)
+                self._think(f"\n[move] {board.san(move)}" + (f" - {comment}" if comment else "") + "\n")
+                self._think_close()
                 return move.uci(), comment
             except ValueError as exc:
                 self._add_think(started)
@@ -503,11 +514,35 @@ class SubscriptionChessClient:
                 rejections.append("no answer arrived in time" if isinstance(exc, subprocess.TimeoutExpired) else "the reply failed")
                 self.last_report["illegal"].append("timeout" if isinstance(exc, subprocess.TimeoutExpired) else "error")
             self.invalid_model_moves += 1
+            self._think(f"\n[reply {attempt} rejected: {last_error[:160]}]\n")
             self.log(
                 f"{self.provider} {self.model} attempt {attempt}/{self.max_attempts} rejected after "
                 f"{time.monotonic() - started:.1f}s: {last_error[:400]} (invalid_count={self.invalid_model_moves})"
             )
         return "0000", f"{self.provider} {self.model} failed after {self.max_attempts} attempts; forfeiting ({last_error[:200]})"
+
+    def _think(self, text: str) -> None:
+        """Append visible thinking to this move's file (what the model reveals; never fabricated)."""
+        if not text or self.thinking_file is None:
+            return
+        with self._think_lock:
+            try:
+                if self._think_handle is None:
+                    self.thinking_file.parent.mkdir(parents=True, exist_ok=True)
+                    self._think_handle = open(self.thinking_file, "a", encoding="utf-8")
+                self._think_handle.write(text)
+                self._think_handle.flush()
+            except OSError:
+                pass
+
+    def _think_close(self) -> None:
+        with self._think_lock:
+            if self._think_handle is not None:
+                try:
+                    self._think_handle.close()
+                except OSError:
+                    pass
+                self._think_handle = None
 
     def _clock_start(self) -> None:
         """The model has started thinking (CLI start-up over / request sent). Display-only signal."""
@@ -651,6 +686,7 @@ class SubscriptionChessClient:
         self.log(f"{self.provider} {self.model} thinking stopped after {time.monotonic() - started:.1f}s ({why}); "
                  f"returning its {len(thoughts)} chars of thinking and asking for the move")
         self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
+        self._think(f"\n[thinking stopped: {why} - answering from its own thoughts]\n")
         messages = payload["messages"] + [
             {"role": "assistant", "content": "My thinking on this move so far:\n" + (thoughts or "(no visible thinking)")},
             {"role": "user", "content": "Your time for this move is up. Your full thinking so far is above. "
@@ -706,7 +742,9 @@ class SubscriptionChessClient:
                             state["usage"] = data["usage"]
                         for choice in data.get("choices") or []:
                             delta = choice.get("delta") or {}
-                            state["reasoning"] += str(delta.get("reasoning_content") or delta.get("reasoning") or "")
+                            piece = str(delta.get("reasoning_content") or delta.get("reasoning") or "")
+                            state["reasoning"] += piece
+                            self._think(piece)
                             state["content"] += str(delta.get("content") or "")
                             if choice.get("finish_reason"):
                                 state["finish"] = choice["finish_reason"]
@@ -807,6 +845,9 @@ class SubscriptionChessClient:
             for line in proc.stdout:
                 times.append((time.monotonic(), line))
                 lines.append(line)
+                visible = cli_visible_thinking(line)
+                if visible:
+                    self._think(visible + "\n")
                 # The model starts thinking here (CLI start-up is over): tell the viewer clock.
                 if not started_signal and ('"turn.started"' in line or '"subtype":"init"' in line):
                     started_signal = True
@@ -829,6 +870,26 @@ class SubscriptionChessClient:
                 raise CliCrash(f"{self.provider} exited {proc.returncode} with no output")
             raise ProviderError(f"{self.provider} exited {proc.returncode}: {output[-400:]!r}")
         return output
+
+
+def cli_visible_thinking(line: str) -> str:
+    """Thinking a CLI reveals in its JSON stream: Codex reasoning summaries, Claude thinking blocks."""
+    line = line.strip()
+    if not line.startswith("{") or ("reasoning" not in line and "thinking" not in line):
+        return ""
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return ""
+    item = event.get("item") if isinstance(event.get("item"), dict) else None
+    if item and item.get("type") == "reasoning" and event.get("type") == "item.completed":
+        return str(item.get("text") or "")
+    message = event.get("message") if event.get("type") == "assistant" else None
+    if isinstance(message, dict):
+        parts = [str(block.get("thinking") or "") for block in message.get("content") or []
+                 if isinstance(block, dict) and block.get("type") == "thinking"]
+        return "\n".join(p for p in parts if p)
+    return ""
 
 
 def claude_result_event(output: str) -> dict | None:
