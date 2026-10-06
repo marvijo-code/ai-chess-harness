@@ -128,16 +128,21 @@ def engine_env(player: dict, cfg: dict) -> dict[str, str]:
 
 
 class LlmEngine:
-    """One persistent llm-chess-engine process for one player."""
+    """One persistent engine process for one player: the llm-chess-engine, or a plain UCI engine
+    (`"provider": "uci"`, `"path"`, `"depth"`, optional `"options"`) such as a fixed-depth Stockfish."""
 
     def __init__(self, player: dict, cfg: dict) -> None:
         self.player = player
         self.name = player["name"]
         self.cfg = cfg
+        self.is_uci = player.get("provider") == "uci"
         env = os.environ.copy()
-        env.update(engine_env(player, cfg))
+        if not self.is_uci:
+            env.update(engine_env(player, cfg))
+        argv = [str(Path(player["path"]))] if self.is_uci else [sys.executable, str(ENGINE_SCRIPT)]
         self.proc = subprocess.Popen(
-            [sys.executable, str(ENGINE_SCRIPT)],
+            argv,
+            cwd=str(Path(player["path"]).parent) if self.is_uci else None,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -153,8 +158,15 @@ class LlmEngine:
         threading.Thread(target=self._pump, daemon=True).start()
         self.send("uci")
         self.wait_for("uciok", 30)
+        for name, value in (player.get("options") or {}).items():
+            self.send(f"setoption name {name} value {value}")
         self.send("isready")
         self.wait_for("readyok", 30)
+
+    def go_command(self, wtime: int, btime: int, inc: int = 0) -> str:
+        if self.is_uci and self.player.get("depth"):
+            return f"go depth {int(self.player['depth'])}"
+        return f"go wtime {wtime} btime {btime} winc {inc} binc {inc}"
 
     def _pump(self) -> None:
         assert self.proc.stdout is not None

@@ -14,6 +14,8 @@ never picks a move for the model.
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import os
 import re
@@ -80,7 +82,11 @@ SYSTEM_PROMPT = (
 # then (only if that brings no move) at the lowest effort the route allows. Measured 2026-10-06 with the
 # thinking cut halfway: DeepSeek answered in 6 s and GLM Flash in 2 s at High; Grok, whose visible
 # thinking is only a short summary, re-thought for 49 s at High and answered in 2 s at low.
-ANSWER_WITH_THOUGHTS_SECONDS = 20.0
+ANSWER_WITH_THOUGHTS_SECONDS = 20.0  # upper bound per answer step; the real limit is a share of the move cap
+# Share of the move cap per step: thinking, the same-effort answer, the lowest-effort answer. The whole move
+# fits inside the cap (2026-10-06 run 5: cap 30 s + 20 s + 8 s made Grok's moves ~55 s and it flagged).
+THINK_SHARE, SAME_SHARE, LOWEST_SHARE = 0.6, 0.2, 0.2
+LOWEST_MIN_SECONDS = 5.0
 THOUGHTS_HEAD_CHARS = 20_000
 THOUGHTS_TAIL_CHARS = 100_000
 # The note the referee plays when a model is still thinking at its move cap (its own latest choice).
@@ -191,14 +197,20 @@ def move_budget_seconds(board: chess.Board, remaining_ms: object, increment_ms: 
 
 
 def arbiter_cutoff_seconds(board: chess.Board, remaining_ms: object, increment_ms: object = 0) -> float:
-    """Move cap for streaming models: 1.5x the budget (15-60 s), never past 25% of its clock.
+    """Whole-move cap for streaming models: 1.5x the clock share plus 0.9x the increment (8-60 s),
+    never past 25% of its clock. A model cut on every move then still gains time from the increment.
 
     Past the cap the thinking stops and the model answers from its own full thinking (owner 2026-10-06:
     "give models their original thoughts so they can make informed decisions"). Without a cap High effort
     flagged Grok and DeepSeek in run 4 (Grok averaged 41 s a move, up to 134 s; DeepSeek ran into its
     token limit three times in one move)."""
-    budget = move_budget_seconds(board, remaining_ms, increment_ms)
-    cutoff = min(60.0, max(15.0, 1.5 * budget))
+    try:
+        remaining = max(0.0, float(remaining_ms) / 1000)  # type: ignore[arg-type]
+        increment = max(0.0, float(increment_ms or 0) / 1000)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 30.0
+    moves_left = max(15, 45 - board.fullmove_number)
+    cutoff = min(60.0, max(8.0, 1.5 * remaining / moves_left + 0.9 * increment))
     try:
         cutoff = min(cutoff, max(4.0, 0.25 * float(remaining_ms) / 1000))  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -229,6 +241,61 @@ def latest_note(text: str, board: chess.Board) -> chess.Move | None:
     return None
 
 
+def board_diagram(board: chess.Board) -> str:
+    """The FEN as an 8x8 diagram with file letters and rank numbers (White uppercase, Black lowercase)."""
+    rows = ["  a b c d e f g h"]
+    for rank in range(7, -1, -1):
+        cells = []
+        for file in range(8):
+            piece = board.piece_at(chess.square(file, rank))
+            cells.append(piece.symbol() if piece else ".")
+        rows.append(f"{rank + 1} {' '.join(cells)} {rank + 1}")
+    rows.append("  a b c d e f g h")
+    return "\n".join(rows)
+
+
+BOARD_FONT = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "seguisym.ttf"
+GLYPHS = {chess.KING: "\u265a", chess.QUEEN: "\u265b", chess.ROOK: "\u265c", chess.BISHOP: "\u265d",
+          chess.KNIGHT: "\u265e", chess.PAWN: "\u265f"}
+
+
+def board_png(board: chess.Board) -> bytes:
+    """A 560x560 PNG of the position: White at the bottom, coordinates on all sides, last move highlighted."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    sq, margin = 64, 24
+    size = sq * 8 + margin * 2
+    image = Image.new("RGB", (size, size), (40, 40, 40))
+    draw = ImageDraw.Draw(image)
+    piece_font = ImageFont.truetype(str(BOARD_FONT), 52)
+    label_font = ImageFont.truetype(str(BOARD_FONT), 16)
+    last = board.peek() if board.move_stack else None
+    for rank in range(8):
+        for file in range(8):
+            square = chess.square(file, rank)
+            x, y = margin + file * sq, margin + (7 - rank) * sq
+            light = (file + rank) % 2 == 1
+            colour = (240, 217, 181) if light else (181, 136, 99)
+            if last and square in (last.from_square, last.to_square):
+                colour = (246, 246, 105) if light else (186, 202, 43)
+            draw.rectangle([x, y, x + sq - 1, y + sq - 1], fill=colour)
+            piece = board.piece_at(square)
+            if piece:
+                white = piece.color == chess.WHITE
+                draw.text((x + sq / 2, y + sq / 2 + 2), GLYPHS[piece.piece_type], font=piece_font, anchor="mm",
+                          fill=(255, 255, 255) if white else (0, 0, 0), stroke_width=2,
+                          stroke_fill=(0, 0, 0) if white else (255, 255, 255))
+    for i in range(8):
+        letter, number = "abcdefgh"[i], str(8 - i)
+        for y in (margin / 2, size - margin / 2):
+            draw.text((margin + i * sq + sq / 2, y), letter, font=label_font, anchor="mm", fill=(230, 230, 230))
+        for x in (margin / 2, size - margin / 2):
+            draw.text((x, margin + i * sq + sq / 2), number, font=label_font, anchor="mm", fill=(230, 230, 230))
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
 def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejections: list[str], show_legal: bool = True,
                  cap_seconds: float | None = None, nudge: str | None = None) -> str:
     side = "White" if board.turn == chess.WHITE else "Black"
@@ -240,8 +307,9 @@ def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejectio
         f"Moves so far: {san_history(history)}",
         "It is your move.",
         f"FEN: {board.fen()}",
-        "Board (White pieces are uppercase, White plays up the board):",
-        str(board),
+        "Board diagram from the FEN (White pieces uppercase, Black lowercase, White plays up the board):",
+        board_diagram(board),
+        "An image of the same position is attached: White at the bottom, the last move highlighted.",
     ]
     if go_args.get(own) is not None:
         inc = go_args.get("winc" if side == "White" else "binc", 0) or 0
@@ -335,6 +403,8 @@ class SubscriptionChessClient:
         self.http_stream: Callable[[str, dict, dict, int, float | None], dict] = self._http_stream
         self._cutoff_s: float | None = None
         self._board: chess.Board | None = None
+        self._image: bytes | None = None
+        self._image_board: str | None = None
         self._nudge: str | None = None
         self._infra_ms = 0
         self.on_clock_start: Callable[[int], None] | None = None
@@ -388,6 +458,9 @@ class SubscriptionChessClient:
             inc = go_args.get("winc" if board.turn == chess.WHITE else "binc", 0)
             self._cutoff_s = arbiter_cutoff_seconds(board, left, inc) if left is not None else None
             self._board = board
+            if self._image_board != board.fen():
+                self._image = board_png(board)
+                self._image_board = board.fen()
             # Only streaming routes show their thinking live, so only they get the BEST SO FAR cap.
             cap = self._cutoff_s if self.provider in HTTP_ROUTES else None
             prompt = build_prompt(board, go_args, history, rejections, self.show_legal, cap, self._nudge)
@@ -469,8 +542,19 @@ class SubscriptionChessClient:
             return self._ask_http(prompt, timeout)
         workdir = isolated_workdir()
         argv, last_message = build_command(self.provider, self.model, self.effort, resolve_binary(self.provider), workdir)
+        image_file = None
         if self.provider == "codex":
             prompt = SYSTEM_PROMPT + "\n\n" + prompt
+            if self._image:
+                image_file = workdir / f"board-{os.getpid()}-{time.time_ns()}.png"
+                image_file.write_bytes(self._image)
+                argv = argv[:-1] + ["-i", str(image_file), "--", "-"]
+        elif self.provider == "claude" and self._image:
+            argv = argv + ["--input-format", "stream-json"]
+            prompt = json.dumps({"type": "user", "message": {"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                             "data": base64.b64encode(self._image).decode("ascii")}},
+                {"type": "text", "text": prompt}]}}) + "\n"
         try:
             self._line_times = []
             output = self.runner(argv, prompt, timeout, workdir)
@@ -487,15 +571,21 @@ class SubscriptionChessClient:
         finally:
             if last_message and last_message.exists():
                 last_message.unlink(missing_ok=True)
+            if image_file is not None:
+                image_file.unlink(missing_ok=True)
 
     def _ask_http(self, prompt: str, timeout: int) -> str:
         route = HTTP_ROUTES[self.provider]
         api_key = os.environ.get(route["key"]) or _user_env(route["key"])
         if not api_key:
             raise ProviderError(f"{route['key']} is not set")
+        user: object = prompt
+        if self._image:
+            user = [{"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(self._image).decode("ascii")}}]
         payload: dict = {
             "model": self.model,
-            "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
+            "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}],
             "max_tokens": HTTP_MAX_TOKENS,
         }
         effort = (self.effort or "").strip().lower()
@@ -525,8 +615,9 @@ class SubscriptionChessClient:
             headers["x-session-id"] = self.session_id
         started = time.monotonic()
         self._clock_start()
+        think_cap = None if self._cutoff_s is None else THINK_SHARE * self._cutoff_s
         streamed = self.http_stream(route["url"], {**payload, "stream": True, "stream_options": {"include_usage": True}},
-                                    headers, timeout, self._cutoff_s)
+                                    headers, timeout, think_cap)
         self.usage_log.append(streamed.get("usage") or {})
         content = streamed.get("content") or ""
         # Still thinking at the cap, or out of output tokens before any answer (DeepSeek, run 4).
@@ -545,7 +636,8 @@ class SubscriptionChessClient:
         if len(thoughts) > THOUGHTS_HEAD_CHARS + THOUGHTS_TAIL_CHARS:
             thoughts = (thoughts[:THOUGHTS_HEAD_CHARS] + "\n[... middle of the thinking omitted for length ...]\n"
                         + thoughts[-THOUGHTS_TAIL_CHARS:])
-        why = "ran out of output space" if streamed.get("finish") == "length" else f"reached the {self._cutoff_s:.0f}s move cap"
+        total = self._cutoff_s or 30.0
+        why = "ran out of output space" if streamed.get("finish") == "length" else f"reached {THINK_SHARE * total:.0f}s of its {total:.0f}s move cap"
         self.log(f"{self.provider} {self.model} thinking stopped after {time.monotonic() - started:.1f}s ({why}); "
                  f"returning its {len(thoughts)} chars of thinking and asking for the move")
         self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
@@ -553,6 +645,8 @@ class SubscriptionChessClient:
             {"role": "assistant", "content": "My thinking on this move so far:\n" + (thoughts or "(no visible thinking)")},
             {"role": "user", "content": "Your time for this move is up. Your full thinking so far is above. "
                                         "Reply now with only the JSON object for your move."}]
+        limits = {"same": min(ANSWER_WITH_THOUGHTS_SECONDS, SAME_SHARE * total),
+                  "lowest": min(ANSWER_WITH_THOUGHTS_SECONDS, max(LOWEST_MIN_SECONDS, LOWEST_SHARE * total))}
         for level in ("same", "lowest"):
             follow = {**payload, "messages": messages, "max_tokens": 6000, "stream": True,
                       "stream_options": {"include_usage": True}}
@@ -562,12 +656,12 @@ class SubscriptionChessClient:
                 elif style == "effort":
                     follow.pop("reasoning_effort", None)
                     follow["thinking"] = {"type": "disabled"}
-            answer = self.http_stream(url, follow, headers, int(ANSWER_WITH_THOUGHTS_SECONDS) + 10, ANSWER_WITH_THOUGHTS_SECONDS)
+            answer = self.http_stream(url, follow, headers, int(limits[level]) + 10, limits[level])
             self.usage_log.append(answer.get("usage") or {})
             if (answer.get("content") or "").strip():
                 if level == "lowest":
                     self.log(f"{self.provider} {self.model} answered at the lowest effort after a "
-                             f"{ANSWER_WITH_THOUGHTS_SECONDS:.0f}s answer at its own effort brought no move")
+                             f"{limits['same']:.0f}s answer at its own effort brought no move")
                 return answer["content"]
         note = latest_note(streamed.get("reasoning") or "", self._board or chess.Board())
         if note is not None:
