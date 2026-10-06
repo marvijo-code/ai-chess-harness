@@ -439,7 +439,7 @@ body.focus-mode .boards { display: block; }
   .card.focused .moves { flex: none; max-height: 240px; min-height: 0; }
 }
 /* ---- hosted page (marvijo.com/ai-chess): one slim line that says how fresh the data is ---- */
-.hosted-banner { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px 16px; border-bottom: 1px solid var(--line);
+.hosted-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 8px; padding: 6px 16px; border-bottom: 1px solid var(--line);
   background: var(--panel); color: var(--muted); font-size: 13px; line-height: 1.35; text-align: center; overflow-wrap: anywhere; }
 .hosted-banner .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .hosted-banner .msg { min-width: 0; }
