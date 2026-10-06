@@ -31,6 +31,80 @@ commentary times, `verify.txt`, `plan.json`), and a byte-equal copy `C:\temp\acl
 The raw take, events and logs stay on the VPS in the run dir. If the drive is too full for a second copy
 and `-CopyDir` is on the same drive, the C:\temp file is an NTFS hard link to the master (same bytes).
 
+## Series mode (the rest of the tournament, no pauses)
+
+```powershell
+# Arm once while the tournament is paused with round 5 paired, then resume the runner:
+pwsh tools\round_recorder\record-round.ps1 -Series -FromRound 5 -WaitChange
+# Per round: recorded?, mixed?, sizes, SHA-256, last rec.log lines, VPS free disk:
+pwsh tools\round_recorder\record-round.ps1 -SeriesStatus
+# Download every new DRAFT (SHA-256 checked), hard-link it into C:\temp, then free the VPS raws:
+pwsh tools\round_recorder\record-round.ps1 -CollectNew -Prune
+```
+
+One Xvfb (`:97`) and one kiosk Chrome page stay up for the whole series (`rec.py series`, tmux `aclrec`).
+The first take starts when round N starts (same start rule as record mode, including `--wait-change`),
+then every round gets its own lossless take `raw-r<R>.mkv` (same ffmpeg settings). At a round boundary the
+next ffmpeg starts first; the boundary epoch is the new take's x11grab start, and only then is the previous
+take stopped, so the takes overlap by a second or two and the cut has no gap. Round boundaries:
+
+| Round | Take ends at |
+|---|---|
+| round robin (no `stage`) | the `rcard hide mode=results round=R` director event + 0.5 s; fallback round_done + 90 s |
+| knockout, not the last (semifinals) | round_done + 20 s (an Armageddon decider reopens the round and resets this) |
+| final (stage `final`) | champion set, `champion show` seen, `heardEvents.has('champion')`, no clip playing, then 12 s; cap 180 s after the champion appears |
+
+round_done = every game of the round has a result and the round status is `finished` (re-read every 1 s
+poll). Each closed take adds or updates its entry in `rounds.json` (`round, key, raw, ffmpeg_popen_epoch,
+ffmpeg_input_start, start_epoch, end_epoch, stop_reason, ...`) and touches `R<key>_REC_DONE` (content =
+ffmpeg rc). If ffmpeg dies mid round, a new part starts at once (`key` = `5p2`, file `raw-r5p2.mkv`).
+A failed `page.evaluate` (crash, navigation) reloads the page, or relaunches Chrome, and re-asserts Move
+sound, Commentary and Auto-focus; one failed poll never ends the series. Cap: `--max-min 360`.
+
+`mixer.sh` (tmux `aclmix`) waits for each `R<key>_REC_DONE` in `rounds.json` order and runs
+`mix.py --round <key>` under `nice -n 19` while the next round records. It writes `R<key>_MIX_DONE`
+(content = exit code) and `round<key>-live-DRAFT001.mkv.sha256`, waits when the disk has under 2.5 GB free
+or the tunnel is down, and exits when `SERIES_DONE` exists and every closed take is mixed, or on a `STOP`
+file in the run dir. `series.sh` arms both sessions.
+
+### Director contract (page -> recorder)
+
+The viewer dispatches `window.dispatchEvent(new CustomEvent("acl-director", {detail}))`; the init script
+writes each one to `events.jsonl` as `{kind: "director", t: <page epoch ms>, ...detail}`:
+
+- `{k:"tour", a:"start", speed:10, boards:[...], why:"quiet"|"due"}` - a board tour (time-lapse span) begins
+- `{k:"tour", a:"board", game, n, of}` - informational
+- `{k:"tour", a:"end"}` - the tour is over
+- `{k:"rcard", a:"show"|"hide", mode:"intro"|"results"|"ko", round}` - full-screen round card
+- `{k:"champion", a:"show"|"hide"}` - champion overlay
+
+### Time-lapse edit (mix.py --round R)
+
+A lapse span runs from a tour `start` to the next tour `end`, clamped to the round window (a start with no
+end closes at the window end). A span in which a commentary clip starts plays at normal speed; spans
+shorter than 8 s are ignored; speed = the event's `speed` (default 10). The segment table
+`[(raw_start, raw_end, speed)]` covers the round, frame aligned, each lapse segment a whole multiple of its
+speed in frames. The video is ONE pass: per segment `trim=start_frame:end_frame,setpts=(PTS-STARTPTS)/S`
+(`fps=30` after it when S > 1) joined with `concat`, libx264 ultrafast CRF 0 yuv444p 30 fps, 2 threads, nice 19.
+The audio is built on the OUTPUT timeline: each speech clip offset and click time goes through `remap(t)`
+(piecewise linear), clicks inside lapse spans are dropped, a clip still playing at the window start is kept
+from that point, the music bed is looped for the output duration and ducked under the speech, the 24-bit
+FLAC premix gets a two-pass loudnorm (-16 LUFS, true peak target -1.7 dBTP) inside the same final pass,
+FLAC in MKV. Outputs per round, in the run dir:
+
+- `round<R>-live-DRAFT001.mkv` (lossless video, FLAC audio)
+- `round<R>-verify.txt`: durations (video, audio, planned), frames vs duration x 30, loudness, the segment
+  table (raw span, speed, output span), normal-speed tours and why, dropped clicks, volumedetect at clip offsets
+- `grabs-r<R>/`: 4 frame grabs, one inside the longest lapse span when there is one
+- `mix-r<R>/plan.json` and the filter scripts
+
+### Disk (the VPS has about 14 GB free)
+
+Per round about 0.8 GB raw plus about 0.7 GB DRAFT (less when tours are lapsed). The mix keeps its
+intermediates small (16-bit clicks track, 24-bit FLAC premix; no float WAVs) and deletes them after a
+successful mix. `-CollectNew -Prune` removes a round's `raw-r<R>.mkv` only after its DRAFT was downloaded
+and SHA-256 verified; nothing else is ever deleted.
+
 ## How it works
 
 | File | Runs on | Job |
@@ -39,7 +113,9 @@ and `-CopyDir` is on the same drive, the C:\temp file is an NTFS hard link to th
 | `rec.py` | VPS | Xvfb `:97`, kiosk Chrome via Playwright, unmutes Commentary at the round start, keeps Move sound on, logs clip and click events, records `raw.mkv` (x11grab, H.264 CRF 0, yuv444p, 30 fps) |
 | `mix.py` | VPS | speech clips placed at their logged start (`adelay`, `amix normalize=0`, no ducking), about -16 LUFS, true peak under -1.5 dBTP; clicks at -20 dBFS peak; mux; verify |
 | `click_sound.py` | VPS | the 50 ms wooden click, same recipe as the viewer's `playClick()` |
+| `timeline.py` | VPS | pure python: lapse spans, segment table, `remap(t)`, round windows, round boundary state machine (unit tested in `tests/test_round_recorder_timeline.py`) |
 | `arm.sh`, `collect.sh`, `status.sh` | VPS | tmux wrappers with `REC_DONE` / `MIX_DONE` markers |
+| `series.sh`, `mixer.sh`, `series-status.sh` | VPS | series mode: arm `aclrec` + `aclmix`, mix rounds in order, per-round status |
 
 Timing: the page logs `performance.timeOrigin + performance.now()` for every clip `playing`/`pause`/`ended`
 and every `AudioBufferSourceNode.start` (the click). ffmpeg prints the x11grab input start as a wall-clock
@@ -63,5 +139,6 @@ no speech budget is spent while it waits.
 
 ## Rules kept
 
-Own VPS run dir `~/acl-chess-round-rec`, own tmux session `aclrec`, own display `:97`, own tunnel port
-18770. Never touch other agents' sessions. The launcher stops only the tunnel PID it started.
+Own VPS run dir `~/acl-chess-round-rec`, own tmux sessions `aclrec` and `aclmix`, own display `:97`, own
+tunnel port 18770. Never touch other agents' sessions. The launcher stops only the tunnel PID it started.
+`-SeriesStatus`, `-CollectNew` and `-Prune` never redeploy the scripts (a live mixer must not be overwritten).
