@@ -105,31 +105,80 @@ class ThinkTimeTest(unittest.TestCase):
         self.assertTrue(seen["payload"]["stream"])
         self.assertEqual(seen["payload"]["messages"][0]["content"], sp.SYSTEM_PROMPT)
         self.assertIn("Time budget for this move: about 14 seconds", seen["payload"]["messages"][1]["content"])
-        self.assertAlmostEqual(seen["cutoff"], 2 * 600 / 44, places=3)
+        self.assertAlmostEqual(seen["cutoff"], 1.5 * 600 / 44, places=3)
         self.assertIn("/zen/go/", seen["url"])
 
-    def test_referee_plays_the_latest_best_so_far_note_at_the_cap(self):
+    def test_at_the_cap_the_model_answers_from_its_own_full_thinking_at_the_same_effort(self):
+        import chess
+        import os
+
+        os.environ.setdefault("OPENROUTER_API_KEY", "test-key")
+        client = sp.SubscriptionChessClient("openrouter-chat", lambda _m: None)
+        calls = []
+        thoughts = "Candidates: Nf3 and e4. " * 50
+
+        def fake_stream(url, payload, headers, timeout, cutoff):
+            calls.append((payload, cutoff))
+            if len(calls) == 1:
+                return {"content": "", "reasoning": thoughts, "usage": {}, "cut": True}
+            return {"content": '{"move": "Nf3", "comment": "from my analysis"}', "reasoning": "", "usage": {}, "cut": False}
+
+        client.http_stream = fake_stream
+        move, comment = client.choose_move(chess.Board(), {"wtime": 600000, "btime": 600000, "winc": 10000}, [])
+        self.assertEqual(move, "g1f3")
+        self.assertEqual(len(calls), 2)
+        follow, limit = calls[1]
+        self.assertEqual(follow["reasoning"], {"effort": "high"}, "same effort as the thinking")
+        self.assertEqual(follow["messages"][-2]["role"], "assistant")
+        self.assertIn(thoughts, follow["messages"][-2]["content"], "all of its own thinking comes back")
+        self.assertIn("time for this move is up", follow["messages"][-1]["content"])
+        self.assertEqual(limit, sp.ANSWER_WITH_THOUGHTS_SECONDS)
+        self.assertEqual(client.last_report["hurried"], 1)
+        self.assertEqual(client.last_report["tries"], 1)
+        self.assertEqual(client.last_report["illegal"], [])
+        self.assertIn("your thinking is stopped", calls[0][0]["messages"][1]["content"])
+
+    def test_lowest_effort_only_when_the_same_effort_answer_brings_no_move(self):
+        import chess
+        import os
+
+        os.environ.setdefault("OPENROUTER_API_KEY", "test-key")
+        client = sp.SubscriptionChessClient("openrouter-chat", lambda _m: None)
+        calls = []
+
+        def fake_stream(url, payload, headers, timeout, cutoff):
+            calls.append(payload)
+            if len(calls) < 3:
+                return {"content": "", "reasoning": "still weighing d4", "usage": {}, "cut": True}
+            return {"content": '{"move": "d4"}', "reasoning": "", "usage": {}, "cut": False}
+
+        client.http_stream = fake_stream
+        move, _ = client.choose_move(chess.Board(), {"wtime": 600000, "btime": 600000}, [])
+        self.assertEqual(move, "d2d4")
+        self.assertEqual([c["reasoning"]["effort"] for c in calls], ["high", "high", "low"])
+
+    def test_running_out_of_output_space_also_returns_the_thinking(self):
         import chess
         import os
 
         os.environ.setdefault("OPENCODE_GO_API_KEY", "test-key")
         client = sp.SubscriptionChessClient("opencode-go", lambda _m: None)
-        client.model = "glm-5.3"
+        client.model = "deepseek-v4.1-flash"
         calls = []
 
         def fake_stream(url, payload, headers, timeout, cutoff):
             calls.append(payload)
-            return {"content": "", "reasoning": "BEST SO FAR: e4 ... hmm BEST SO FAR: **Nf3** because", "usage": {}, "cut": True}
+            if len(calls) == 1:
+                return {"content": "", "reasoning": "x" * 200_000, "usage": {}, "cut": False, "finish": "length"}
+            return {"content": '{"move": "e4"}', "usage": {}, "cut": False}
 
         client.http_stream = fake_stream
-        move, comment = client.choose_move(chess.Board(), {"wtime": 600000, "btime": 600000, "winc": 10000}, [])
-        self.assertEqual(move, "g1f3")
-        self.assertEqual(len(calls), 1, "no second, lower-effort request")
-        self.assertEqual(client.last_report["hurried"], 1)
-        self.assertEqual(client.last_report["tries"], 1)
-        self.assertEqual(client.last_report["illegal"], [])
-        self.assertIn("BEST SO FAR", comment)
-        self.assertIn("referee plays your latest BEST SO FAR", calls[0]["messages"][1]["content"])
+        move, _ = client.choose_move(chess.Board(), {"wtime": 600000, "btime": 600000}, [])
+        self.assertEqual(move, "e2e4")
+        self.assertEqual(calls[1]["reasoning_effort"], "high")
+        returned = calls[1]["messages"][-2]["content"]
+        self.assertIn("middle of the thinking omitted", returned)
+        self.assertLess(len(returned), 130_000)
 
     def test_every_route_keeps_high_effort_and_openrouter_is_cache_sticky(self):
         import chess
@@ -198,10 +247,11 @@ class ThinkTimeTest(unittest.TestCase):
         import chess
 
         board = chess.Board()
-        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 600000), 2 * 600 / 44)
-        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 600000, 10000), 2 * (600 / 44 + 8))
-        self.assertEqual(sp.arbiter_cutoff_seconds(board, 3_600_000), 90.0)
+        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 600000), 1.5 * 600 / 44)
+        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 600000, 10000), 1.5 * (600 / 44 + 8))
+        self.assertEqual(sp.arbiter_cutoff_seconds(board, 3_600_000), 60.0)
         self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 30000), 7.5)
+
     def test_a_plan_limit_voids_instead_of_forfeiting(self):
         import chess
         import os

@@ -243,7 +243,7 @@ function gameCard(game) {
   const ev = analysisOn && data.analysis_engine ? evalFor(game, ply, moves.length) : undefined;
   const commentWho = shownMove ? `${esc(game[shownMove.side])} - ${Math.ceil(shownMove.ply / 2)}${shownMove.side === "white" ? "." : "..."} ${esc(shownMove.san)}`
     + (shownMove.tries > 1 ? ` (try ${shownMove.tries})` : "") + ` - ${(shownMove.elapsed_ms / 1000).toFixed(0)}s`
-    + (shownMove.hurried ? ` - referee played its BEST SO FAR` : "") : "No moves yet";
+    + (shownMove.hurried ? ` - thinking stopped at the cap` : "") : "No moves yet";
   const moveText = moves.map((m, i) => {
     const num = m.side === "white" ? `${Math.ceil(m.ply / 2)}.` : "";
     const cls = (i + 1 === ply ? "cur" : "") + (m.tries > 1 ? " bad" : "");
@@ -306,7 +306,7 @@ function render() {
     "Each AI picks every move itself: no tools, no code, no chess engine.",
     `${cfg.maxAttempts} replies per move; an illegal or broken reply is rejected with the reason, the third one forfeits the game.`,
     `${Math.round((cfg.timeControlMs || 0) / 60000)} minutes of model thinking time per player, ${cfg.incrementMs ? "+" + Math.round(cfg.incrementMs / 1000) + " s per move" : "no increment"}; the clock runs out = loss on time.`,
-    "Every model thinks at High effort on every move. While thinking it writes BEST SO FAR: <move>; past the move cap the referee plays its own latest note. Running out of time is never an invalid reply.",
+    "Every model thinks at High effort. Past the move cap (1.5x its time budget) its thinking stops, it gets all of that thinking back and gives its move. Running out of time is never an invalid reply.",
     "Points: 1 for a win, 0.5 for a draw, 0 for a loss or a bye.",
     "Swiss pairing: same score meets same score, no rematches, one bye each.",
     "Stockfish analysis is for viewers only: the AI players never see it.",
