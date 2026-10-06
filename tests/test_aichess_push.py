@@ -264,3 +264,52 @@ def test_run_never_crashes_on_unexpected_error(tmp_path, monkeypatch):
     except KeyboardInterrupt:
         pass
     assert any("cycle error: RuntimeError: weird" in line for line in logs)
+
+
+def last_state(http):
+    return json.loads(gzip.decompress([b for path, b, _ in http.posts if path == "/ingest/state"][-1]))
+
+
+def test_eval_track_comes_from_the_sidecar_from_whites_side(tmp_path):
+    import chess
+
+    board = chess.Board()
+    after1 = board.copy(); after1.push_san("e4")
+    after2 = after1.copy(); after2.push_san("e5")
+    sidecar = {"depth": 16, "positions": {
+        board.fen(): {"cp": 20, "best": "e2e4"},        # White to move: +20 for White
+        after1.fen(): {"cp": -35, "best": "e7e5"},      # Black to move: -35 for Black is +35 for White
+        after2.fen(): {"cp": 10000, "best": None},       # mate for the side to move (White)
+    }}
+    (tmp_path / "t-1-annotations.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    p, http, mono, _ = make(tmp_path)
+    http.state["games"]["r1b2"]["moves"] = [{"uci": "e2e4"}, {"uci": "e7e5"}]
+    p.cycle()
+    sent = json.loads(gzip.decompress(http.posts[0][1]))
+    track = sent["eval_track"]["r1b2"]
+    assert track["depth"] == 16
+    assert track["cp"] == [20, 35, 10000]
+    assert track["best"] == ["e4", "e5", ""]
+    assert sent["eval_track"]["r1b1"]["cp"] == [20]           # a game with no moves still has its start position
+
+
+def test_eval_track_fills_in_later_and_never_blocks_the_state(tmp_path):
+    import chess
+
+    p, http, mono, _ = make(tmp_path)
+    http.state["games"]["r1b2"]["moves"] = [{"uci": "e2e4"}]
+    p.cycle()                                                  # no sidecar yet: state goes out untouched
+    assert "eval_track" not in json.loads(gzip.decompress(http.posts[0][1]))
+    board = chess.Board(); board.push_san("e4")
+    side = tmp_path / "t-1-annotations.json"
+    side.write_text(json.dumps({"depth": 16, "positions": {board.fen(): {"cp": -20, "best": "e7e5"}}}), encoding="utf-8")
+    mono.now += 2
+    p.cycle()
+    track = last_state(http)["eval_track"]["r1b2"]
+    assert track["cp"] == [None, 20] and track["best"] == ["", "e5"]
+    side.write_text("{not json", encoding="utf-8")             # half-written sidecar: keep the last good scores
+    import os; os.utime(side, (1, 2))
+    mono.now += 2
+    http.state["updated_epoch_ms"] = 3
+    p.cycle()
+    assert last_state(http)["eval_track"]["r1b2"]["cp"] == [None, 20]

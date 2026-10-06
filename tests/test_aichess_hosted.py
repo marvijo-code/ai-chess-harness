@@ -60,6 +60,17 @@ class ExporterTest(unittest.TestCase):
                        "age < 90", "function stateAgeS()"):
             self.assertIn(needle, self.page, needle)
 
+    def test_commentary_is_on_by_default_and_asks_for_one_click(self):
+        self.assertIn('let commentaryOn = HOSTED ? store("swissCommentary") !== "off"', self.page)
+        self.assertIn("let needGesture = HOSTED && !(navigator.userActivation", self.page)
+        self.assertIn("Commentary is on - click anywhere to hear it", self.page)
+
+    def test_engine_analysis_also_covers_replays_and_finished_boards(self):
+        # the pusher adds data.eval_track; evalFor must read it before it gives up on /api/analyze
+        self.assertIn("function trackEval(game, ply)", self.page)
+        self.assertLess(self.page.index("const tracked = trackEval(game, ply);"), self.page.index("if (analyzeOff) return undefined;"))
+        self.assertIn('trackMate ? "" : Math.abs(a.mate)', self.page)
+
     def test_output_is_deterministic_and_has_no_long_dashes(self):
         self.assertEqual(self.page, exporter.build_page())
         for bad in (chr(0x2014), chr(0x2013)):   # em and en dash

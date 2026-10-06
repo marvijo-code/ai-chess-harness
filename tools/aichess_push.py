@@ -9,6 +9,9 @@ reached through an ssh forward tunnel (run-aichess-push.ps1 starts both):
                      at most once every 1.5 s;
   * commentary clips audio first, then metadata. On a (re)start only the newest 20
                      clips are sent, never the whole archive;
+  * eval_track       added to that state: the viewer's Stockfish score and best move for every
+                     position of every game, so the public page shows the engine on replays and
+                     finished boards too (read from <live-dir>/<id>-annotations.json);
   * thinking tails   of every live board's current ply when the size changed, at most
                      once every 2 s per board;
   * viewer version   when it changed.
@@ -73,6 +76,82 @@ def live_boards(state: dict) -> dict[str, int]:
             except (TypeError, ValueError):
                 continue
     return out
+
+
+class EvalTrack:
+    """Stockfish scores per ply for every game, from the viewer's annotations sidecar.
+
+    track[game] = {"depth", "cp": [White-side score after i plies], "best": [best move in SAN]}.
+    The sidecar scores positions from the side to move; this turns them into White's side. Scores
+    that are not known yet stay null and are filled in later. python-chess is optional: without it
+    (or without the sidecar) the state is pushed as it is.
+    """
+
+    def __init__(self):
+        self.games: dict[str, dict] = {}
+        self.sidecar_mtime: float | None = None
+        self.positions: dict[str, dict] = {}
+        self.depth = 0
+        self.tid: str | None = None
+
+    def _load(self, path: Path) -> None:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return
+        if mtime == self.sidecar_mtime:
+            return
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return                       # half-written: keep what we have
+        self.positions = saved.get("positions") or {}
+        self.depth = int(saved.get("depth") or 0)
+        self.sidecar_mtime = mtime
+
+    def build(self, state: dict, sidecar: Path) -> dict[str, dict]:
+        try:
+            import chess
+        except ImportError:
+            return {}
+        if state.get("id") != self.tid:
+            self.tid, self.games, self.sidecar_mtime, self.positions = state.get("id"), {}, None, {}
+        self._load(sidecar)
+        if not self.positions:
+            return {}
+        out: dict[str, dict] = {}
+        for gid, game in (state.get("games") or {}).items():
+            ucis = [m.get("uci") for m in (game.get("moves") or []) if isinstance(m, dict) and m.get("uci")]
+            have = self.games.get(gid)
+            if have is None or have["ucis"] != ucis[: len(have["ucis"])]:
+                board = chess.Board()
+                have = {"ucis": [], "fens": [board.fen()], "turns": [True], "board": board, "cp": [None], "best": [""]}
+                self.games[gid] = have
+            for uci in ucis[len(have["ucis"]):]:
+                try:
+                    have["board"].push_uci(uci)
+                except ValueError:
+                    break
+                have["ucis"].append(uci)
+                have["fens"].append(have["board"].fen())
+                have["turns"].append(have["board"].turn == chess.WHITE)
+                have["cp"].append(None)
+                have["best"].append("")
+            for i, fen in enumerate(have["fens"]):
+                if have["cp"][i] is not None:
+                    continue
+                rec = self.positions.get(fen)
+                if not rec or rec.get("cp") is None:
+                    continue
+                cp = int(rec["cp"])
+                have["cp"][i] = cp if have["turns"][i] else -cp
+                if rec.get("best"):
+                    try:
+                        have["best"][i] = chess.Board(fen).san(chess.Move.from_uci(rec["best"]))
+                    except ValueError:
+                        pass
+            out[gid] = {"depth": self.depth, "cp": list(have["cp"]), "best": list(have["best"])}
+        return out
 
 
 class Backoff:
@@ -148,6 +227,7 @@ class Pusher:
         self._raw_state = b""
         self._cycle_err = False
         self.pushed_fp: str | None = None
+        self.eval_track = EvalTrack()
         self.last_state_push_mono = -1e9
         self.last_state_push_epoch_ms: int | None = None
         self.state_bytes_gz = 0
@@ -272,6 +352,14 @@ class Pusher:
                 self.board_ply.clear()
             self.tid = tid
             self._load_status_seq()
+        try:
+            track = self.eval_track.build(state, self.live_dir / f"{tid}-annotations.json")
+        except Exception as exc:           # scores are a bonus: never stop publishing the state
+            self.log(f"eval track skipped: {exc.__class__.__name__}")
+            track = {}
+        if track:
+            state["eval_track"] = track
+            body = json.dumps(state, separators=(",", ":")).encode("utf-8")
         self.state = state
         self._raw_state = body
 
