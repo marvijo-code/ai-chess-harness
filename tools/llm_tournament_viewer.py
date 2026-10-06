@@ -1259,7 +1259,8 @@ function maybeRoundCard() {
     const anyDone = rg.some(g => g.status === "finished");
     const maxPly = Math.max(0, ...rg.map(g => (g.moves || []).length));
     if (anyDone || maxPly > 6) { roundCardsShown.add("round-" + cur.round); return; }   // joined mid round
-    if (stateMoving() && rg.some(g => g.status === "live")) { roundCardsShown.add("round-" + cur.round); showRoundCard("intro", cur); }
+    // The first move of the round, not its pairing: a round paired and then paused is not previewed.
+    if (stateMoving() && maxPly >= 1 && rg.some(g => g.status === "live")) { roundCardsShown.add("round-" + cur.round); showRoundCard("intro", cur); }
   }
 }
 function rcPlayer(name, extra = "") {

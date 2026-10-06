@@ -200,19 +200,21 @@ class RoundShowTest(unittest.TestCase):
                 "games": games, "standings": standings, "updated_epoch_ms": _t.time() * 1000}
 
     def test_a_new_round_gets_a_preview_with_standings_and_pairings(self):
-        event = lc.next_event(self.tournament(), {"opening"})
+        self.assertIsNone(lc.next_event(self.tournament(), {"opening"}), "paired but no move yet: wait for the first move")
+        event = lc.next_event(self.tournament(moves=1), {"opening"})
         self.assertEqual((event["key"], event["game"]), ("round-2", "r2b1"), "the leader's board carries the preview")
         self.assertIn("1. Gemini three point eight Flash 1 point (1 win, 0 draws, 0 losses)", event["facts"])
         self.assertIn("top 4 go through to the knockouts", event["facts"])
         self.assertIn("Board 2: Muse Spark one point three", event["facts"])
         self.assertIsNone(lc.next_event(self.tournament(moves=7), {"opening"}), "too far in: no late preview")
-        self.assertIsNone(lc.next_event(self.tournament(), {"opening", "round-2"}), "once per round")
+        self.assertIsNone(lc.next_event(self.tournament(moves=1), {"opening", "round-2"}), "once per round")
 
     def test_a_paused_round_is_not_previewed(self):
-        c, path = CommentaryTest().make(self.tournament())
-        state = self.tournament()
+        c, path = CommentaryTest().make(self.tournament(moves=1))
+        state = self.tournament(moves=1)
         state["updated_epoch_ms"] = 0  # the runner stopped writing: paused
         path.write_text(json.dumps(state), encoding="utf-8")
+        c._done_ply = {"r2b1": 1, "r2b2": 1}  # the move was already covered
         self.assertIsNone(c.tick())
         self.assertEqual(c.http.calls, [])
 

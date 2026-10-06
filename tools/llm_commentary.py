@@ -170,8 +170,9 @@ def _round_intro(state: dict, done: set) -> dict | None:
     live = [g for g in rgames if g.get("status") == "live"]
     if not live or any(g.get("result", "*") != "*" for g in rgames):
         return None
-    if max(len(g.get("moves") or []) for g in rgames) > INTRO_MAX_PLIES:
-        return None
+    plies = max(len(g.get("moves") or []) for g in rgames)
+    if plies < 1 or plies > INTRO_MAX_PLIES:
+        return None  # not started (paired, then paused) or joined too late
     fmt = state.get("format") or {}
     rows = {r["name"]: r for r in _table(state, 99)}
 

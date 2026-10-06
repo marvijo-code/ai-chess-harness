@@ -12,7 +12,9 @@ Usage:
   rec.py record <run_dir> --round N [--slug ID] [--port 18770] [--display 97] [--max-min 75] [--wait-change]
 
 Stop rule: every game in the round's pairings has a result (not live, not "*") AND the round status is
-"finished" (knockout rounds can grow an Armageddon decider; it is re-read every poll), then a 15 s tail.
+"finished" (knockout rounds can grow an Armageddon decider; it is re-read every poll), then a tail that
+lasts until the page has played the host's round recap and closed the results card (at least 15 s, at most
+120 s), so every round ends on its recap.
 Hard cap --max-min minutes of recording.
 """
 import argparse
@@ -189,6 +191,17 @@ def round_state(page, rnd):
     }""", rnd)
 
 
+def show_over(page, rnd):
+    """The page finished the round's closing show: recap line heard (round robin rounds), no clip playing, no card."""
+    try:
+        return bool(page.evaluate(
+            "n => { if (typeof heardEvents === 'undefined') return true;"
+            " const rr = rrRounds().some(r => r.round === n);"
+            " return (!rr || heardEvents.has('recap-' + n)) && !clipPlaying && !rcardEl && !commentaryQueue.length; }", rnd))
+    except Exception:
+        return True
+
+
 def round_done(st):
     if not st or not st["exists"] or not st["games"]:
         return False
@@ -307,14 +320,16 @@ def do_record(run, url, rnd, max_min, wait_hours, disp_no, allow_late, wait_chan
                     done_at = time.time()
                     meta["round_done_epoch"] = done_at
                     ev.write({"kind": "round_done", "py": done_at, "state": st})
-                    log("round done; 15 s tail")
+                    log("round done; tail until the recap has played (15 to 120 s)")
                 elif done_at is not None and not round_done(st):
                     done_at = None                  # an Armageddon decider was added: keep recording
                     meta.pop("round_done_epoch", None)
                     ev.write({"kind": "round_reopened", "py": time.time(), "state": st})
                     log("round reopened (new game in pairings)")
-                if done_at and time.time() - done_at >= 15:
+                if done_at and time.time() - done_at >= 15 and (time.time() - done_at >= 120 or show_over(page, rnd)):
+                    time.sleep(3)                   # let the last word ring out
                     meta["stop_reason"] = "round_done"
+                    meta["tail_seconds"] = round(time.time() - done_at, 1)
                     break
                 if time.time() - rec_start > max_min * 60:
                     meta["stop_reason"] = "max_minutes"
