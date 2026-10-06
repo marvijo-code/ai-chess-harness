@@ -1,6 +1,7 @@
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -36,6 +37,7 @@ class CommentaryTest(unittest.TestCase):
         c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=budget)
         c.http = FakeHttp()
         c.cost_async = False
+        c.gating = False
         c.always = True
         lc.time.sleep = lambda _s: None
         return c, path
@@ -99,6 +101,7 @@ class RoamingTest(unittest.TestCase):
         (tmp / "t1-annotations.json").write_text(json.dumps({"annotations": {"r1b2": {"2": "??"}}}), encoding="utf-8")
         c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=1.0)
         c.http = FakeHttp()
+        c.gating = False
         c.always = True
         lc.time.sleep = lambda _s: None
         return c
@@ -171,6 +174,7 @@ class ListenerTest(unittest.TestCase):
         c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=1.0)
         c.http = FakeHttp()
         c.cost_async = False
+        c.gating = False
         c.always = False
         self.assertIsNone(c.tick())
         self.assertEqual(c.http.calls, [])
@@ -206,7 +210,8 @@ class RoundShowTest(unittest.TestCase):
         self.assertIn("1. Gemini three point eight Flash 1 point (1 win, 0 draws, 0 losses)", event["facts"])
         self.assertIn("top 4 go through to the knockouts", event["facts"])
         self.assertIn("Board 2: Muse Spark one point three", event["facts"])
-        self.assertIsNone(lc.next_event(self.tournament(moves=7), {"opening"}), "too far in: no late preview")
+        self.assertIsNone(lc.next_event(self.tournament(moves=31), {"opening"}), "too far in: no late preview")
+        self.assertIsNotNone(lc.next_event(self.tournament(moves=20), {"opening"}), "after a results card the first minute still counts")
         self.assertIsNone(lc.next_event(self.tournament(moves=1), {"opening", "round-2"}), "once per round")
 
     def test_a_paused_round_is_not_previewed(self):
@@ -234,6 +239,9 @@ class RoundShowTest(unittest.TestCase):
         state = self.tournament(moves=8)
         c, path = CommentaryTest().make(state)
         c._done_ply = {"r2b1": 8, "r2b2": 8}  # nothing new on any board
+        c._events_done.add("round-2")
+        lc.THINK_LINES = True
+        self.addCleanup(setattr, lc, "THINK_LINES", False)
         (path.parent / "t1-r2b2-ply9.thinking.txt").write_text("I weigh Nf3 against the pin on e5. " * 20, encoding="utf-8")
         clip = c.tick()
         self.assertTrue(clip and clip.get("thinking"))
@@ -252,6 +260,150 @@ class RoundShowTest(unittest.TestCase):
         self.assertEqual(got["seq"], clip["seq"])
         self.assertGreaterEqual(got["age_s"], 0)
         self.assertLess(got["age_s"], 5)
+
+
+def real_moves(san_list):
+    """Moves as the tournament state stores them (ply, side, san, uci), replayed with python-chess."""
+    import chess
+    board, out = chess.Board(), []
+    for i, san in enumerate(san_list):
+        move = board.parse_san(san)
+        out.append({"ply": i + 1, "side": "white" if i % 2 == 0 else "black", "san": san, "uci": move.uci()})
+        board.push(move)
+    return out
+
+
+OPENING = ["e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "a6"]
+
+
+class DirectorTest(unittest.TestCase):
+    """The host only speaks for a reason; the rest is quiet (the viewer time-lapses it)."""
+
+    def make(self, moves, marks=None, positions=None, clocks=None):
+        game = {"id": "r5b1", "board": 1, "round": 5, "white": "Grok 4.7", "black": "GPT-6.1 Sol", "status": "live",
+                "result": "*", "moves": moves, "clocks": clocks or {"white": 300000, "black": 300000}}
+        state = {"id": "t1", "games": {"r5b1": game}, "standings": [
+            {"name": "Grok 4.7", "rank": 1, "points": 2, "played": 3},
+            {"name": "GPT-6.1 Sol", "rank": 6, "points": 1, "played": 3}],
+            "current_round": 5, "updated_epoch_ms": time.time() * 1000}
+        tmp = Path(tempfile.mkdtemp())
+        path = tmp / "t1-tournament.json"
+        path.write_text(json.dumps(state), encoding="utf-8")
+        (tmp / "t1-annotations.json").write_text(json.dumps({"annotations": {"r5b1": marks or {}},
+                                                              "positions": positions or {}}), encoding="utf-8")
+        c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=1.0)
+        c.http = FakeHttp()
+        c.cost_async = False
+        c.always = True
+        c._events_done.update({"opening", "round-5"})
+        lc.time.sleep = lambda _s: None
+        return c, state
+
+    def prompt(self, c):
+        return [b for p, b in c.http.calls if p == "/chat/completions"][-1]["messages"][1]["content"]
+
+    def test_a_boring_start_is_quiet_and_the_opening_is_named_once(self):
+        c, _ = self.make(real_moves(OPENING[:6]))
+        self.assertIsNone(c.tick(), "6 half-moves: nothing to say yet")
+        self.assertIsNotNone(c._quiet_since)
+        self.assertGreaterEqual(c.quiet_s(), 0.0)
+        c, _ = self.make(real_moves(OPENING))
+        clip = c.tick()
+        self.assertEqual(clip["reason"], "opening")
+        self.assertIsNone(c._quiet_since, "talking is not quiet")
+        self.assertIn("Opening moves: 1. e4 c5 2. Nf3 d6 3. d4 cxd4", self.prompt(c))
+        self.assertIn("name the opening", self.prompt(c))
+        c._busy_until = 0
+        self.assertIsNone(c.tick(), "named once; the next plies are boring")
+
+    def test_critical_blunders_are_called_out_but_folded_together(self):
+        c, _ = self.make(real_moves(OPENING), marks={"9": "??"})
+        c._said["r5b1"] = {"opening"}
+        c._done_ply["r5b1"] = 8
+        clip = c.tick()
+        self.assertEqual(clip["reason"], "blunder")
+        self.assertIn("CRITICAL MISTAKE", self.prompt(c))
+        self.assertEqual(c._last_blunder["r5b1"], 10)
+        game = {"id": "r5b1", "white": "Grok 4.7", "black": "GPT-6.1 Sol", "status": "live", "clocks": {},
+                "moves": real_moves(OPENING + ["Be3", "e5"])}
+        c._done_ply["r5b1"] = 10
+        self.assertEqual(c._board_reason("r5b1", game, {"11": "??"}, {}, {})[0], "", "2 plies after a blunder line: folded")
+        game["moves"] = real_moves(OPENING + ["Be3", "e5", "Nb3", "Be7", "f3", "O-O", "Qd2", "Nbd7"])
+        self.assertEqual(c._board_reason("r5b1", game, {"17": "?"}, {}, {})[0], "mistake", "8 plies later: a new story")
+
+    def test_endgame_decided_and_drawish_each_get_one_line(self):
+        c, _ = self.make(real_moves(OPENING))
+        moves = [{"ply": i + 1, "side": "white" if i % 2 == 0 else "black", "san": "Kf1"} for i in range(30)]
+        game = {"id": "r5b1", "white": "Grok 4.7", "black": "GPT-6.1 Sol", "status": "live", "clocks": {}, "moves": moves}
+        c._said["r5b1"] = {"opening"}
+        c._done_ply["r5b1"] = 28
+        real = lc.analyse_game
+        self.addCleanup(setattr, lc, "analyse_game", real)
+        lc.analyse_game = lambda g, pos: {"cps": [120] * 30, "material": 20}
+        self.assertEqual(c._board_reason("r5b1", game, {}, {}, {})[0], "endgame")
+        c._said["r5b1"].add("endgame")
+        lc.analyse_game = lambda g, pos: {"cps": [900] * 30, "material": 20}
+        self.assertEqual(c._board_reason("r5b1", game, {}, {}, {})[0], "decided")
+        c._said["r5b1"].add("decided")
+        self.assertEqual(c._board_reason("r5b1", game, {}, {}, {})[0], "", "decided: only critical things are said")
+        c._said["r5b1"] = {"opening", "endgame"}
+        game["moves"] = moves + moves[:14]               # 44 half-moves
+        lc.analyse_game = lambda g, pos: {"cps": [10] * 44, "material": 20}
+        c._done_ply["r5b1"] = 43
+        self.assertEqual(c._board_reason("r5b1", game, {}, {}, {})[0], "draw")
+        c._said["r5b1"].add("draw")
+        c._done_ply["r5b1"] = 0
+        self.assertEqual(c._board_reason("r5b1", game, {}, {}, {"Grok 4.7": 1})[0], "", "drawish and said: quiet")
+
+    def test_leaders_and_updates_only_after_a_silence(self):
+        c, _ = self.make(real_moves(OPENING))
+        game = {"id": "r5b1", "white": "Grok 4.7", "black": "GPT-6.1 Sol", "status": "live", "clocks": {},
+                "moves": real_moves(OPENING)}
+        c._said["r5b1"] = {"opening"}
+        ranks = {"Grok 4.7": 1, "GPT-6.1 Sol": 6}
+        c._done_ply["r5b1"] = 5                    # 5 plies since the last line
+        self.assertEqual(c._board_reason("r5b1", game, {}, {}, ranks)[0], "")
+        c._done_ply["r5b1"] = 0                    # 10 silent plies on a top-two board
+        self.assertEqual(c._board_reason("r5b1", game, {}, {}, ranks)[0], "leaders")
+        self.assertEqual(c._board_reason("r5b1", game, {}, {}, {})[0], "", "a low board waits for 20 plies")
+
+    def test_scores_are_read_from_whites_side(self):
+        import chess
+        moves = real_moves(["e4", "e5"])
+        board = chess.Board()
+        positions = {}
+        board.push_san("e4")
+        positions[board.fen()] = {"cp": -33}       # Black to move, 33 centipawns for White
+        board.push_san("e5")
+        positions[board.fen()] = {"cp": 25}        # White to move, +25 for White
+        got = lc.analyse_game({"moves": moves}, positions)
+        self.assertEqual(got["cps"], [33, 25])
+        self.assertEqual(got["material"], 62)
+        self.assertEqual(lc.band(-520), "winning for Black")
+        self.assertEqual(lc.band(40), "roughly equal")
+
+    def test_a_tour_holds_the_host_then_sums_up_what_changed(self):
+        c, state = self.make(real_moves(OPENING))
+        c._said["r5b1"] = {"opening"}
+        c._done_ply["r5b1"] = 10
+        c.tour(True)
+        self.assertTrue(c.held())
+        self.assertIsNone(c.tick())
+        self.assertEqual(c.http.calls, [])
+        state["games"]["r5b1"]["moves"] = real_moves(OPENING + ["Be3", "e5"])   # time passes
+        c.state_path.write_text(json.dumps(state), encoding="utf-8")
+        c.tour(False)
+        self.assertFalse(c.held())
+        clip = c.tick()
+        self.assertEqual(clip["event"], "tour-1")
+        self.assertIn("time-lapse tour", self.prompt(c))
+        self.assertIn("Board 1: Grok four point seven against GPT six point one Sol", self.prompt(c))
+
+    def test_a_stuck_tour_releases_the_host(self):
+        c, _ = self.make(real_moves(OPENING[:4]))
+        c.tour(True)
+        c._tour_until = time.time() - 1
+        self.assertFalse(c.held())
 
 
 if __name__ == "__main__":
