@@ -199,6 +199,18 @@ class CommentaryOffTest(unittest.TestCase):
         self.assertFalse(state["commentary"])
         self.assertEqual(state["annotations"], {})
 
+    def test_tournament_reports_how_old_the_state_is(self):
+        # A paused tournament (state not written for minutes) must not trigger the round preview card.
+        status, state = self.get("/api/tournament")
+        self.assertGreater(state["state_age_s"], 1e6, "no updated_epoch_ms = very old")
+        self.assertIsInstance(state["server_now_ms"], int)
+
+    def test_page_has_round_cards_and_a_standings_strip(self):
+        page = viewer.PAGE
+        for needle in ('id="ticker"', "function showRoundCard", "function renderTicker", "Match of the round",
+                       "data.state_age_s", "clip.got", "function clipTag"):
+            self.assertIn(needle, page)
+
     def test_start_commentator_without_module(self):
         saved = sys.modules.get("llm_commentary")
         sys.modules["llm_commentary"] = None   # makes the import fail

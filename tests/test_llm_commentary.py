@@ -35,6 +35,7 @@ class CommentaryTest(unittest.TestCase):
         path.write_text(json.dumps(state), encoding="utf-8")
         c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=budget)
         c.http = FakeHttp()
+        c.cost_async = False
         c.always = True
         lc.time.sleep = lambda _s: None
         return c, path
@@ -169,12 +170,86 @@ class ListenerTest(unittest.TestCase):
         path.write_text(json.dumps(state_with([{"ply": 1, "side": "white", "san": "e4"}])), encoding="utf-8")
         c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=1.0)
         c.http = FakeHttp()
+        c.cost_async = False
         c.always = False
         self.assertIsNone(c.tick())
         self.assertEqual(c.http.calls, [])
         c.clips_all(0)  # an unmuted page polls
         lc.time.sleep = lambda _s: None
         self.assertIsNotNone(c.tick())
+
+
+class RoundShowTest(unittest.TestCase):
+    """Every round opens with a preview and closes with a recap; quiet stretches read the live thinking."""
+
+    def tournament(self, moves=0, status="live", ended=None):
+        import time as _t
+        pairings = [{"board": 1, "white": "Gemini 3.8 Flash", "black": "Stockfish 19 (depth 4)", "game_id": "r2b1"},
+                    {"board": 2, "white": "Muse Spark 1.3", "black": "Grok 4.7", "game_id": "r2b2"}]
+        games = {p["game_id"]: {"id": p["game_id"], "round": 2, "board": p["board"], "white": p["white"],
+                                "black": p["black"], "status": status, "result": "1-0" if status == "finished" else "*",
+                                "termination": "checkmate" if status == "finished" else "", "end": ended,
+                                "moves": [{"ply": i + 1, "side": "white" if i % 2 == 0 else "black", "san": "e4"}
+                                          for i in range(moves)]} for p in pairings}
+        standings = [{"name": n, "rank": i + 1, "points": 1.0 - i * 0.5 if i < 3 else 0.0, "played": 1, "wins": 1 if i < 2 else 0,
+                      "draws": 0, "losses": 0 if i < 2 else 1}
+                     for i, n in enumerate(["Gemini 3.8 Flash", "Stockfish 19 (depth 4)", "Grok 4.7", "Muse Spark 1.3"])]
+        return {"id": "t1", "current_round": 2, "format": {"type": "round-robin+knockout", "rr_rounds": 9, "ko_size": 4},
+                "rounds": [{"round": 1, "status": "finished", "pairings": []},
+                           {"round": 2, "status": status, "pairings": pairings}],
+                "games": games, "standings": standings, "updated_epoch_ms": _t.time() * 1000}
+
+    def test_a_new_round_gets_a_preview_with_standings_and_pairings(self):
+        event = lc.next_event(self.tournament(), {"opening"})
+        self.assertEqual((event["key"], event["game"]), ("round-2", "r2b1"), "the leader's board carries the preview")
+        self.assertIn("1. Gemini three point eight Flash 1 point (1 win, 0 draws, 0 losses)", event["facts"])
+        self.assertIn("top 4 go through to the knockouts", event["facts"])
+        self.assertIn("Board 2: Muse Spark one point three", event["facts"])
+        self.assertIsNone(lc.next_event(self.tournament(moves=7), {"opening"}), "too far in: no late preview")
+        self.assertIsNone(lc.next_event(self.tournament(), {"opening", "round-2"}), "once per round")
+
+    def test_a_paused_round_is_not_previewed(self):
+        c, path = CommentaryTest().make(self.tournament())
+        state = self.tournament()
+        state["updated_epoch_ms"] = 0  # the runner stopped writing: paused
+        path.write_text(json.dumps(state), encoding="utf-8")
+        self.assertIsNone(c.tick())
+        self.assertEqual(c.http.calls, [])
+
+    def test_a_finished_round_gets_a_recap_with_a_tease(self):
+        import datetime as dt
+        state = self.tournament(status="finished", ended=dt.datetime.now().astimezone().isoformat())
+        state["rounds"].append({"round": 3, "status": "live", "pairings": [
+            {"board": 1, "white": "Grok 4.7", "black": "Gemini 3.8 Flash", "game_id": "r3b1"}]})
+        event = lc.next_event(state, {"opening"})
+        self.assertEqual(event["key"], "recap-2")
+        self.assertIn("Gemini three point eight Flash beat Stockfish at depth four (checkmate)", event["facts"])
+        self.assertIn("Next round, board 1: Grok four point seven against Gemini three point eight Flash", event["facts"])
+        old = self.tournament(status="finished", ended="2020-01-01T00:00:00+02:00")
+        self.assertIsNone(lc.next_event(old, {"opening"}), "an old round (resume after a pause) gets no recap")
+
+    def test_quiet_boards_read_out_the_live_thinking_once(self):
+        state = self.tournament(moves=8)
+        c, path = CommentaryTest().make(state)
+        c._done_ply = {"r2b1": 8, "r2b2": 8}  # nothing new on any board
+        (path.parent / "t1-r2b2-ply9.thinking.txt").write_text("I weigh Nf3 against the pin on e5. " * 20, encoding="utf-8")
+        clip = c.tick()
+        self.assertTrue(clip and clip.get("thinking"))
+        self.assertEqual(clip["ply"], 8)
+        prompt = [b for p, b in c.http.calls if p == "/chat/completions"][-1]["messages"]
+        self.assertEqual(prompt[0]["content"], lc.THINKING_PROMPT)
+        self.assertIn("the pin on e5", prompt[1]["content"])
+        self.assertIn("Muse Spark one point three (white) is thinking", prompt[1]["content"])
+        c._busy_until = c._quiet_from = 0
+        self.assertIsNone(c.tick(), "the same thinking is read out once")
+
+    def test_clips_carry_their_age_so_the_viewer_can_drop_late_ones(self):
+        c, _ = CommentaryTest().make(state_with([{"ply": 1, "side": "white", "san": "Nf3"}]))
+        clip = c.tick()
+        got = c.clips_all(0)[0]
+        self.assertEqual(got["seq"], clip["seq"])
+        self.assertGreaterEqual(got["age_s"], 0)
+        self.assertLess(got["age_s"], 5)
 
 
 if __name__ == "__main__":
