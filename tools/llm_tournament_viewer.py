@@ -450,6 +450,7 @@ body.focus-mode .boards { display: block; }
 .hosted-banner.final { color: var(--text); }
 .hosted-banner.final .dot { background: #f5b942; }
 .hosted-banner.final b { color: #ffd479; }
+.hosted-banner .hear { margin-left: 8px; padding: 2px 10px; border-radius: 999px; border: 1px solid rgba(245, 185, 66, .6); color: #ffd479; font-weight: 600; cursor: pointer; }
 /* ---- local page: is this tournament published to the hosted page? ---- */
 a.chip.pub { text-decoration: none; }
 .chip.pub.live { color: var(--ok); border-color: rgba(52, 199, 123, .45); }
@@ -504,7 +505,7 @@ const params = new URLSearchParams(location.search);
 function store(key, value) { try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (e) { /* storage blocked */ } return null; }
 let analysisOn = store("swissAnalysis") !== "off";
 let soundOn = store("swissMoveSound") !== "off";
-let commentaryOn = store("swissCommentary") === "on";
+let commentaryOn = HOSTED ? store("swissCommentary") !== "off" : store("swissCommentary") === "on";   // hosted: on unless the viewer muted it
 const replayEval = {};        // "game|ply" -> Stockfish result for replay positions
 let replayFetchAt = 0;
 const cards = new Map();      // game id -> persistent card DOM + render keys
@@ -566,7 +567,7 @@ window.addEventListener("hashchange", onHistory);
 function evalText(a) {
   if (!a) return "...";
   if (a.over) return "game over";
-  if (a.mate !== null && a.mate !== undefined) return (a.mate > 0 ? "+M" : "-M") + Math.abs(a.mate);
+  if (a.mate !== null && a.mate !== undefined) return (a.mate > 0 ? "+M" : "-M") + (a.trackMate ? "" : Math.abs(a.mate));
   if (a.cp === null || a.cp === undefined) return "...";
   return (a.cp > 0 ? "+" : "") + (a.cp / 100).toFixed(2);
 }
@@ -577,9 +578,23 @@ function whiteShare(a) {
   return 100 / (1 + Math.exp(-a.cp / 250));
 }
 let analyzeOff = false;       // /api/analyze said {"enabled": false}: no replay analysis (hosted page)
+// data.eval_track[game] = {depth, cp: [White-side score per ply], best: [best move per ply]}: the pusher
+// adds it from the viewer's annotations, so the hosted page can show the engine on every position.
+function trackEval(game, ply) {
+  const t = (data.eval_track || {})[game.id];
+  if (!t || !Array.isArray(t.cp)) return undefined;
+  const cp = t.cp[ply];
+  if (cp === null || cp === undefined) return null;
+  const b = Array.isArray(t.best) ? t.best[ply] : null;
+  const out = { track: true, engine: data.analysis_engine || data.annotation_engine || "Stockfish", depth: t.depth || 0, best: b || "" };
+  if (Math.abs(cp) >= 10000) { out.mate = cp > 0 ? 1 : -1; out.trackMate = true; } else out.cp = cp;
+  return out;
+}
 function evalFor(game, ply, total) {
   if (!analysisOn) return null;
   if (ply >= total && game.status === "live") return (data.analysis || {})[game.id] || null;
+  const tracked = trackEval(game, ply);
+  if (tracked !== undefined) return tracked;
   if (analyzeOff) return undefined;
   const key = `${game.id}|${ply}`;
   const have = replayEval[key];
@@ -878,7 +893,7 @@ function updateCard(c, game, now) {
   if (ev !== undefined) {
     const h = whiteShare(ev).toFixed(1) + "%";
     if (p.evalwhite.style.height !== h) p.evalwhite.style.height = h;
-    setHTML(p.evalline, `<span class="score">${evalText(ev)}</span><span class="pv">${ev && ev.best ? "best " + esc(ev.best) + " - " + esc(ev.pv) : (ev && ev.over ? "" : "analysing...")}</span><span class="eng">${esc((ev && ev.engine) || data.analysis_engine || "Stockfish")}${ev && ev.depth && ev.depth < 99 ? " d" + ev.depth : ""}</span>`);
+    setHTML(p.evalline, `<span class="score">${evalText(ev)}</span><span class="pv">${ev && ev.best ? "best " + esc(ev.best) + (ev.pv ? " - " + esc(ev.pv) : "") : (ev && (ev.over || ev.track) ? "" : "analysing...")}</span><span class="eng">${esc((ev && ev.engine) || data.analysis_engine || "Stockfish")}${ev && ev.depth && ev.depth < 99 ? " d" + ev.depth : ""}</span>`);
   }
   const shownMove = ply > 0 ? moves[ply - 1] : null;
   const commentWho = shownMove ? `${esc(game[shownMove.side])} - ${Math.ceil(shownMove.ply / 2)}${shownMove.side === "white" ? "." : "..."} ${esc(shownMove.san)}${nagHtml(ann[ply])}`
@@ -1407,7 +1422,8 @@ function renderBanner() {
   }
   const name = `hosted-banner ${cls}`;
   if (el.className !== name) el.className = name;
-  setHTML(el, `<span class="dot" aria-hidden="true"></span><span class="msg">${msg}</span>`);
+  const hear = data && data.commentary && commentaryOn && needGesture ? `<span class="hear">Commentary is on - click anywhere to hear it</span>` : "";
+  setHTML(el, `<span class="dot" aria-hidden="true"></span><span class="msg">${msg}</span>${hear}`);
 }
 function publishChip() {
   const p = !HOSTED && data ? data.publish : null;
@@ -1743,7 +1759,7 @@ function soundForNewMoves() {
 // The commentator picks the board itself (leaders, interesting games): clips arrive for every
 // game in one sequence. Focus mode pins it to the focused board and plays only that board.
 let caption = null;           // { game, text } shown under that board
-let needGesture = false;      // the browser blocked play(): wait for a click
+let needGesture = HOSTED && !(navigator.userActivation && navigator.userActivation.hasBeenActive);   // the browser blocks sound until a click
 const commentaryQueue = [];
 let lastSeq = 0;              // highest clip seq received (all games)
 let seqPrimed = false;        // first poll done (older clips of finished games are skipped)
