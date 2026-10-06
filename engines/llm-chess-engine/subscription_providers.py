@@ -82,6 +82,7 @@ BEST_SO_FAR = re.compile(r"BEST\s+SO\s+FAR\s*[:=\-]?\s*[*`\"']*\s*(?:\d+\s*\.+\s
 MARKER_UNSAFE = re.compile(r"[\s\[\]{};]+")
 # A plan limit, empty balance or lost login is the provider being unavailable, not a bad move:
 # the game is voided and replayed later, never forfeited (2026-10-06: OpenCode Go hit its monthly limit).
+OPENROUTER_QUANTIZATIONS = ("fp8", "fp16", "bf16", "fp32", "unknown")
 UNAVAILABLE_MARKERS = ("usagelimit", "usage limit", "usage_limit", "insufficient balance", "insufficient_quota",
                        "exceeded your current quota", "credit balance", "payment required", "not logged in",
                        "please run /login", "invalid api key", "unauthorized", "http 401", "http 402", "http 403")
@@ -212,9 +213,13 @@ def overrun_note(think_ms: int | None, cap_seconds: float | None) -> str | None:
 
 
 def latest_note(text: str, board: chess.Board) -> chess.Move | None:
-    """The model's latest `BEST SO FAR` note when it names a legal move (an illegal latest note = keep thinking)."""
-    notes = BEST_SO_FAR.findall(text or "")
-    return move_from_text(notes[-1].rstrip(".,;"), board) if notes else None
+    """The model's latest `BEST SO FAR` note that names a legal move. Words that are not moves
+    (DeepSeek wrote "write BEST SO FAR lines" while reading the rules) are skipped."""
+    for raw in reversed(BEST_SO_FAR.findall(text or "")):
+        move = move_from_text(raw.rstrip(".,;"), board)
+        if move is not None:
+            return move
+    return None
 
 
 def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejections: list[str], show_legal: bool = True,
@@ -496,8 +501,10 @@ class SubscriptionChessClient:
         if style == "openrouter":
             payload["reasoning"] = {"effort": effort or "high"}
             # Input cache: one session per engine keeps OpenRouter's sticky routing on the same
-            # provider (cache reads bill at 0.25x input for Grok). No provider order/sort: an order
-            # turns sticky routing off.
+            # provider (cache reads bill at 0.25x input for Grok; only a provider `order` turns it off).
+            # Full-quality weights only (fp4 hosts are cheapest, so they win by default) on the fastest host:
+            # the clock counts wall time (2026-10-06: DeepSeek V4.1 Flash took 78-113 s per move unsorted).
+            payload["provider"] = {"sort": "throughput", "quantizations": list(OPENROUTER_QUANTIZATIONS), "require_parameters": True}
             payload["session_id"] = self.session_id
             payload["prompt_cache_key"] = self.session_id
         elif style == "effort":

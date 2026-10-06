@@ -150,6 +150,7 @@ class ThinkTimeTest(unittest.TestCase):
         self.assertEqual(payload["session_id"], client.session_id)
         self.assertEqual(seen["headers"]["x-session-id"], client.session_id)
         self.assertNotIn("order", payload.get("provider", {}), "a provider order turns sticky cache routing off")
+        self.assertNotIn("fp4", payload["provider"]["quantizations"])
 
     def test_prompt_puts_the_append_only_part_first_for_input_caching(self):
         import chess
@@ -167,7 +168,8 @@ class ThinkTimeTest(unittest.TestCase):
 
         board = chess.Board()
         self.assertIsNone(sp.latest_note("thinking about e4 and d4", board))
-        self.assertIsNone(sp.latest_note("BEST SO FAR: Nf6", board), "an illegal latest note is not played")
+        self.assertIsNone(sp.latest_note("BEST SO FAR: Nf6", board), "an illegal note is not played")
+        self.assertEqual(sp.latest_note("BEST SO FAR: e4 ... write BEST SO FAR lines", board), chess.Move.from_uci("e2e4"))
         self.assertEqual(sp.latest_note("BEST SO FAR: 1. d4", board), chess.Move.from_uci("d2d4"))
         client = sp.SubscriptionChessClient("opencode-go", lambda _m: None)
         move, comment = client.choose_move(board, {"wtime": 0, "btime": 600000}, [])
