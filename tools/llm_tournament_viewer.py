@@ -898,7 +898,7 @@ function bkMatchHtml(m, o) {
     if (arma && m.decided_by === "armageddon") why = arma.result === "1/2-1/2" ? `Armageddon drawn: ${m.winner} goes through on Black's draw odds` : `${m.winner} won the Armageddon decider`;
   } else if (armaLive) { state = `<span class="bk-state arma">Armageddon live</span>`; why = "Game 1 drawn: colours swapped, draw = Black wins"; }
   else if (live) state = `<span class="bk-state live">Live</span>`;
-  else if (o.preview) state = `<span class="bk-state">Provisional</span>`;
+  else if (o.preview) state = `<span class="bk-state">Projected</span>`;
   else state = `<span class="bk-state">${games.length ? "Decider next" : "Up next"}</span>`;
   const shown = live || games.filter(g => (g.moves || []).length || g.status === "finished").slice(-1)[0];
   const cls = ["bk-match", o.cls || "", live ? "live" : "", armaLive ? "arma" : "", m && m.winner ? "done" : "", shown && !o.preview ? "click" : ""].filter(Boolean).join(" ");
@@ -930,9 +930,9 @@ function bracketSlots() {
     const played = rows.some(r => (r.played || 0) > 0);
     const done = (data.rounds || []).filter(r => !r.stage && r.status === "finished").length;
     const nm = i => (played && rows[i] ? rows[i].name : null);
-    out.note = played ? `Provisional: the top ${size} now, after ${done} of ${rr} rounds. Semifinals are 1 v ${size} and 2 v ${size - 1}.`
+    out.note = played ? `Projected only: who would meet if the round robin ended now (after ${done} of ${rr} rounds). It changes after every game; the real semifinals (1 v ${size}, 2 v ${size - 1}) start after round ${rr}.`
       : `The top ${size} of the round robin meet here: 1 v ${size} and 2 v ${size - 1}.`;
-    out.short = played ? `Provisional top ${size} after ${done} of ${rr} rounds` : `Top ${size} of the round robin`;
+    out.short = played ? `Projected if it ended now (after round ${done} of ${rr})` : `Top ${size} of the round robin`;
     out.sf1 = { m: null, o: { label: "Semifinal 1", preview: true, a: nm(0), b: nm(size - 1), aSeed: 1, bSeed: size, aTbd: "Seed 1", bTbd: `Seed ${size}` } };
     out.sf2 = { m: null, o: { label: "Semifinal 2", preview: true, a: nm(1), b: nm(size - 2), aSeed: 2, bSeed: size - 1, aTbd: "Seed 2", bTbd: `Seed ${size - 1}` } };
     out.fin = { m: null, o: { label: "Final", preview: true, cls: "bk-final", aTbd: "Winner of Semifinal 1", bTbd: "Winner of Semifinal 2" } };
@@ -946,7 +946,7 @@ function renderBracket() {
   if (card.hidden === !!sl) card.hidden = !sl;
   document.getElementById("side").classList.toggle("ko-first", !!(sl && sl.ko));
   if (!sl) return;
-  document.getElementById("bracketTitle").textContent = sl.ko ? "Knockout bracket" : "Road to the final";
+  document.getElementById("bracketTitle").textContent = sl.ko ? "Knockout bracket" : "Road to the final (projected)";
   const champ = sl.champion ? `<div class="bk-champ won">${crownSvg("", "bk")}<span><span class="bk-head" style="justify-content:center;margin:0">Champion</span><b>${esc(sl.champion)}</b></span></div>`
     : `<div class="bk-champ">${crownSvg("", "bk", true)}<span>Champion: to be crowned</span></div>`;
   const html = (sl.note ? `<div class="bk-note">${esc(sl.note)}</div>` : "")
@@ -966,7 +966,7 @@ function miniMatch(m, o, curId) {
   else if (armaLive) state = `<span class="arma">Armageddon live</span>`;
   else if (live) state = `<span class="live">Live</span>`;
   else if (arma) state = `<span class="arma">Armageddon next</span>`;
-  else state = `<span>${o.preview ? "Provisional" : (games.length ? "Decider next" : "Up next")}</span>`;
+  else state = `<span>${o.preview ? "Projected" : (games.length ? "Decider next" : "Up next")}</span>`;
   const shown = live || games.filter(g => (g.moves || []).length || g.status === "finished").slice(-1)[0];
   const here = !!curId && games.some(g => g.id === curId);
   const click = shown && !o.preview && shown.id !== curId;
@@ -986,7 +986,7 @@ function miniBracketHtml(curId) {
   if (!sl) return "";
   const champ = sl.champion ? `<div class="mb-m mb-champ won">${crownSvg("", "mb")}<span class="mb-h"><span class="t">Champion</span></span><b>${esc(sl.champion)}</b></div>`
     : `<div class="mb-m mb-champ">${crownSvg("", "mb", true)}<span class="mb-h"><span class="t">Champion</span></span><span class="tbd">To be crowned</span></div>`;
-  return `<div class="mb-title"><span>${sl.ko ? "Knockout bracket" : "Road to the final"}</span>${sl.short ? `<span class="mb-note">${esc(sl.short)}</span>` : ""}</div><div class="mb-grid">`
+  return `<div class="mb-title"><span>${sl.ko ? "Knockout bracket" : "Road to the final (projected)"}</span>${sl.short ? `<span class="mb-note">${esc(sl.short)}</span>` : ""}</div><div class="mb-grid">`
     + miniMatch(sl.sf1.m, sl.sf1.o, curId) + miniMatch(sl.sf2.m, sl.sf2.o, curId) + miniMatch(sl.fin.m, sl.fin.o, curId)
     + (sl.third ? miniMatch(sl.third.m, sl.third.o, curId) : "") + champ + `</div>`;
 }
