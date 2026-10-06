@@ -104,8 +104,11 @@ class ThinkTimeTest(unittest.TestCase):
         self.assertEqual(seen["payload"]["thinking"], {"type": "enabled"})
         self.assertTrue(seen["payload"]["stream"])
         self.assertEqual(seen["payload"]["messages"][0]["content"], sp.SYSTEM_PROMPT)
-        self.assertIn("Time budget for this move: about 14 seconds", seen["payload"]["messages"][1]["content"])
-        self.assertAlmostEqual(seen["cutoff"], 1.5 * 600 / 44, places=3)
+        text, image = seen["payload"]["messages"][1]["content"]
+        self.assertIn("Time budget for this move: about 14 seconds", text["text"])
+        self.assertIn("8 r n b q k b n r 8", text["text"], "FEN diagram with coordinates")
+        self.assertTrue(image["image_url"]["url"].startswith("data:image/png;base64,"), "board image every turn")
+        self.assertAlmostEqual(seen["cutoff"], sp.THINK_SHARE * 1.5 * 600 / 44, places=3)
         self.assertIn("/zen/go/", seen["url"])
 
     def test_at_the_cap_the_model_answers_from_its_own_full_thinking_at_the_same_effort(self):
@@ -132,11 +135,11 @@ class ThinkTimeTest(unittest.TestCase):
         self.assertEqual(follow["messages"][-2]["role"], "assistant")
         self.assertIn(thoughts, follow["messages"][-2]["content"], "all of its own thinking comes back")
         self.assertIn("time for this move is up", follow["messages"][-1]["content"])
-        self.assertEqual(limit, sp.ANSWER_WITH_THOUGHTS_SECONDS)
+        self.assertAlmostEqual(limit, sp.SAME_SHARE * sp.arbiter_cutoff_seconds(chess.Board(), 600000, 10000))
         self.assertEqual(client.last_report["hurried"], 1)
         self.assertEqual(client.last_report["tries"], 1)
         self.assertEqual(client.last_report["illegal"], [])
-        self.assertIn("your thinking is stopped", calls[0][0]["messages"][1]["content"])
+        self.assertIn("your thinking is stopped", calls[0][0]["messages"][1]["content"][0]["text"])
 
     def test_lowest_effort_only_when_the_same_effort_answer_brings_no_move(self):
         import chess
@@ -248,7 +251,9 @@ class ThinkTimeTest(unittest.TestCase):
 
         board = chess.Board()
         self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 600000), 1.5 * 600 / 44)
-        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 600000, 10000), 1.5 * (600 / 44 + 8))
+        self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 600000, 10000), 1.5 * 600 / 44 + 9)
+        # Cut on every move and still sustainable: near an empty clock the cap stays under the increment.
+        self.assertLess(sp.arbiter_cutoff_seconds(board, 20000, 10000), 10)
         self.assertEqual(sp.arbiter_cutoff_seconds(board, 3_600_000), 60.0)
         self.assertAlmostEqual(sp.arbiter_cutoff_seconds(board, 30000), 7.5)
 
@@ -277,6 +282,38 @@ class ThinkTimeTest(unittest.TestCase):
         import chess
 
         self.assertIn("Decide faster", sp.build_prompt(chess.Board(), {}, [], [], nudge=note))
+
+
+class BoardViewTest(unittest.TestCase):
+    def test_diagram_has_coordinates_and_matches_the_fen(self):
+        import chess
+
+        board = chess.Board()
+        board.push_san("e4")
+        rows = sp.board_diagram(board).splitlines()
+        self.assertEqual(rows[0], "  a b c d e f g h")
+        self.assertEqual(rows[5], "4 . . . . P . . . 4")
+        self.assertEqual(rows[1], "8 r n b q k b n r 8")
+
+    def test_board_image_is_a_png(self):
+        import chess
+
+        png = sp.board_png(chess.Board())
+        self.assertTrue(png.startswith(b"\x89PNG"))
+        self.assertGreater(len(png), 5000)
+
+
+class StockfishPlayerTest(unittest.TestCase):
+    def test_fixed_depth_go_and_comment(self):
+        import play_llm_series as series
+
+        engine = series.LlmEngine.__new__(series.LlmEngine)
+        engine.is_uci, engine.player = True, {"depth": 4}
+        self.assertEqual(engine.go_command(600000, 600000, 10000), "go depth 4")
+        engine.is_uci = False
+        self.assertEqual(engine.go_command(1, 2, 3), "go wtime 1 btime 2 winc 3 binc 3")
+        lines = ["info depth 4 seldepth 6 multipv 1 score cp -35 nodes 900 pv e7e5 g1f3", "bestmove e7e5"]
+        self.assertIn("-0.35", swiss.uci_comment(lines, {"depth": 4}))
 
 
 if __name__ == "__main__":

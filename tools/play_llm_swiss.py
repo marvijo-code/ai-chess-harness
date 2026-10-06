@@ -301,6 +301,18 @@ def wait_bestmove(engine: LlmEngine, timeout: float, on_clockstart) -> list[str]
             engine.cond.wait(min(left, 1.0))
 
 
+def uci_comment(lines: list[str], player: dict) -> str:
+    """A UCI engine has no words: show its search depth and evaluation instead."""
+    for line in reversed(lines):
+        parts = line.split()
+        if parts[:1] == ["info"] and "score" in parts and "depth" in parts:
+            depth = parts[parts.index("depth") + 1]
+            kind, value = parts[parts.index("score") + 1], parts[parts.index("score") + 2]
+            score = f"mate in {value}" if kind == "mate" else f"{int(value) / 100:+.2f}"
+            return f"Engine search at depth {depth}, evaluation {score} for the side to move."
+    return f"Engine move at depth {player.get('depth', '?')}."
+
+
 def kill_engine_tree(engine: LlmEngine) -> None:
     if os.name == "nt":
         import subprocess
@@ -379,7 +391,7 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
         engine = white if side == chess.WHITE else black
         started = time.time()
         publish(side, None)  # clock frozen until the model actually starts thinking
-        go_line = f"go wtime {clocks[chess.WHITE]} btime {clocks[chess.BLACK]} winc {increment} binc {increment}"
+        go_line = engine.go_command(clocks[chess.WHITE], clocks[chess.BLACK], increment)
         position = "position startpos" + (" moves " + " ".join(history) if history else "")
         wait = clocks[side] / 1000 + FLAG_GRACE_SECONDS
 
@@ -402,6 +414,8 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
             uci, lines = "0000", [f"info string engine failure: {exc}"]
         wall_ms = int((time.time() - started) * 1000)
         comment, tries, illegal = parse_info(lines)
+        if engine.is_uci and not comment:
+            comment = uci_comment(lines, engine.player)
         think_ms = parse_think_ms(lines)
         # The chess clock charges model thinking time; wall time only when the engine did not report it.
         elapsed_ms = wall_ms if think_ms is None else min(wall_ms, think_ms)
@@ -469,7 +483,7 @@ def preflight(players: list[dict], cfg: dict, log) -> list[str]:
             engine = LlmEngine(player, cfg)
             engine.new_game()
             engine.send("position startpos moves e2e4")
-            engine.send(f"go wtime {cfg['timeControlMs']} btime {cfg['timeControlMs']}")
+            engine.send(engine.go_command(cfg["timeControlMs"], cfg["timeControlMs"], cfg["incrementMs"]))
             lines = engine.wait_for("bestmove", engine.move_budget_seconds())
             uci = lines[-1].split()[1]
             board = chess.Board()
