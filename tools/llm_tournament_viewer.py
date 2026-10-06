@@ -373,6 +373,19 @@ body.focus-mode .boards { display: block; }
 @media (max-width: 1100px) { .ticker:not(:empty) { display: flex; } }
 @media (max-width: 1279px) { body.focus-mode .ticker:not(:empty) { display: flex; } }
 @media (max-width: 520px) { .ticker { padding: 6px 16px; } }
+/* ---- time-lapse tour ribbon: shown while the page visits every board (the recorder speeds this span up) ---- */
+.lapse { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 12px;
+  padding: 8px 18px; border-radius: 999px; background: rgba(14, 16, 19, .94); border: 1px solid rgba(245, 185, 66, .75);
+  box-shadow: 0 0 26px rgba(245, 185, 66, .25); font-size: 16px; font-weight: 700; letter-spacing: .06em; color: #ffd479; white-space: nowrap; max-width: calc(100vw - 24px); }
+.lapse[hidden] { display: none; }
+.lapse .ff { font-size: 22px; line-height: 1; letter-spacing: -.12em; animation: lapse-run 1s linear infinite; }
+@keyframes lapse-run { 0% { opacity: .35; } 50% { opacity: 1; } 100% { opacity: .35; } }
+.lapse .of { font-weight: 600; color: var(--text); letter-spacing: 0; }
+.lapse .names { font-weight: 600; color: var(--muted); letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; max-width: 38vw; }
+.lapse .bar { width: 90px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .14); overflow: hidden; flex: none; }
+.lapse .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #f5b942); }
+@media (max-width: 700px) { .lapse { font-size: 13px; gap: 8px; padding: 6px 12px; } .lapse .names { display: none; } .lapse .bar { width: 50px; } }
+@media (prefers-reduced-motion: reduce) { .lapse .ff { animation: none; } }
 /* ---- round preview and round results: a full-screen card at the start and end of every round ---- */
 .rcard { position: fixed; inset: 0; z-index: 58; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: clamp(10px, 2.2vh, 24px);
   padding: clamp(16px, 4vh, 48px) clamp(16px, 4vw, 64px); overflow-y: auto; cursor: pointer;
@@ -449,6 +462,7 @@ body.focus-mode .boards { display: block; }
     <div class="card"><h2>Rules</h2><ul class="rules" id="rules"></ul></div>
   </aside>
 </main>
+<div class="lapse" id="lapse" hidden role="status" aria-live="off"></div>
 <div class="champ-overlay" id="champOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="champName"><canvas id="confetti"></canvas><div class="champ-card" id="champCard"></div></div>
 <script>
 const GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
@@ -1162,7 +1176,7 @@ function clipDriven(now) {
 }
 let focusLiveAt = 0;          // last time the auto-focused game was seen live (a finished game stays up a while)
 function autoTick(force) {
-  if (!autoFocus || !data || !data.games) return;
+  if (!autoFocus || !data || !data.games || tour) return;
   const now = Date.now();
   if (clipDriven(now)) { autoReason = "following the commentary"; return; }   // the commentary picks the board
   const live = Object.values(data.games).filter(g => g.status === "live");
@@ -1222,13 +1236,98 @@ function hideIntro() {
   setTimeout(() => el.remove(), 380);
 }
 
+// ---- director: time-lapse tours of every board ---------------------------------------------------
+// The host only speaks when something matters. After TOUR_QUIET_S seconds without a line, or every
+// TOUR_EVERY_MS, the page visits every live board for TOUR_DWELL_MS each under a "time lapse" ribbon
+// (the recorder plays these spans TOUR_SPEED times faster), the host is held, and afterwards it sums up
+// what changed. Events for the recorder go out as "acl-director" window events.
+// ?tourDwell=<ms>&tourEvery=<ms> shorten the tour for testing.
+const TOUR_SPEED = 10, TOUR_DWELL_MS = Number(params.get("tourDwell")) || 30000, TOUR_EVERY_MS = Number(params.get("tourEvery")) || 360000;
+const TOUR_QUIET_S = 18, TOUR_MIN_BOARDS = 3;
+const TOUR_PENDING_MAX_MS = 45000;
+let tour = null;               // { ids, i, dwellAt, why }
+let tourPending = false;       // a tour is due: the line playing now finishes, then the tour starts
+let tourPendingAt = 0;
+let lastTourEnd = 0;
+let roundSeen = null, roundSeenAt = Date.now();
+let quietS = 0;                // seconds the host reports it has had nothing to say
+function director(detail) {
+  try { window.dispatchEvent(new CustomEvent("acl-director", { detail })); } catch (e) { /* ignore */ }
+}
+function tourBoards() {
+  return Object.values(data.games || {}).filter(g => g.status === "live" && (g.moves || []).length > 0)
+    .sort((a, b) => (a.board || 0) - (b.board || 0)).map(g => g.id);
+}
+function tourReady() {
+  return autoFocus && !(focusId && focusPinned) && !introEl && !rcardEl && !needGesture && document.getElementById("champOverlay").hidden;
+}
+function directorTick() {
+  if (!data || !data.id) return;
+  if (data.current_round !== roundSeen) { roundSeen = data.current_round; roundSeenAt = Date.now(); }
+  if (tour) { runTour(); return; }
+  const ids = tourBoards();
+  if (!tourReady() || ids.length < TOUR_MIN_BOARDS || !stateMoving()) { tourPending = false; return; }
+  const now = Date.now();
+  const due = now - Math.max(lastTourEnd, roundSeenAt) >= TOUR_EVERY_MS;
+  const quiet = !!(data.commentary && commentaryOn) && quietS >= TOUR_QUIET_S && !clipPlaying && !commentaryQueue.length;
+  if (!due && !quiet) { tourPending = false; return; }
+  if (clipPlaying) {                                       // let the line finish; no new line starts meanwhile
+    if (!tourPending) { tourPending = true; tourPendingAt = now; }
+    if (now - tourPendingAt < TOUR_PENDING_MAX_MS) return;
+  }
+  startTour(ids, quiet ? "quiet" : "due");
+}
+function startTour(ids, why) {
+  tour = { ids, i: 0, dwellAt: Date.now(), why };
+  tourPending = false;
+  fetch("/api/commentary/tour?on=1", { method: "POST", cache: "no-store" }).catch(() => {});
+  director({ k: "tour", a: "start", speed: TOUR_SPEED, boards: ids, why });
+  tourShow(0);
+}
+function tourShow(i) {
+  tour.i = i;
+  tour.dwellAt = Date.now();
+  const id = tour.ids[i];
+  autoReason = "time lapse tour";
+  lastAutoSwitch = Date.now();
+  setFocus(id, { auto: true });
+  director({ k: "tour", a: "board", game: id, n: i + 1, of: tour.ids.length });
+  renderRibbon();
+}
+function runTour() {
+  if (!tourReady()) { endTour("interrupted"); return; }
+  if (Date.now() - tour.dwellAt < TOUR_DWELL_MS) { renderRibbon(); return; }
+  let i = tour.i + 1;
+  while (i < tour.ids.length && (data.games[tour.ids[i]] || {}).status !== "live") i++;
+  if (i >= tour.ids.length) { endTour("done"); return; }
+  tourShow(i);
+}
+function endTour(why) {
+  if (!tour) return;
+  tour = null;
+  lastTourEnd = Date.now();
+  lastAutoSwitch = 0;
+  fetch("/api/commentary/tour?on=0", { method: "POST", cache: "no-store" }).catch(() => {});
+  director({ k: "tour", a: "end", why });
+  renderRibbon();
+}
+function renderRibbon() {
+  const el = document.getElementById("lapse");
+  if (!tour) { el.hidden = true; return; }
+  const g = (data.games || {})[tour.ids[tour.i]] || {};
+  const pct = Math.min(100, (Date.now() - tour.dwellAt) / TOUR_DWELL_MS * 100);
+  el.hidden = false;
+  setHTML(el, `<span class="ff">&raquo;&raquo;</span><span>TIME LAPSE x${TOUR_SPEED}</span><span class="of">Board ${tour.i + 1} of ${tour.ids.length}</span>`
+    + `<span class="names">${esc(g.white || "")} vs ${esc(g.black || "")}</span><span class="bar"><i style="width:${pct.toFixed(0)}%"></i></span>`);
+}
+
 // ---- round preview and round results ---------------------------------------------------------
 // Every round robin round opens with a preview card (pairings, the match of the round, the table)
 // and closes with a results card (results, the new table, the next round's headline match). The
 // card waits up to 25 s for the host's matching line (round-N / recap-N) and stays while it plays.
 const roundCardForced = (location.hash.match(/(?:^#|[#&])round-(intro|results)\b/) || [])[1] || "";
 const roundCardsShown = new Set();
-let rcardEl = null, rcardKey = "", rcardTimer = null, rcardShownAt = 0;
+let rcardEl = null, rcardKey = "", rcardTimer = null, rcardShownAt = 0, rcardMode = "", rcardRound = 0;
 const RCARD_MIN_MS = 11000, RCARD_WAIT_MS = 25000, RCARD_MAX_MS = 55000;
 const heardEvents = new Set();   // host lines (event keys) that started playing on this page
 let serverSkewMs = 0;         // server clock minus this page's clock
@@ -1237,6 +1336,7 @@ function stateMoving() { return typeof data.state_age_s === "number" ? data.stat
 function maybeRoundCard() {
   if (!data || !data.id || introEl || rcardEl) return;
   const games = data.games || {}, rr = rrRounds();
+  const tourOnly = !!tour;           // a tour in progress gives way to a results card, never to a preview
   const cur = rr.find(r => r.round === data.current_round);
   if (roundCardForced && !roundCardsShown.has("forced")) {
     roundCardsShown.add("forced");
@@ -1251,17 +1351,64 @@ function maybeRoundCard() {
   if (last && !roundCardsShown.has("recap-" + last.round)) {
     const ends = (last.pairings || []).map(p => Date.parse((games[p.game_id] || {}).end || "")).filter(x => !isNaN(x));
     const ago = ends.length ? Date.now() + serverSkewMs - Math.max(...ends) : Infinity;
-    if (ago < 300000 && polls > 1) { roundCardsShown.add("recap-" + last.round); showRoundCard("results", last); return; }
+    if (ago < 300000 && polls > 1) { roundCardsShown.add("recap-" + last.round); endTour("round over"); showRoundCard("results", last); return; }
     if (ago >= 300000) roundCardsShown.add("recap-" + last.round);
   }
   if (cur && cur.round > 1 && !roundCardsShown.has("round-" + cur.round)) {
     const rg = (cur.pairings || []).map(p => games[p.game_id] || {});
     const anyDone = rg.some(g => g.status === "finished");
     const maxPly = Math.max(0, ...rg.map(g => (g.moves || []).length));
-    if (anyDone || maxPly > 6) { roundCardsShown.add("round-" + cur.round); return; }   // joined mid round
+    if (anyDone || maxPly > 30) { roundCardsShown.add("round-" + cur.round); return; }   // joined mid round
+    if (tourOnly) return;
     // The first move of the round, not its pairing: a round paired and then paused is not previewed.
-    if (stateMoving() && maxPly >= 1 && rg.some(g => g.status === "live")) { roundCardsShown.add("round-" + cur.round); showRoundCard("intro", cur); }
+    if (stateMoving() && maxPly >= 1 && rg.some(g => g.status === "live")) { roundCardsShown.add("round-" + cur.round); showRoundCard("intro", cur); return; }
   }
+  maybeKoCard();
+}
+// Knockouts: one card when the semifinals start and one for the final (and third place game).
+function maybeKoCard() {
+  const k = ko(), stage = data.stage;
+  if (!k || (stage !== "semifinals" && stage !== "final") || roundCardsShown.has("ko-" + stage) || tour) return;
+  const games = data.games || {};
+  const ms = (k.matches || []).filter(m => m.stage === stage);
+  const gs = ms.flatMap(m => m.games || []).map(id => games[id] || {});
+  if (!gs.length) return;
+  const maxPly = Math.max(0, ...gs.map(g => (g.moves || []).length));
+  if (maxPly < 1 && gs.every(g => g.status !== "finished")) return;       // wait for the first move
+  roundCardsShown.add("ko-" + stage);
+  if (maxPly <= 30 && stateMoving() && gs.some(g => g.status === "live") && !gs.some(g => g.status === "finished")) showKoCard(stage, ms);
+}
+function fmtClock(ms) { const s = Math.round((ms || 0) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
+function showKoCard(stage, ms) {
+  const k = ko(), cfg = data.config || {};
+  const seed = n => (k.seeds || []).find(x => x.name === n) || {};
+  const pl = n => `${esc(n)}<small>${seed(n).seed ? `Seed ${esc(seed(n).seed)} - ${esc(seed(n).points)} pts` : ""}</small>`;
+  const rows = ms.map((m, i) => `<div class="rc-m${m.id === "final" ? " star" : ""}" style="--i:${i}">`
+    + (m.id === "final" ? `<span class="tag">For the crown</span>` : "")
+    + `<span class="bd">${esc(m.label || m.id)}</span><span class="pl">${pl(m.a)}</span><span class="vs">vs</span><span class="pl b">${pl(m.b)}</span></div>`).join("");
+  const arma = `Lose and you are out. A drawn game goes to an Armageddon decider: White gets ${fmtClock(cfg.armageddonWhiteMs || 600000)}, `
+    + `Black gets ${fmtClock(cfg.armageddonBlackMs || 450000)}, and a draw sends Black through.`;
+  const head = stage === "semifinals" ? `<span>Semifinals</span>` : `<span>The</span> <span class="gold">final</span>`;
+  const el = document.createElement("div");
+  el.className = "rcard";
+  el.dataset.rcard = "ko";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", "Knockout stage, click or press Escape to skip");
+  el.style.setProperty("--dur", RCARD_MIN_MS / 1000 + "s");
+  el.innerHTML = `<div class="rc-kicker">${esc(stage === "semifinals" ? "The round robin is over. The knockouts begin" : "One game for the crown")}</div><h2 class="rc-head">${head}</h2>`
+    + `<div class="rc-sub">${esc(arma)}</div>`
+    + `<div class="rc-body"><div class="rc-col"><h3>${stage === "semifinals" ? "The matches" : "The games"}</h3>${rows}</div>`
+    + `<div class="rc-col"><h3>Round robin table (final)</h3>${rcTable(null)}</div></div>`
+    + `<div class="rc-skip">Click or press Esc to skip</div><div class="rc-bar"></div>`;
+  document.body.appendChild(el);
+  rcardEl = el;
+  rcardKey = stage === "semifinals" ? "knockouts" : "final";
+  rcardMode = "ko";
+  rcardRound = data.current_round;
+  rcardShownAt = Date.now();
+  director({ k: "rcard", a: "show", mode: "ko", round: rcardRound });
+  clearTimeout(rcardTimer);
+  rcardTimer = setTimeout(tickRoundCard, RCARD_MIN_MS);
 }
 function rcPlayer(name, extra = "") {
   const r = standingRow(name);
@@ -1330,7 +1477,10 @@ function showRoundCard(mode, rnd) {
   document.body.appendChild(el);
   rcardEl = el;
   rcardKey = (mode === "intro" ? "round-" : "recap-") + rnd.round;
+  rcardMode = mode;
+  rcardRound = rnd.round;
   rcardShownAt = Date.now();
+  director({ k: "rcard", a: "show", mode, round: rnd.round });
   clearTimeout(rcardTimer);
   rcardTimer = setTimeout(tickRoundCard, RCARD_MIN_MS);
 }
@@ -1348,6 +1498,7 @@ function hideRoundCard() {
   clearTimeout(rcardTimer);
   const el = rcardEl;
   rcardEl = null;
+  director({ k: "rcard", a: "hide", mode: rcardMode, round: rcardRound });
   el.classList.add("leaving");
   setTimeout(() => el.remove(), 380);
 }
@@ -1387,12 +1538,14 @@ function showChampion(animate) {
   document.getElementById("champCard").innerHTML = champHtml(k);
   ov.classList.toggle("play", !!animate);
   ov.hidden = false;
+  director({ k: "champion", a: "show" });
   stopConfetti();
   let still = false;
   try { still = matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { /* old browser */ }
   if (animate && !still) startConfetti();
 }
 function hideChampion() {
+  if (!document.getElementById("champOverlay").hidden) director({ k: "champion", a: "hide" });
   document.getElementById("champOverlay").hidden = true;
   stopConfetti();
 }
@@ -1571,6 +1724,7 @@ function clipDone() {
 }
 function playNextClip() {
   if (clipPlaying || needGesture || !commentaryOn) return;
+  if (tour || tourPending) return;                      // the host waits for the time-lapse tour
   while (commentaryQueue.length) {
     const clip = commentaryQueue.shift();
     if (!clipWanted(clip)) continue;
@@ -1610,6 +1764,7 @@ async function pollCommentary() {
     const res = await fetch(`/api/commentary?after=${lastSeq}`, { cache: "no-store" });
     if (!res.ok) return;
     const j = await res.json();
+    quietS = Number(j.quiet_s) || 0;                    // seconds the host has had nothing worth saying
     const clips = (j.clips || []).filter(c => typeof c.seq === "number" && c.seq > lastSeq && c.game).sort((a, b) => a.seq - b.seq);
     for (const [i, clip] of clips.entries()) {
       lastSeq = clip.seq;
@@ -1720,6 +1875,7 @@ async function poll() {
       autoTick(false);
       maybeIntro();
       maybeRoundCard();
+      directorTick();
       checkChampion();
     }
   } catch (e) { /* keep the last frame */ }
@@ -2003,6 +2159,11 @@ class Annotator:
             games = self.games.get(Path(state_path)) or {}
             return {gid: annotate_plies(g["uci"], [known.get(f) for f in g["fens"]]) for gid, g in games.items()}
 
+    def known(self, state_path: Path) -> dict:
+        """Every analysed position so far: {fen: {"cp", "second", "best", "over"}} (a copy)."""
+        with self.lock:
+            return dict(self.positions.get(Path(state_path)) or {})
+
     def progress(self, state_path: Path) -> dict:
         with self.lock:
             known = self.positions.get(Path(state_path)) or {}
@@ -2223,6 +2384,18 @@ class Handler(BaseHTTPRequestHandler):
             self.rfile.read(min(length, 65536))
         if url.path == "/api/commentary/focus":
             self._commentary_focus(url)
+        elif url.path == "/api/commentary/tour":
+            on = (parse_qs(url.query).get("on") or ["0"])[0] in {"1", "true", "yes"}
+            tour = getattr(self.commentator, "tour", None) if self.commentator is not None else None
+            if tour is None:
+                self._json({"enabled": False})
+                return
+            try:
+                tour(on)
+            except Exception as exc:
+                self._json({"enabled": True, "error": str(exc)})
+                return
+            self._json({"enabled": True, "tour": on})
         else:
             self._send(404, b"not found", "text/plain")
 
@@ -2336,7 +2509,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._json({"enabled": True, "clips": [], "error": str(exc)})
                 return
-            self._json({"enabled": True, "clips": clips})
+            quiet = getattr(self.commentator, "quiet_s", None)
+            held = getattr(self.commentator, "held", None)
+            self._json({"enabled": True, "clips": clips, "quiet_s": quiet() if quiet else 0, "held": bool(held()) if held else False})
         elif url.path.startswith("/api/commentary/audio/"):
             name = unquote(url.path[len("/api/commentary/audio/"):])
             if self.commentator is None or not safe_audio_name(name):
@@ -2387,6 +2562,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"analysis off: engine not found at {args.engine}", flush=True)
     if args.commentary:
         Handler.commentator = start_commentator(Handler.state_path or newest_state(Handler.live_dir))
+        if Handler.commentator is not None and Handler.annotator is not None:
+            sp = Handler.state_path or newest_state(Handler.live_dir)
+            Handler.commentator.marks_provider = lambda: Handler.annotator.annotations(sp)
+            Handler.commentator.positions_provider = lambda: Handler.annotator.known(sp)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"tournament viewer on http://{args.host}:{args.port}/", flush=True)
     server.serve_forever()

@@ -208,7 +208,8 @@ class CommentaryOffTest(unittest.TestCase):
     def test_page_has_round_cards_and_a_standings_strip(self):
         page = viewer.PAGE
         for needle in ('id="ticker"', "function showRoundCard", "function renderTicker", "Match of the round",
-                       "data.state_age_s", "clip.got", "function clipTag"):
+                       "data.state_age_s", "clip.got", "function clipTag", "function startTour", "TIME LAPSE x",
+                       "acl-director", "function showKoCard", "/api/commentary/tour"):
             self.assertIn(needle, page)
 
     def test_start_commentator_without_module(self):
@@ -258,6 +259,11 @@ class CommentaryOnTest(unittest.TestCase):
                     Fake.focused = game_id
                     Fake.calls.append((game_id, pinned))
 
+                tours = []
+
+                def tour(self, on):
+                    Fake.tours.append(on)
+
             class H(viewer.Handler):
                 pass
 
@@ -269,7 +275,7 @@ class CommentaryOnTest(unittest.TestCase):
                 with urllib.request.urlopen(base + "/api/commentary?game=r1b1&after=0", timeout=5) as res:
                     self.assertEqual(json.loads(res.read())["clips"][0]["seq"], 1)
                 with urllib.request.urlopen(base + "/api/commentary?game=r1b1&after=1", timeout=5) as res:
-                    self.assertEqual(json.loads(res.read()), {"enabled": True, "clips": []})
+                    self.assertEqual(json.loads(res.read()), {"enabled": True, "clips": [], "quiet_s": 0, "held": False})
                 with urllib.request.urlopen(base + "/api/commentary/audio/c1.mp3", timeout=5) as res:
                     self.assertEqual(res.headers["Content-Type"], "audio/mpeg")
                     self.assertEqual(res.read(), b"ID3fake")
@@ -295,6 +301,12 @@ class CommentaryOnTest(unittest.TestCase):
                     urllib.request.urlopen(req, timeout=5)
                 self.assertEqual(ctx.exception.code, 400)
                 self.assertEqual(len(Fake.calls), 2)
+                # The viewer starts and ends a time-lapse tour: the host is held, then sums up.
+                for on, want in (("1", True), ("0", False)):
+                    req = urllib.request.Request(base + f"/api/commentary/tour?on={on}", method="POST", data=b"")
+                    with urllib.request.urlopen(req, timeout=5) as res:
+                        self.assertEqual(json.loads(res.read()), {"enabled": True, "tour": want})
+                self.assertEqual(Fake.tours, [True, False])
             finally:
                 server.shutdown()
                 server.server_close()
