@@ -116,7 +116,10 @@ def engine_env(player: dict, cfg: dict) -> dict[str, str]:
         "LLM_MAX_ATTEMPTS": str(cfg["maxAttempts"]),
         "LLM_ATTEMPT_TIMEOUT_SECONDS": str(cfg["attemptTimeoutSeconds"]),
         "LLM_SHOW_LEGAL_MOVES": "true" if cfg["showLegalMoves"] else "false",
+        "LLM_BOARD_IMAGE": "false" if player.get("image") is False else "true",
     }
+    if player.get("maxPrice"):
+        env["LLM_MAX_PRICE"] = json.dumps(player["maxPrice"])
     if player["provider"] == "openrouter":
         env.update({
             "OPENROUTER_MODEL": player["model"],

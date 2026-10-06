@@ -97,7 +97,8 @@ MARKER_UNSAFE = re.compile(r"[\s\[\]{};]+")
 OPENROUTER_QUANTIZATIONS = ("fp8", "fp16", "bf16", "fp32", "unknown")
 UNAVAILABLE_MARKERS = ("usagelimit", "usage limit", "usage_limit", "insufficient balance", "insufficient_quota",
                        "exceeded your current quota", "credit balance", "payment required", "not logged in",
-                       "please run /login", "invalid api key", "unauthorized", "http 401", "http 402", "http 403")
+                       "please run /login", "invalid api key", "unauthorized", "http 401", "http 402", "http 403",
+                       "no allowed providers")
 
 
 class ProviderError(RuntimeError):
@@ -297,7 +298,7 @@ def board_png(board: chess.Board) -> bytes:
 
 
 def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejections: list[str], show_legal: bool = True,
-                 cap_seconds: float | None = None, nudge: str | None = None) -> str:
+                 cap_seconds: float | None = None, nudge: str | None = None, image: bool = True) -> str:
     side = "White" if board.turn == chess.WHITE else "Black"
     own, opp = ("wtime", "btime") if board.turn == chess.WHITE else ("btime", "wtime")
     # Stable, append-only text first (side, then the game so far) so input caching reuses the
@@ -309,8 +310,9 @@ def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejectio
         f"FEN: {board.fen()}",
         "Board diagram from the FEN (White pieces uppercase, Black lowercase, White plays up the board):",
         board_diagram(board),
-        "An image of the same position is attached: White at the bottom, the last move highlighted.",
     ]
+    if image:
+        lines.append("An image of the same position is attached: White at the bottom, the last move highlighted.")
     if go_args.get(own) is not None:
         inc = go_args.get("winc" if side == "White" else "binc", 0) or 0
         lines.append(f"Clocks: you {fmt_clock(go_args.get(own))}, opponent {fmt_clock(go_args.get(opp))}, +{int(inc) // 1000}s per move.")
@@ -396,6 +398,8 @@ class SubscriptionChessClient:
         self.max_attempts = _int_env("LLM_MAX_ATTEMPTS", 3, 1, 9)
         self.timeout_seconds = _int_env("LLM_ATTEMPT_TIMEOUT_SECONDS", DEFAULT_ATTEMPT_TIMEOUT_SECONDS, 10, 1800)
         self.show_legal = os.environ.get("LLM_SHOW_LEGAL_MOVES", "true").strip().lower() not in {"0", "false", "no", "off"}
+        # Text-only models (Mercury 2.5) get the FEN and the diagram but no picture.
+        self.board_image = os.environ.get("LLM_BOARD_IMAGE", "true").strip().lower() not in {"0", "false", "no", "off"}
         self.invalid_model_moves = 0
         self.last_report: dict = {}
         self.runner: Callable[[list[str], str, int, Path | None], str] = self._run_cli
@@ -458,12 +462,14 @@ class SubscriptionChessClient:
             inc = go_args.get("winc" if board.turn == chess.WHITE else "binc", 0)
             self._cutoff_s = arbiter_cutoff_seconds(board, left, inc) if left is not None else None
             self._board = board
-            if self._image_board != board.fen():
+            if not self.board_image:
+                self._image = None
+            elif self._image_board != board.fen():
                 self._image = board_png(board)
                 self._image_board = board.fen()
             # Only streaming routes show their thinking live, so only they get the BEST SO FAR cap.
             cap = self._cutoff_s if self.provider in HTTP_ROUTES else None
-            prompt = build_prompt(board, go_args, history, rejections, self.show_legal, cap, self._nudge)
+            prompt = build_prompt(board, go_args, history, rejections, self.show_legal, cap, self._nudge, self.board_image)
             started = time.monotonic()
             self._attempt_think_ms = None
             self._infra_ms = 0
@@ -601,6 +607,10 @@ class SubscriptionChessClient:
             # Full-quality weights only (fp4 hosts are cheapest, so they win by default) on the fastest host:
             # the clock counts wall time (2026-10-06: DeepSeek V4.1 Flash took 78-113 s per move unsorted).
             payload["provider"] = {"sort": "throughput", "quantizations": list(OPENROUTER_QUANTIZATIONS), "require_parameters": True}
+            # Per-player price ceiling (USD per million tokens) keeps "fastest" off 2x priority tiers (Gemini, Grok).
+            max_price = os.environ.get("LLM_MAX_PRICE")
+            if max_price:
+                payload["provider"]["max_price"] = json.loads(max_price)
             payload["session_id"] = self.session_id
             payload["prompt_cache_key"] = self.session_id
         elif style == "effort":
