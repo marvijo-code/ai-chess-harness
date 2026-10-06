@@ -461,6 +461,23 @@ class PageTest(unittest.TestCase):
         mini = viewer.PAGE[viewer.PAGE.index("function miniMatch("):viewer.PAGE.index("function miniBracketHtml(")]
         self.assertIn("data-bk-game", mini)
 
+    def test_focus_mode_leaderboard_always_visible(self):
+        page = viewer.PAGE
+        for needle in ("function leaderboardHtml(game)", 'data-part="lbside"', 'data-part="lbunder"',
+                       "knockout zone", "Round robin table (final)", 'class="sd"', "lb-r ${side ? \"me\" : \"\"}",
+                       'const lb = focused ? leaderboardHtml(game) : "";'):
+            self.assertIn(needle, page, needle)
+        # wide screens: a third column beside the board, same height as the info column
+        self.assertIn('grid-template-areas: "head head head" "boardcol infocol lbcol"', page)
+        self.assertIn(".card.focused .lb-side:not(:empty) { display: flex; flex-direction: column; grid-area: lbcol; height: calc(var(--fboard) + 64px); }", page)
+        # the third column comes out of the width, never the height: a 1080p board keeps its size
+        self.assertIn("calc(100vh - 290px - var(--hdr-extra, 0px)), calc(100vw - 822px)", page)
+        # narrow screens: under the board (inside the board column, so above the move list)
+        board_col = page[page.index('<div class="boardcol">'):page.index('<div class="infocol">')]
+        self.assertIn('data-part="lbunder"', board_col)
+        # the grid view keeps the full standings panel
+        self.assertIn('id="standingsCard"', page)
+
     def test_no_external_assets(self):
         self.assertNotIn("http://", viewer.PAGE.replace("http://www.w3.org", ""))
         self.assertNotIn("https://", viewer.PAGE)

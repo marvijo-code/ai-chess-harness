@@ -173,7 +173,13 @@ body.focus-mode .boards { display: block; }
 .card.focused .moves { max-height: none; flex: 1 1 auto; min-height: 140px; font-size: 14px; }
 .card.focused .infocol > .thinking { flex: 0 1 auto; min-height: 34px; overflow: hidden; }
 .card.focused .think-body { max-height: 45vh; font-size: 12px; flex: 1 1 auto; min-height: 0; }
-@media (max-height: 820px) { .card.focused .moves { min-height: 72px; } }
+@media (max-height: 820px) {
+  .card.focused .moves { min-height: 56px; }
+  .card.focused .infocol .comment { min-height: 0; margin-top: 6px; padding: 6px 10px; font-size: 13px; }
+  .card.focused .infocol [data-part="result"] .who { display: inline; margin-right: 8px; }
+  .card.focused .infocol { overflow-y: auto; overscroll-behavior: contain; }   /* last resort: scroll, never cut */
+  .card.focused .lb-r { padding-top: 2px; padding-bottom: 2px; }
+}
 .card.switch-in { animation: switch-in .45s ease both; }
 @keyframes switch-in { from { opacity: .2; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 /* ---- round robin + knockouts ---------------------------------------------------------------- */
@@ -295,7 +301,8 @@ body.focus-mode .boards { display: block; }
 @media (min-width: 1280px) { .card.focused .mini-bk:not(:empty) { display: block; flex: none; margin-bottom: 4px; } }
 .mb-title { display: flex; justify-content: space-between; align-items: baseline; gap: 2px 10px; flex-wrap: wrap; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
 .mb-title .mb-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
-.mb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 6px; }
+.mb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 6px; }
+@media (max-width: 1599px) { .mb-m.third { display: none; } }
 .mb-m { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 5px 6px; min-width: 0; }
 .mb-m.click { cursor: pointer; } .mb-m.click:hover { border-color: var(--accent); }
 .mb-m.live { border-color: rgba(52, 199, 123, .55); }
@@ -315,6 +322,37 @@ body.focus-mode .boards { display: block; }
 .mb-champ svg { width: 24px; height: 22px; }
 .mb-champ.won { border: 1px solid rgba(245, 185, 66, .7); background: rgba(245, 185, 66, .14); }
 .mb-champ.won b { color: #ffd479; font-size: 13.5px; overflow-wrap: anywhere; line-height: 1.2; }
+/* Compact leaderboard in focus mode (always visible): a third column on wide screens, under the board elsewhere. */
+.lb { display: none; background: #12161c; border: 1px solid var(--line); border-radius: 10px; padding: 7px 8px; min-width: 0; }
+.card.focused .lb-under:not(:empty) { display: block; margin-top: 8px; }
+@media (min-width: 1280px) {
+  .boards > .card.focused { --fboard: max(340px, min(calc(100vh - 290px - var(--hdr-extra, 0px)), calc(100vw - 822px)));
+    grid-template-columns: var(--fboard) minmax(300px, 1fr) clamp(240px, 18vw, 300px); grid-template-areas: "head head head" "boardcol infocol lbcol"; }
+  .card.focused .lb-under:not(:empty) { display: none; }
+  .card.focused .lb-side:not(:empty) { display: flex; flex-direction: column; grid-area: lbcol; height: calc(var(--fboard) + 64px); }
+  .card.focused .lb-side .lb-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+}
+.lb-title { display: flex; justify-content: space-between; align-items: baseline; gap: 2px 8px; flex-wrap: wrap; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
+.lb-title .n { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.lb-r { display: grid; grid-template-columns: 20px minmax(0, 1fr) 30px 46px; gap: 4px; align-items: center; padding: 3px 4px; border-radius: 6px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.lb-r.lb-head { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; padding-top: 0; padding-bottom: 1px; }
+.lb-k { color: var(--muted); text-align: center; font-size: 11.5px; }
+.lb-n { min-width: 0; overflow-wrap: anywhere; line-height: 1.2; font-weight: 600; }
+.lb-n .sd { display: inline-block; font-size: 10px; color: #ffd479; border: 1px solid rgba(245, 185, 66, .5); border-radius: 4px; padding: 0 3px; margin-left: 4px; font-weight: 700; line-height: 1.3; white-space: nowrap; }
+.lb-n .cr { display: inline-block; width: 13px; height: 12px; margin-left: 4px; vertical-align: -1px; }
+.lb-p { text-align: right; font-weight: 700; }
+.lb-e { text-align: right; line-height: 1.1; font-size: 12px; }
+.lb-e i { display: block; font-style: normal; font-size: 10.5px; }
+.lb-r.zone { background: rgba(245, 185, 66, .06); }
+.lb-r.me { background: rgba(91, 157, 255, .22); box-shadow: inset 3px 0 0 var(--accent); }
+.lb-r .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 1px solid #777; margin-right: 5px; vertical-align: 0; }
+.lb-r .dot.w { background: #fff; } .lb-r .dot.b { background: #111; }
+.lb-cut { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 10px; color: #ffd479; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+@media (min-width: 1700px) and (min-height: 900px) {
+  .lb-r { font-size: 14px; padding: 4px 5px; grid-template-columns: 22px minmax(0, 1fr) 34px 50px; } .lb-e { font-size: 13px; } .lb-e i { font-size: 11.5px; }
+  .lb-title { font-size: 12px; }
+}
+.lb-cut::before, .lb-cut::after { content: ""; flex: 1; border-top: 1px dashed rgba(245, 185, 66, .55); }
 @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
 @media (max-width: 900px) {
   .boards > .card.focused { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "boardcol" "infocol"; }
@@ -500,10 +538,11 @@ function cardFor(id) {
   el.innerHTML = `<div class="game-head" data-focus-head></div>
     <div class="boardcol"><div class="pbar" data-part="black"></div>
       <div class="board-wrap" data-part="wrap"><div class="evalbar" data-part="evalbar" title="Stockfish evaluation, White at the bottom"><div class="white" data-part="evalwhite"></div><div class="mid"></div></div><div class="board" data-part="board"></div></div>
-      <div class="pbar" data-part="white"></div><div class="caption" data-part="caption" style="display:none"></div></div>
+      <div class="pbar" data-part="white"></div><div class="caption" data-part="caption" style="display:none"></div><div class="lb lb-under" data-part="lbunder"></div></div>
     <div class="infocol"><div class="mini-bk" data-part="minibk"></div><div class="evalline" data-part="evalline"></div><div class="comment" data-part="comment"></div>
       <div class="comment" data-part="result" style="display:none"></div><div class="moves" data-part="moves"></div><div class="nav" data-part="nav"></div>
-      <div class="thinking" data-part="thinking"><button type="button" class="think-head" data-part="thinkhead" data-think-toggle aria-expanded="false"></button><div class="think-body" data-part="thinkbody" hidden></div></div></div>`;
+      <div class="thinking" data-part="thinking"><button type="button" class="think-head" data-part="thinkhead" data-think-toggle aria-expanded="false"></button><div class="think-body" data-part="thinkbody" hidden></div></div></div>
+    <div class="lb lb-side" data-part="lbside"></div>`;
   const parts = { head: el.querySelector("[data-focus-head]") };
   el.querySelectorAll("[data-part]").forEach(n => { parts[n.dataset.part] = n; });
   c = { id, el, parts, follow: true, top: 0, movesKey: null, boardKey: null, moveTotal: undefined, movePly: undefined, think: newThink(null) };
@@ -708,6 +747,9 @@ function updateCard(c, game, now) {
   updateBar(p.black, game, "black", now);
   updateBar(p.white, game, "white", now);
   setHTML(p.minibk, focused ? miniBracketHtml(game.id) : "");
+  const lb = focused ? leaderboardHtml(game) : "";   // CSS shows it beside the board (wide) or under it
+  setHTML(p.lbside, lb);
+  setHTML(p.lbunder, lb);
   const boardKey = `${total}|${ply}|${game.fen}`;
   if (c.boardKey !== boardKey) {
     c.boardKey = boardKey;
@@ -976,7 +1018,7 @@ function miniMatch(m, o, curId) {
     const win = m && m.winner === name, out = m && m.winner && m.winner !== name;
     return `<div class="mb-p ${win ? "win" : ""} ${out ? "out" : ""}"><span class="bk-seed">${seed || "-"}</span><span class="mb-n">${esc(name)}</span></div>`;
   };
-  const cls = ["mb-m", live ? "live" : "", armaLive ? "arma" : "", m && m.winner ? "done" : "", here ? "here" : "", click ? "click" : ""].filter(Boolean).join(" ");
+  const cls = ["mb-m", o.label === "Third place" ? "third" : "", live ? "live" : "", armaLive ? "arma" : "", m && m.winner ? "done" : "", here ? "here" : "", click ? "click" : ""].filter(Boolean).join(" ");
   const attrs = click ? ` data-bk-game="${esc(shown.id)}" title="${live ? "Watch this game" : "Show this game"}"` : "";
   return `<div class="${cls}"${attrs}><div class="mb-h"><span class="t">${esc(o.label)}</span>${state}</div>`
     + row(o.a, o.aSeed, o.aTbd) + row(o.b, o.bSeed, o.bTbd) + `</div>`;
@@ -989,6 +1031,31 @@ function miniBracketHtml(curId) {
   return `<div class="mb-title"><span>${sl.ko ? "Knockout bracket" : "Road to the final (projected)"}</span>${sl.short ? `<span class="mb-note">${esc(sl.short)}</span>` : ""}</div><div class="mb-grid">`
     + miniMatch(sl.sf1.m, sl.sf1.o, curId) + miniMatch(sl.sf2.m, sl.sf2.o, curId) + miniMatch(sl.fin.m, sl.fin.o, curId)
     + (sl.third ? miniMatch(sl.third.m, sl.third.o, curId) : "") + champ + `</div>`;
+}
+
+// Compact leaderboard for focus mode: the round-robin table (final once the knockouts start).
+function leaderboardHtml(game) {
+  const rows = (data.standings || []).slice().sort((a, b) => (a.rank || 99) - (b.rank || 99));
+  if (!rows.length) return "";
+  const f = fmtInfo(), k = ko();
+  const size = f ? (f.ko_size || (data.config || {}).knockoutSize || 4) : 0;
+  const seeds = {};
+  if (k) for (const sd of k.seeds || []) seeds[sd.name] = sd.seed;
+  const title = k ? "Round robin table (final)" : (f ? "Leaderboard" : "Standings");
+  const note = k ? "Seeds S1 to S" + size : (f ? `Top ${size} go to the knockouts` : "");
+  let html = `<div class="lb-title"><span>${esc(title)}</span>${note ? `<span class="n">${esc(note)}</span>` : ""}</div>`
+    + `<div class="lb-list"><div class="lb-r lb-head"><span class="lb-k">#</span><span>Player</span><span class="lb-p">Pts</span><span class="lb-e">Elo</span></div>`;
+  rows.forEach((r, i) => {
+    const side = r.name === game.white ? "w" : r.name === game.black ? "b" : "";
+    const d = Math.round(r.elo_delta || 0);
+    const seed = seeds[r.name] ? `<span class="sd" title="Knockout seed ${seeds[r.name]}">S${seeds[r.name]}</span>` : "";
+    const crown = k && k.champion === r.name ? crownSvg("cr", "lb" + i) : "";
+    html += `<div class="lb-r ${side ? "me" : ""} ${size && i < size ? "zone" : ""}"${side ? ` title="Playing ${side === "w" ? "White" : "Black"} in this game"` : ""}>`
+      + `<span class="lb-k">${r.rank || i + 1}</span><span class="lb-n">${side ? `<span class="dot ${side}"></span>` : ""}${esc(r.name)}${seed}${crown}</span>`
+      + `<span class="lb-p">${esc(r.points ?? 0)}</span><span class="lb-e">${r.elo ? Math.round(r.elo) : ""}<i class="${d > 0 ? "up" : d < 0 ? "down" : ""}">${d ? (d > 0 ? "+" : "") + d : ""}</i></span></div>`;
+    if (size && i === size - 1 && rows.length > size) html += `<div class="lb-cut">&uarr; knockout zone</div>`;
+  });
+  return html + `</div>`;
 }
 
 // ---- auto-focus without commentary: the most interesting live board -----------------------------
@@ -1434,7 +1501,7 @@ async function poll() {
 // whole card still fits the screen; a one-row header changes nothing.
 (function watchHeader() {
   const hdr = document.querySelector("header");
-  const set = () => document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight - 70) + "px");
+  const set = () => document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight - 60) + "px");
   try { new ResizeObserver(set).observe(hdr); } catch (e) { window.addEventListener("resize", set); }
   set();
 })();
