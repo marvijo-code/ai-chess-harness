@@ -229,15 +229,22 @@ class CommentaryOnTest(unittest.TestCase):
 
             class Fake:
                 focused = None
+                calls = []
 
                 def clips(self, game, after):
                     return [{"seq": 1, "ply": 4, "text": "hi", "audio": "c1.mp3"}] if after < 1 else []
 
+                def clips_all(self, after):
+                    every = [{"seq": 1, "game": "r1b1", "ply": 4, "text": "a", "audio": "c1.mp3", "seconds": 3.0, "final": False},
+                             {"seq": 2, "game": "r1b2", "ply": 7, "text": "b", "audio": None, "seconds": 0, "final": True}]
+                    return [c for c in every if c["seq"] > after]
+
                 def audio_path(self, name):
                     return audio if name == "c1.mp3" else None
 
-                def focus(self, game):
-                    Fake.focused = game
+                def focus(self, game_id, pinned=False):
+                    Fake.focused = game_id
+                    Fake.calls.append((game_id, pinned))
 
             class H(viewer.Handler):
                 pass
@@ -256,16 +263,156 @@ class CommentaryOnTest(unittest.TestCase):
                     self.assertEqual(res.read(), b"ID3fake")
                 with self.assertRaises(urllib.error.HTTPError):
                     urllib.request.urlopen(base + "/api/commentary/audio/..%2Fc1.mp3", timeout=5)
+                # No game: every board's clips in seq order (auto mode).
+                with urllib.request.urlopen(base + "/api/commentary?after=0", timeout=5) as res:
+                    clips = json.loads(res.read())["clips"]
+                self.assertEqual([(c["seq"], c["game"]) for c in clips], [(1, "r1b1"), (2, "r1b2")])
+                with urllib.request.urlopen(base + "/api/commentary?after=1", timeout=5) as res:
+                    self.assertEqual([c["seq"] for c in json.loads(res.read())["clips"]], [2])
+                # Focus mode pins the board; leaving it (no game) hands the choice back.
                 req = urllib.request.Request(base + "/api/commentary/focus?game=r2b1", method="POST", data=b"")
                 with urllib.request.urlopen(req, timeout=5) as res:
                     self.assertTrue(json.loads(res.read())["enabled"])
                 self.assertEqual(Fake.focused, "r2b1")
+                req = urllib.request.Request(base + "/api/commentary/focus", method="POST", data=b"")
+                with urllib.request.urlopen(req, timeout=5) as res:
+                    self.assertTrue(json.loads(res.read())["enabled"])
+                self.assertEqual(Fake.calls, [("r2b1", True), (None, False)])
+                req = urllib.request.Request(base + "/api/commentary/focus?game=..%2Fx", method="POST", data=b"")
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(req, timeout=5)
+                self.assertEqual(ctx.exception.code, 400)
+                self.assertEqual(len(Fake.calls), 2)
             finally:
                 server.shutdown()
                 server.server_close()
 
 
+class ThinkingEndpointTest(unittest.TestCase):
+    """GET /api/thinking reads <slug>-<game>-ply<N>.thinking.txt next to the state file."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.dir = Path(cls.tmp.name)
+        # The slug is the state's "id", not the file name.
+        state = cls.dir / "named-differently-tournament.json"
+        state.write_text(json.dumps({"id": "swiss-1", "games": {"r1b1": {"status": "live", "moves": []}}}), encoding="utf-8")
+        (cls.dir / "other-tournament.json").write_text(json.dumps({"id": "other", "games": {}}), encoding="utf-8")
+        (cls.dir / "other-r1b1-ply1.thinking.txt").write_text("from the other tournament", encoding="utf-8")
+        (cls.dir / "swiss-1-r1b1-ply3.thinking.txt").write_text("I consider e4.\n[thinking stopped at the move cap - answering from its own thoughts]\n", encoding="utf-8")
+        (cls.dir / "swiss-1-r1b1-ply4.thinking.txt").write_bytes(("x" * 70_000 + "END").encode("utf-8"))
+        (cls.dir / "swiss-1-r1b1-ply5.thinking.txt").write_bytes("abé€".encode("utf-8")[:-1])   # live writer mid-character
+        (cls.dir / "secret.txt").write_text("nope", encoding="utf-8")
+
+        class H(viewer.Handler):
+            pass
+
+        H.state_path = state
+        H.live_dir = cls.dir
+        H.analyzer = H.annotator = H.commentator = None
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.tmp.cleanup()
+
+    def get(self, query):
+        with urllib.request.urlopen(self.base + "/api/thinking?" + query, timeout=5) as res:
+            return json.loads(res.read())
+
+    def status(self, query):
+        try:
+            with urllib.request.urlopen(self.base + "/api/thinking?" + query, timeout=5) as res:
+                return res.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+
+    def test_reads_whole_small_file(self):
+        j = self.get("game=r1b1&ply=3")
+        self.assertTrue(j["exists"])
+        self.assertFalse(j["truncated"])
+        self.assertEqual(j["from"], 0)
+        self.assertIn("[thinking stopped at the move cap", j["text"])
+        self.assertEqual(j["size"], (self.dir / "swiss-1-r1b1-ply3.thinking.txt").stat().st_size)
+
+    def test_since_returns_only_new_text(self):
+        full = self.get("game=r1b1&ply=3")
+        j = self.get(f"game=r1b1&ply=3&since={len('I consider ')}")
+        self.assertEqual(j["from"], len("I consider "))
+        self.assertTrue(j["text"].startswith("e4."))
+        self.assertEqual(j["size"], full["size"])
+        self.assertEqual(self.get(f"game=r1b1&ply=3&since={full['size']}")["text"], "")
+
+    def test_since_past_the_end_starts_over(self):
+        j = self.get("game=r1b1&ply=3&since=999999")
+        self.assertEqual(j["from"], 0)
+        self.assertTrue(j["text"].startswith("I consider"))
+
+    def test_large_file_returns_the_tail(self):
+        j = self.get("game=r1b1&ply=4")
+        self.assertTrue(j["truncated"])
+        self.assertEqual(j["size"], 70_003)
+        self.assertEqual(j["from"], 70_003 - viewer.THINK_CHUNK)
+        self.assertEqual(len(j["text"]), viewer.THINK_CHUNK)
+        self.assertTrue(j["text"].endswith("END"))
+        # Close behind: everything new, not truncated.
+        k = self.get("game=r1b1&ply=4&since=69000")
+        self.assertFalse(k["truncated"])
+        self.assertEqual((k["from"], k["text"]), (69000, "x" * 1000 + "END"))
+        # Far behind: only the last 60,000 bytes.
+        self.assertTrue(self.get("game=r1b1&ply=4&since=5")["truncated"])
+
+    def test_unfinished_character_waits_for_the_next_read(self):
+        j = self.get("game=r1b1&ply=5")
+        self.assertEqual(j["text"], "abé")
+        self.assertEqual(j["size"], 4)   # the cut euro sign is read next time from byte 4
+        self.assertNotIn("�", j["text"])
+
+    def test_missing_file(self):
+        self.assertEqual(self.get("game=r1b1&ply=1"), {"exists": False, "size": 0, "text": "", "from": 0, "truncated": False})
+        self.assertFalse(self.get("game=r9b9&ply=7")["exists"])
+
+    def test_other_tournament_by_id(self):
+        self.assertEqual(self.get("game=r1b1&ply=1&id=other")["text"], "from the other tournament")
+
+    def test_rejects_bad_input(self):
+        for query in (
+            "game=..%2Fsecret&ply=1", "game=r1b1%2F..&ply=1", "game=r1b1.txt&ply=1", "game=&ply=1", "ply=1",
+            "game=r1b1&ply=0", "game=r1b1&ply=1001", "game=r1b1&ply=-1", "game=r1b1&ply=abc", "game=r1b1",
+            "game=r1b1&ply=1&since=-5", "game=r1b1&ply=1&since=x", "game=r1b1&ply=1&id=..%2F..%2Fx",
+            "game=r1b1%00&ply=1", "game=r%C3%A9&ply=1", "game=" + "a" * 81 + "&ply=1",
+        ):
+            self.assertEqual(self.status(query), 400, query)
+
+    def test_unknown_tournament_id(self):
+        self.assertEqual(self.status("game=r1b1&ply=1&id=nope"), 404)
+
+    def test_read_thinking_helper_never_starts_mid_character(self):
+        path = self.dir / "multi.txt"
+        path.write_bytes(("€" * 30).encode("utf-8"))   # 90 bytes, 3 per character
+        j = viewer.read_thinking(path, 0, limit=10)
+        self.assertTrue(j["truncated"])
+        self.assertEqual(j["text"], "€" * 3)
+        self.assertEqual(j["from"], 81)
+        self.assertEqual(j["size"], 90)
+
+
 class PageTest(unittest.TestCase):
+    def test_commentary_follows_all_boards(self):
+        self.assertIn("/api/commentary?after=", viewer.PAGE)
+        self.assertNotIn("/api/commentary?game=", viewer.PAGE)
+        self.assertIn("On commentary", viewer.PAGE)
+
+    def test_thinking_panel_present(self):
+        for needle in ("/api/thinking?", "data-think-toggle", 'class="think-body"', "swissThinking.", "No visible thinking for this move.",
+                       "Thinking shows what each model chose to reveal while deciding: raw reasoning for most API models, summaries for GPT and Claude, search lines for Stockfish."):
+            self.assertIn(needle, viewer.PAGE, needle)
+
     def test_no_long_dashes(self):
         text = Path(viewer.__file__).read_text(encoding="utf-8")
         self.assertNotIn("—", text)

@@ -87,6 +87,10 @@ ANSWER_WITH_THOUGHTS_SECONDS = 20.0  # upper bound per answer step; the real lim
 # fits inside the cap (2026-10-06 run 5: cap 30 s + 20 s + 8 s made Grok's moves ~55 s and it flagged).
 THINK_SHARE, SAME_SHARE, LOWEST_SHARE = 0.6, 0.2, 0.2
 LOWEST_MIN_SECONDS = 5.0
+# The last step (lowest effort, own thinking returned) is NOT cut at its share: it runs until the model answers
+# or its clock runs out. Run 6 (2026-10-06): a ~6 s hard limit there turned slow first tokens into "invalid
+# replies" and forfeited Muse, Qwen, MiMo and Grok in round 1. Out of clock is a time loss, never invalid.
+ANSWER_MAX_TOKENS = 16000
 THOUGHTS_HEAD_CHARS = 20_000
 THOUGHTS_TAIL_CHARS = 100_000
 # The note the referee plays when a model is still thinking at its move cap (its own latest choice).
@@ -359,6 +363,11 @@ def parse_reply(text: str, board: chess.Board) -> tuple[chess.Move, str, str]:
             raw_move = str(data.get("move") or data.get("uci") or data.get("san") or "").strip()
             comment = str(data.get("comment") or "").strip()
     if not raw_move:
+        # A reply cut off after the move was written ('{"move": "Bxc5", "comment": "I recap...') still states it.
+        cut = re.search(r'"move"\s*:\s*"([A-Za-z0-9=+#\-]{2,8})"', text)
+        if cut:
+            raw_move = cut.group(1)
+    if not raw_move:
         bare = text.strip().strip("`\"' .")
         if re.fullmatch(r"[A-Za-z0-9=+#\-]{2,8}", bare):
             raw_move = bare
@@ -409,6 +418,7 @@ class SubscriptionChessClient:
         self.http_stream: Callable[[str, dict, dict, int, float | None], dict] = self._http_stream
         self._cutoff_s: float | None = None
         self._board: chess.Board | None = None
+        self._left_ms: int | None = None
         self._image: bytes | None = None
         # Live thinking for the viewer: the runner names one file per move (UCI option ThinkingFile).
         self.thinking_file: Path | None = None
@@ -470,6 +480,7 @@ class SubscriptionChessClient:
             timeout = self._attempt_timeout(left)
             inc = go_args.get("winc" if board.turn == chess.WHITE else "binc", 0)
             self._cutoff_s = arbiter_cutoff_seconds(board, left, inc) if left is not None else None
+            self._left_ms = left
             self._board = board
             if not self.board_image:
                 self._image = None
@@ -693,8 +704,9 @@ class SubscriptionChessClient:
                                         "Reply now with only the JSON object for your move."}]
         limits = {"same": min(ANSWER_WITH_THOUGHTS_SECONDS, SAME_SHARE * total),
                   "lowest": min(ANSWER_WITH_THOUGHTS_SECONDS, max(LOWEST_MIN_SECONDS, LOWEST_SHARE * total))}
+        clock_left = None if self._left_ms is None else self._left_ms / 1000 - (time.monotonic() - started)
         for level in ("same", "lowest"):
-            follow = {**payload, "messages": messages, "max_tokens": 6000, "stream": True,
+            follow = {**payload, "messages": messages, "max_tokens": ANSWER_MAX_TOKENS, "stream": True,
                       "stream_options": {"include_usage": True}}
             if level == "lowest":
                 if style == "openrouter":
@@ -702,7 +714,12 @@ class SubscriptionChessClient:
                 elif style == "effort":
                     follow.pop("reasoning_effort", None)
                     follow["thinking"] = {"type": "disabled"}
-            answer = self.http_stream(url, follow, headers, int(limits[level]) + 10, limits[level])
+            if level == "same":
+                answer = self.http_stream(url, follow, headers, int(limits[level]) + 10, limits[level])
+            else:
+                # No share limit: wait for the answer until the clock is gone (then it is a loss on time).
+                left = 600.0 if clock_left is None else max(5.0, clock_left - (time.monotonic() - started))
+                answer = self.http_stream(url, follow, headers, int(left) + 5, None)
             self.usage_log.append(answer.get("usage") or {})
             if (answer.get("content") or "").strip():
                 if level == "lowest":
