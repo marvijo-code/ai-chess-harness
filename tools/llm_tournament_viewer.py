@@ -64,7 +64,8 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 18px; pa
 .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
 .game-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 6px 8px; cursor: pointer; min-width: 0; flex-wrap: wrap; }
 .card.focused .game-head { cursor: default; }
-.game-head .tag { font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game-head .tag { font-size: 12px; color: var(--muted); min-width: 0; flex: 1 1 140px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+.game-head .tag.ko { color: #ffd479; font-weight: 600; font-size: 12.5px; }
 .game-head .head-right { display: flex; gap: 6px; align-items: center; flex: none; }
 .result-pill { font-weight: 700; font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); white-space: nowrap; }
 .result-pill.live { color: var(--ok); border-color: rgba(52, 199, 123, .45); }
@@ -171,6 +172,122 @@ body.focus-mode .boards { display: block; }
 .card.focused .moves { max-height: none; flex: 1 1 auto; min-height: 140px; font-size: 14px; }
 .card.focused .thinking { flex: 0 1 auto; min-height: 0; }
 .card.focused .think-body { max-height: 45vh; font-size: 12px; }
+.card.switch-in { animation: switch-in .45s ease both; }
+@keyframes switch-in { from { opacity: .2; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* ---- round robin + knockouts ---------------------------------------------------------------- */
+.chip.stage { color: var(--ok); border-color: rgba(52, 199, 123, .45); }
+.chip.stage.ko { color: #ffd479; border-color: rgba(245, 185, 66, .6); background: rgba(245, 185, 66, .09); font-weight: 600; }
+.chip.stage.champ b { color: #ffd479; }
+.chip .ico { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; margin-right: 5px; }
+.arma-band { flex: 1 0 100%; order: 3; display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; padding: 5px 10px; border-radius: 8px;
+  background: linear-gradient(90deg, rgba(255, 93, 93, .2), rgba(245, 185, 66, .1)); border: 1px solid rgba(255, 93, 93, .5); font-size: 12px; color: var(--text); }
+.arma-band b { color: #ff8a7a; letter-spacing: .14em; font-size: 12.5px; }
+.arma-band .odds { font-weight: 600; }
+.arma-band .clk { color: var(--muted); }
+.pair .lbl { grid-column: 1 / -1; text-align: center; font-size: 11.5px; color: #ffd479; font-weight: 600; }
+.pair .lbl .a { color: #ff8a7a; letter-spacing: .08em; margin-left: 4px; }
+.side > .card { order: 2; }
+.side > #bracketCard { order: 1; }
+.side.ko-first > #bracketCard { order: 0; }
+.side > #standingsCard { order: 0; }
+.side.ko-first > #standingsCard { order: 1; }
+.bk-note { font-size: 12px; color: var(--muted); margin: -4px 0 10px; }
+.bk-semis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.bk-match { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 8px 7px; min-width: 0; }
+.bk-match.click { cursor: pointer; } .bk-match.click:hover { border-color: var(--accent); }
+.bk-match.live { border-color: rgba(52, 199, 123, .55); }
+.bk-match.arma { border-color: rgba(255, 93, 93, .6); box-shadow: inset 0 0 0 1px rgba(255, 93, 93, .18); }
+.bk-match.done { border-color: rgba(245, 185, 66, .35); }
+.bk-head { display: flex; justify-content: space-between; align-items: baseline; gap: 2px 8px; flex-wrap: wrap; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+.bk-head .t { color: var(--text); font-weight: 700; }
+.bk-state.live { color: var(--ok); font-weight: 700; }
+.bk-state.arma { color: #ff8a7a; font-weight: 700; }
+.bk-state.won { color: #ffd479; }
+.bk-p { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 4px 4px; border-radius: 7px; font-size: 13.5px; }
+.bk-seed { font-size: 11px; color: var(--muted); text-align: center; border: 1px solid var(--line); border-radius: 5px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.bk-name { min-width: 0; overflow-wrap: anywhere; line-height: 1.2; font-weight: 600; }
+.bk-name.tbd { color: var(--muted); font-weight: 400; font-style: italic; font-size: 12.5px; }
+.bk-res { display: flex; gap: 3px; font: 700 12.5px/1 "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+.bk-res span { min-width: 17px; text-align: center; padding: 3px 3px; border-radius: 4px; background: #12161c; color: var(--muted); }
+.bk-res span.a { color: #ff8a7a; box-shadow: inset 0 0 0 1px rgba(255, 93, 93, .45); }
+.bk-res span.lv { color: var(--ok); }
+.bk-p.win { background: rgba(245, 185, 66, .15); }
+.bk-p.win .bk-name { color: #ffd479; }
+.bk-p.out { opacity: .5; }
+.bk-why { font-size: 11px; color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
+.bk-join { position: relative; height: 16px; margin: 0 25%; border: 2px solid var(--line); border-top: 0; border-radius: 0 0 9px 9px; }
+.bk-join::after { content: ""; position: absolute; left: calc(50% - 1px); top: 100%; height: 10px; border-left: 2px solid var(--line); }
+.bk-final { width: min(100%, 300px); margin: 10px auto 0; }
+.bk-final.bk-match { border-width: 1px; background: linear-gradient(180deg, rgba(245, 185, 66, .08), var(--panel-2)); }
+.bk-champ { display: flex; align-items: center; justify-content: center; gap: 10px; width: min(100%, 300px); margin: 8px auto 0; padding: 8px 10px; border-radius: 10px; border: 1px dashed var(--line); color: var(--muted); font-size: 13px; text-align: center; }
+.bk-champ svg { width: 26px; height: 26px; flex: none; }
+.bk-champ.won { border: 1px solid rgba(245, 185, 66, .7); background: rgba(245, 185, 66, .14); color: var(--text); }
+.bk-champ.won b { color: #ffd479; font-size: 16px; overflow-wrap: anywhere; }
+.bk-third { margin-top: 10px; }
+.bk-third .bk-match { opacity: .92; }
+/* Champion moment: full-screen celebration over the boards. */
+.champ-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px 16px; overflow-y: auto;
+  background: radial-gradient(ellipse at 50% 32%, rgba(245, 185, 66, .2), rgba(14, 16, 19, .93) 62%); backdrop-filter: blur(3px); }
+.champ-overlay[hidden] { display: none; }
+.champ-overlay canvas { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; transition: opacity 1.2s ease; }
+.champ-card { position: relative; z-index: 2; text-align: center; width: min(940px, 100%); margin: auto; padding: clamp(20px, 4vh, 40px) clamp(16px, 3vw, 36px) clamp(18px, 3vh, 30px); border-radius: 22px;
+  background: rgba(23, 26, 31, .88); border: 1px solid rgba(245, 185, 66, .5); box-shadow: 0 30px 90px rgba(0, 0, 0, .6), inset 0 0 0 1px rgba(245, 185, 66, .14); }
+.champ-crown { width: clamp(84px, 13vh, 150px); height: auto; display: block; margin: 0 auto 6px; filter: drop-shadow(0 8px 26px rgba(245, 185, 66, .55)); }
+.champ-kicker { text-transform: uppercase; letter-spacing: .32em; color: #ffd479; font-weight: 700; font-size: clamp(12px, 1.7vh, 18px); }
+.champ-name { font-size: clamp(30px, min(7.5vh, 10.5vw), 88px); font-weight: 800; line-height: 1.05; margin: 10px 0 4px; overflow-wrap: anywhere;
+  background: linear-gradient(180deg, #fff6d2 0%, #f5b942 62%, #c98a1a 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.champ-sub { font-size: clamp(18px, 2.7vh, 30px); font-weight: 600; }
+.champ-seed { color: var(--muted); font-size: clamp(13px, 1.7vh, 16px); margin-top: 4px; }
+.podium { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: clamp(14px, 2.6vh, 26px) 0 12px; }
+.podium > div { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; min-width: 0; }
+.podium .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+.podium .nm { font-size: clamp(17px, 2.3vh, 22px); font-weight: 700; overflow-wrap: anywhere; }
+.podium .silver .lbl { color: #cfd6df; } .podium .bronze .lbl { color: #d9a26b; }
+.champ-line { color: var(--muted); font-size: clamp(13px, 1.8vh, 16px); margin: 0 0 16px; overflow-wrap: anywhere; }
+.champ-btn { font: inherit; font-size: 15px; padding: 9px 22px; border-radius: 999px; background: #f5b942; color: #15120a; border: 0; font-weight: 700; cursor: pointer; }
+.champ-btn:hover { background: #ffd479; }
+.champ-overlay.play .champ-crown { animation: crown-drop 1s cubic-bezier(.2, 1.45, .4, 1) .15s both; }
+.champ-overlay.play .champ-kicker { animation: rise .6s ease .6s both; }
+.champ-overlay.play .champ-name { animation: name-in .9s cubic-bezier(.2, 1.3, .4, 1) .85s both; }
+.champ-overlay.play .champ-sub, .champ-overlay.play .champ-seed { animation: rise .6s ease 1.4s both; }
+.champ-overlay.play .podium > div { animation: rise .6s ease both; }
+.champ-overlay.play .podium > div:nth-child(1) { animation-delay: 1.8s; } .champ-overlay.play .podium > div:nth-child(2) { animation-delay: 2s; }
+.champ-overlay.play .champ-line, .champ-overlay.play .champ-btn { animation: rise .6s ease 2.3s both; }
+.champ-overlay.play .champ-card { animation: card-in .6s ease both; }
+@keyframes crown-drop { from { opacity: 0; transform: translateY(-80px) rotate(-14deg) scale(.6); } to { opacity: 1; transform: none; } }
+@keyframes name-in { from { opacity: 0; transform: scale(.6); letter-spacing: .2em; } to { opacity: 1; transform: none; } }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes card-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+/* Opening hook: a 6 second title card over the page. */
+.intro { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: clamp(12px, 3vh, 30px);
+  padding: 24px 16px 44px; overflow: hidden; cursor: pointer; background: radial-gradient(ellipse at 50% 28%, #1c2945 0%, #11151c 48%, #0b0d10 100%);
+  animation: intro-out .7s ease 5.3s forwards; }
+.intro.leaving { animation: intro-out .35s ease forwards; }
+@keyframes intro-out { to { opacity: 0; visibility: hidden; } }
+.intro-kicker { letter-spacing: .34em; text-transform: uppercase; color: var(--accent); font-weight: 700; font-size: clamp(12px, 1.7vh, 17px); text-align: center; animation: rise .5s ease .05s both; }
+.intro-head { font-size: clamp(38px, min(11.5vh, 12vw), 140px); font-weight: 900; line-height: .98; text-align: center; margin: 0; letter-spacing: -.02em; }
+.intro-head span { display: inline-block; white-space: nowrap; }
+.intro-head .a { animation: slam .55s cubic-bezier(.2, 1.5, .4, 1) .2s both; }
+.intro-head .b { animation: slam .55s cubic-bezier(.2, 1.5, .4, 1) .7s both; background: linear-gradient(180deg, #fff6d2, #f5b942 65%, #c98a1a);
+  -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 22px rgba(245, 185, 66, .35)); }
+@keyframes slam { from { opacity: 0; transform: scale(2.2); } to { opacity: 1; transform: none; } }
+.intro-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: clamp(8px, 1.2vh, 12px); width: min(1240px, 100%); }
+.intro-p { background: rgba(23, 26, 31, .92); border: 1px solid var(--line); border-radius: 12px; padding: clamp(8px, 1.3vh, 13px) 10px; text-align: center; font-weight: 700;
+  font-size: clamp(14px, 2.1vh, 22px); line-height: 1.2; overflow-wrap: anywhere; min-width: 0; display: flex; align-items: center; justify-content: center;
+  animation: fly .65s cubic-bezier(.2, 1.15, .4, 1) both; animation-delay: calc(1.1s + var(--i) * .11s); }
+@keyframes fly { from { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--r)) scale(.5); } to { opacity: 1; transform: none; } }
+.intro-fmt { display: flex; flex-wrap: wrap; gap: 8px 10px; justify-content: center; align-items: center; font-size: clamp(14px, 2.3vh, 24px); font-weight: 600; max-width: 100%; }
+.intro-fmt span { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); animation: rise .45s ease both; animation-delay: calc(2.6s + var(--i) * .32s); }
+.intro-fmt .arr { border: 0; background: none; padding: 0; color: var(--muted); }
+.intro-fmt .ko { border-color: rgba(245, 185, 66, .6); color: #ffd479; }
+.intro-fmt .arma { border-color: rgba(255, 93, 93, .6); color: #ff8a7a; }
+.intro-skip { position: absolute; bottom: 14px; right: 18px; font-size: 13px; color: var(--muted); }
+.intro-bar { position: absolute; left: 0; bottom: 0; height: 4px; background: linear-gradient(90deg, var(--accent), #f5b942); animation: intro-bar 6s linear both; }
+@keyframes intro-bar { from { width: 0; } to { width: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .intro *, .champ-overlay * { animation-duration: .01s !important; animation-delay: 0s !important; }
+}
+@media (max-width: 700px) { .intro-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
 @media (max-width: 900px) {
   .boards > .card.focused { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "boardcol" "infocol"; }
@@ -193,12 +310,14 @@ body.focus-mode .boards { display: block; }
 </header>
 <main>
   <section class="boards" id="boards"><div class="empty card">Waiting for the tournament to start...</div></section>
-  <aside class="side">
-    <div class="card"><h2>Standings (Elo)</h2><div id="standings"></div></div>
+  <aside class="side" id="side">
+    <div class="card" id="standingsCard"><h2 id="standingsTitle">Standings (Elo)</h2><div id="standings"></div></div>
+    <div class="card" id="bracketCard" hidden><h2 id="bracketTitle">Bracket</h2><div id="bracket"></div></div>
     <div class="card"><h2>Rounds</h2><div id="rounds"></div></div>
     <div class="card"><h2>Rules</h2><ul class="rules" id="rules"></ul></div>
   </aside>
 </main>
+<div class="champ-overlay" id="champOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="champName"><canvas id="confetti"></canvas><div class="champ-card" id="champCard"></div></div>
 <script>
 const GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
 const NAG_CLASS = { "??": "blunder", "?": "mistake", "?!": "dubious", "!": "good" };
@@ -216,21 +335,59 @@ const replayEval = {};        // "game|ply" -> Stockfish result for replay posit
 let replayFetchAt = 0;
 const cards = new Map();      // game id -> persistent card DOM + render keys
 
+// Auto-focus: the page follows the board being commentated (or, without commentary, the most
+// interesting live board). A board the viewer picks by hand pins the commentator and turns it off.
+let autoFocus = store("swissAutoFocus") !== "off";
+let focusPinned = false;      // true = the viewer chose this board (pins the commentator); false = auto-focus put it there
+let autoReason = "";          // why auto-focus shows the current board (chip text)
+let lastAutoSwitch = 0;       // last self-driven switch (never more often than AUTO_GAP_MS)
+let lastClipAt = 0;           // last commentary clip start or end: the commentary drives auto-focus while recent
+const AUTO_GAP_MS = 20000;
+const CLIP_DRIVE_MS = 60000;
+const introForced = /(^#|[#&])intro\b/.test(location.hash);
+const champForced = /(^#|[#&])champion\b/.test(location.hash);
+
 function readHash() {
   const m = location.hash.match(/focus=([^&]+)/);
   focusId = m ? decodeURIComponent(m[1]) : null;
 }
 readHash();
-function setFocus(id) {
-  if (id === focusId) return;
-  focusId = id;
-  const url = id ? `#focus=${encodeURIComponent(id)}` : location.pathname + location.search;
-  try { history.pushState(null, "", url); } catch (e) { location.hash = id ? `focus=${encodeURIComponent(id)}` : ""; }
-  if (id) window.scrollTo(0, 0);
+if (focusId) { focusPinned = true; autoFocus = false; }   // a #focus link is the viewer's own choice
+function setAutoFocus(on) {
+  autoFocus = on;
+  store("swissAutoFocus", on ? "on" : "off");
+  if (on) { focusPinned = false; lastAutoSwitch = 0; autoTick(true); }
+  else if (focusId) focusPinned = true;   // stay on this board, now as the viewer's own choice
   render();
 }
-window.addEventListener("popstate", () => { readHash(); render(); });
-window.addEventListener("hashchange", () => { readHash(); render(); });
+// opts.auto: auto-focus moved the view (no history entry, commentator not pinned).
+function setFocus(id, opts) {
+  const auto = !!(opts && opts.auto);
+  if (!auto) {
+    if (autoFocus) { autoFocus = false; store("swissAutoFocus", "off"); }
+    focusPinned = !!id;
+  }
+  if (id === focusId) { render(); return; }
+  focusId = id;
+  const url = id ? `#focus=${encodeURIComponent(id)}` : location.pathname + location.search;
+  try { if (auto) history.replaceState(null, "", url); else history.pushState(null, "", url); } catch (e) { location.hash = id ? `focus=${encodeURIComponent(id)}` : ""; }
+  if (id) window.scrollTo(0, 0);
+  render();
+  if (auto && id && cards.has(id)) {
+    const el = cards.get(id).el;
+    el.classList.remove("switch-in"); void el.offsetWidth; el.classList.add("switch-in");
+  }
+}
+function onHistory() {
+  const before = focusId;
+  readHash();
+  if (focusId === before) return;
+  if (autoFocus) { autoFocus = false; store("swissAutoFocus", "off"); }   // back/forward is a manual choice
+  focusPinned = !!focusId;
+  render();
+}
+window.addEventListener("popstate", onHistory);
+window.addEventListener("hashchange", onHistory);
 
 function evalText(a) {
   if (!a) return "...";
@@ -506,13 +663,21 @@ function updateCard(c, game, now) {
   const ply = pinned && replayPly !== null ? Math.min(replayPly, total) : total;
   const ann = (data.annotations || {})[game.id] || {};
   c.el.classList.toggle("focused", focused);
-  const onAir = !focusId && clipPlaying && caption && caption.game === game.id;
+  const onAir = (!focusId || !focusPinned) && clipPlaying && caption && caption.game === game.id;
   c.el.classList.toggle("on-air", !!onAir);
   const pill = live ? `<span class="result-pill live">LIVE - move ${Math.floor(total / 2) + 1}</span>`
-    : `<span class="result-pill">${esc(game.result || "*")}</span>`;
+    : `<span class="result-pill">${esc(game.status === "pending" ? "next" : (game.result || "*"))}</span>`;
   const btn = focused ? `<button class="linkbtn small" data-unfocus title="Back to all boards (Esc)">Back to all boards</button>`
     : `<button class="linkbtn small" data-focus="${esc(game.id)}" title="Show only this board, large">Focus</button>`;
-  setHTML(p.head, `<span class="tag">Round ${game.round} - Board ${game.board}${pinned && ply < total ? " - replay" : ""}</span><span class="head-right">${onAir ? `<span class="air-tag" title="The spoken commentary is about this board">On commentary</span>` : ""}${pill}${btn}</span>`);
+  const hit = pairingOf(game.id);
+  const pr = hit ? hit.pairing : null;
+  const label = (pr && pr.label) || game.label || `Round ${game.round} - Board ${game.board}`;
+  const koGame = !!((pr && pr.match) || game.match);
+  const cfg = data.config || {};
+  const armaInc = cfg.armageddonIncrementMs ?? cfg.incrementMs ?? 0;
+  const arma = isArmageddon(game, pr) ? `<span class="arma-band" title="Armageddon decider: White has more time, a draw counts as a Black win"><b>ARMAGEDDON</b><span class="odds">draw = Black wins</span>`
+    + `<span class="clk">White ${clock(cfg.armageddonWhiteMs || 600000)}, Black ${clock(cfg.armageddonBlackMs || 450000)}${armaInc ? `, +${Math.round(armaInc / 1000)} s` : ""}</span></span>` : "";
+  setHTML(p.head, `<span class="tag ${koGame ? "ko" : ""}">${esc(label)}${pinned && ply < total ? " - replay" : ""}</span><span class="head-right">${onAir ? `<span class="air-tag" title="The spoken commentary is about this board">On commentary</span>` : ""}${pill}${btn}</span>${arma}`);
   updateBar(p.black, game, "black", now);
   updateBar(p.white, game, "white", now);
   const boardKey = `${total}|${ply}|${game.fen}`;
@@ -584,18 +749,24 @@ function render() {
   document.title = (focusId && data.games && data.games[focusId] ? `${data.games[focusId].white} vs ${data.games[focusId].black} - ` : "") + (data.title || "AI Chess Swiss");
   const cfg = data.config || {};
   const finished = data.finished;
+  const fmt = fmtInfo();
+  const koSize = (fmt && fmt.ko_size) || cfg.knockoutSize || 4;
   setHTML(document.getElementById("chips"), [
-    finished ? `<span class="chip done">Finished - winner <b>${esc(data.winner || "")}</b></span>` : `<span class="chip live">Round <b>${data.current_round}</b> of ${cfg.rounds}</span>`,
+    stageChip(cfg),
     data.paused ? `<span class="chip" title="${esc(data.paused)}">Paused: a provider is unavailable; the game will be replayed</span>` : "",
     `<span class="chip"><b>${Math.round((cfg.timeControlMs || 0) / 60000)} min${cfg.incrementMs ? " + " + Math.round(cfg.incrementMs / 1000) + " s" : ""}</b> per player</span>`,
     `<span class="chip"><b>${cfg.maxAttempts}</b> tries per move, then forfeit</span>`,
-    `<span class="chip">Swiss, Elo start <b>${cfg.startElo}</b>, K=${cfg.eloK}</span>`,
+    fmt ? `<span class="chip">Round robin, top <b>${koSize}</b> to the knockouts, Elo start <b>${cfg.startElo}</b></span>`
+      : `<span class="chip">Swiss, Elo start <b>${cfg.startElo}</b>, K=${cfg.eloK}</span>`,
+    `<span class="chip btn ${autoFocus ? "on" : ""}" data-toggle-autofocus title="${autoFocus ? "The page follows the commentary, or the most interesting live board. Click a board yourself to stay on it." : "Click to follow the commentary, or the most interesting live board, automatically"}">Auto-focus: <b>${autoFocus ? "on" : "off"}</b>${autoFocus && focusId && autoReason ? ` - ${esc(autoReason)}` : ""}</span>`,
     data.analysis_engine ? `<span class="chip btn ${analysisOn ? "on" : ""}" data-toggle-analysis title="Viewer-only engine analysis; the AI players never see it">${esc(data.analysis_engine)} analysis: <b>${analysisOn ? "on" : "off"}</b></span>` : "",
     `<span class="chip btn ${soundOn ? "on" : ""}" data-toggle-sound title="A short click whenever a new move appears on a visible board">Move sound: <b>${soundOn ? "on" : "off"}</b></span>`,
     data.commentary ? `<span class="chip btn ${commentaryOn ? (needGesture ? "wait" : "on") : ""}" data-toggle-commentary title="Spoken commentary: it moves between the leaders and the most interesting games; in focus mode it stays on the focused board">Commentary: <b>${commentaryOn ? (needGesture ? "click to start" : "on") : "muted"}</b></span>` : "",
   ].join(""));
   renderBoards();
   const games = data.games || {};
+  document.getElementById("standingsTitle").textContent = fmt ? "Round robin table (Elo)" : "Standings (Elo)";
+  renderBracket();
   const rows = (data.standings || []).map(r => {
     const d = r.elo_delta || 0;
     return `<tr class="${r.rank === 1 && (r.played || 0) > 0 ? "rank1" : ""}"><td>${r.rank}</td><td class="player">${esc(r.name)}<span class="route">${esc(route(r.name))}</span></td>`
@@ -607,23 +778,337 @@ function render() {
     const pairs = r.pairings.map(p => {
       const g = games[p.game_id] || {};
       const res = g.status === "live" ? `<span class="r live">LIVE</span>` : `<span class="r">${esc(g.result && g.result !== "*" ? g.result.replace("1/2-1/2", "½-½") : "-")}</span>`;
-      return `<div class="pair ${selected === p.game_id ? "sel" : ""}" data-pick="${esc(p.game_id)}"><span class="w">${esc(p.white)}</span>${res}<span class="b">${esc(p.black)}</span>`
+      const lbl = p.label ? `<span class="lbl">${esc(p.label)}${p.armageddon ? `<span class="a">ARMAGEDDON</span>` : ""}</span>` : "";
+      return `<div class="pair ${selected === p.game_id ? "sel" : ""}" data-pick="${esc(p.game_id)}">${lbl}<span class="w">${esc(p.white)}</span>${res}<span class="b">${esc(p.black)}</span>`
         + (g.termination ? `<span class="why">${esc(g.termination)}</span>` : "") + `</div>`;
     }).join("");
-    return `<div class="round"><div class="round-title"><span>Round ${r.round}</span><span>${r.status === "finished" ? "done" : "playing"}</span></div>${pairs}${r.bye ? `<div class="bye">Bye: ${esc(r.bye)} (sits out this round${cfg.byePoints ? `, +${cfg.byePoints}` : ", no points"})</div>` : ""}</div>`;
+    const title = r.label || (fmt && !r.stage ? `Round ${r.round} of ${fmt.rr_rounds || cfg.rounds}` : `Round ${r.round}`);
+    return `<div class="round"><div class="round-title"><span>${esc(title)}</span><span>${r.status === "finished" ? "done" : "playing"}</span></div>${pairs}${r.bye ? `<div class="bye">Bye: ${esc(r.bye)} (sits out this round${cfg.byePoints ? `, +${cfg.byePoints}` : ", no points"})</div>` : ""}</div>`;
   }).join("") || `<div class="empty">No rounds yet</div>`);
+  const formatRules = fmt ? [
+    `Round robin, everyone plays everyone once; top ${koSize} to the knockouts.`,
+    "Points: 1 for a win, 0.5 for a draw, 0 for a loss. The round-robin table seeds the knockouts.",
+    `Knockouts: semifinals 1 v ${koSize} and 2 v ${koSize - 1}, then the Final and a third-place match.`,
+    `Knockout draw: an Armageddon decider with colours swapped; White ${clock(cfg.armageddonWhiteMs || 600000)}, Black ${clock(cfg.armageddonBlackMs || 450000)}, a draw counts as a Black win.`,
+  ] : [
+    "Points: 1 for a win, 0.5 for a draw, 0 for a loss or a bye.",
+    "Swiss pairing: same score meets same score, no rematches, one bye each.",
+  ];
   setHTML(document.getElementById("rules"), [
     "Each AI picks every move itself: no tools, no code, no chess engine.",
     `${cfg.maxAttempts} replies per move; an illegal or broken reply is rejected with the reason, the third one forfeits the game.`,
     `${Math.round((cfg.timeControlMs || 0) / 60000)} minutes of model thinking time per player, ${cfg.incrementMs ? "+" + Math.round(cfg.incrementMs / 1000) + " s per move" : "no increment"}; the clock runs out = loss on time.`,
     "Every model thinks at High effort. Past the move cap (1.5x its time budget) its thinking stops, it gets all of that thinking back and gives its move. Running out of time is never an invalid reply.",
-    "Points: 1 for a win, 0.5 for a draw, 0 for a loss or a bye.",
-    "Swiss pairing: same score meets same score, no rematches, one bye each.",
+    ...formatRules,
     "Stockfish analysis is for viewers only: the AI players never see it.",
     data.annotation_engine ? "Move marks (?? ? ?! !) come from Stockfish 19 for viewers only." : "",
     "Thinking shows what each model chose to reveal while deciding: raw reasoning for most API models, summaries for GPT and Claude, search lines for Stockfish.",
   ].filter(Boolean).map(x => `<li>${esc(x)}</li>`).join(""));
   syncCommentaryTarget();
+}
+
+// ---- round robin + knockouts (state fields "format", "stage", "knockout"; all optional) -----
+function fmtInfo() { return data && data.format && typeof data.format === "object" ? data.format : null; }
+function ko() { return data && data.knockout && typeof data.knockout === "object" ? data.knockout : null; }
+function stageOf() { return data.stage || (data.finished ? "finished" : (fmtInfo() ? "round-robin" : "")); }
+function pairingOf(gid) {
+  for (const r of data.rounds || []) for (const p of r.pairings || []) if (p.game_id === gid) return { round: r, pairing: p };
+  return null;
+}
+function isArmageddon(game, pairing) {
+  if (!pairing && game && game.id) { const hit = pairingOf(game.id); pairing = hit ? hit.pairing : null; }
+  return !!((game && game.armageddon) || (pairing && pairing.armageddon));
+}
+function crownSvg(cls, uid, dim) {
+  const g = `crown-${uid}`;
+  return `<svg class="${cls}" viewBox="0 0 64 54" aria-hidden="true"${dim ? ` opacity=".35"` : ""}><defs><linearGradient id="${g}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3c4"/><stop offset=".55" stop-color="#f5b942"/><stop offset="1" stop-color="#b9780f"/></linearGradient></defs>`
+    + `<path d="M6 19 L19 31 L32 9 L45 31 L58 19 L53 43 H11 Z" fill="url(#${g})" stroke="#8a5a06" stroke-width="1.6" stroke-linejoin="round"/>`
+    + `<rect x="10" y="44" width="44" height="8" rx="2.5" fill="url(#${g})" stroke="#8a5a06" stroke-width="1.6"/>`
+    + `<circle cx="6" cy="17" r="4.2" fill="url(#${g})" stroke="#8a5a06" stroke-width="1.4"/><circle cx="32" cy="7" r="4.6" fill="url(#${g})" stroke="#8a5a06" stroke-width="1.4"/><circle cx="58" cy="17" r="4.2" fill="url(#${g})" stroke="#8a5a06" stroke-width="1.4"/>`
+    + `<circle cx="22" cy="48" r="2.3" fill="#ff5d5d"/><circle cx="32" cy="48" r="2.3" fill="#5b9dff"/><circle cx="42" cy="48" r="2.3" fill="#34c77b"/></svg>`;
+}
+function stageChip(cfg) {
+  const k = ko(), st = stageOf(), f = fmtInfo();
+  if (k && k.champion) return `<span class="chip stage ko champ btn" data-show-champion title="Show the champion moment again">${crownSvg("ico", "chip")}Champion: <b>${esc(k.champion)}</b></span>`;
+  if (f) {
+    const rnd = (data.rounds || []).find(r => r.round === data.current_round);
+    const armaLive = rnd && (rnd.pairings || []).some(p => p.armageddon && ((data.games || {})[p.game_id] || {}).status === "live");
+    if (st === "semifinals" || st === "final") return `<span class="chip stage ko">${st === "final" ? "Final" : "Semifinals"}${armaLive ? " - Armageddon live" : ""}</span>`;
+    if (st === "finished" || data.finished) return `<span class="chip done">Finished${data.winner ? ` - winner <b>${esc(data.winner)}</b>` : ""}</span>`;
+    return `<span class="chip stage">Round robin - round <b>${data.current_round}</b> of ${f.rr_rounds || cfg.rounds}</span>`;
+  }
+  return data.finished ? `<span class="chip done">Finished - winner <b>${esc(data.winner || "")}</b></span>` : `<span class="chip live">Round <b>${data.current_round}</b> of ${cfg.rounds}</span>`;
+}
+function matchGameList(m) {
+  const ids = Array.isArray(m.games) ? m.games.slice() : [];
+  for (const r of data.rounds || []) for (const p of r.pairings || []) if (p.match === m.id && !ids.includes(p.game_id)) ids.push(p.game_id);
+  return ids.map(id => (data.games || {})[id]).filter(Boolean);
+}
+function seedOf(name) { const k = ko(); const s = k && (k.seeds || []).find(x => x.name === name); return s ? s.seed : ""; }
+function loserOf(m) { return m && m.winner ? (m.winner === m.a ? m.b : m.a) : null; }
+function bkRow(name, seed, tbd, m, games) {
+  if (!name) return `<div class="bk-p"><span class="bk-seed">${seed || "-"}</span><span class="bk-name tbd">${esc(tbd)}</span><span class="bk-res"></span></div>`;
+  const win = m && m.winner === name, out = m && m.winner && m.winner !== name;
+  const res = games.filter(g => g.white === name || g.black === name).map(g => {
+    const colour = g.white === name ? "White" : "Black";
+    if (g.status === "live") return `<span class="lv" title="Playing now with ${colour}">${colour[0]}</span>`;
+    if (!g.result || g.result === "*") return "";
+    const sc = g.result === "1/2-1/2" ? "½" : ((g.result === "1-0") === (g.white === name) ? "1" : "0");
+    return `<span class="${isArmageddon(g) ? "a" : ""}" title="${isArmageddon(g) ? "Armageddon decider" : "Game"} with ${colour}">${sc}</span>`;
+  }).join("");
+  return `<div class="bk-p ${win ? "win" : ""} ${out ? "out" : ""}"><span class="bk-seed" title="Seed">${seed || "-"}</span><span class="bk-name">${esc(name)}</span><span class="bk-res">${res}</span></div>`;
+}
+// o: { label, a, b, aSeed, bSeed, aTbd, bTbd, preview, cls }
+function bkMatchHtml(m, o) {
+  const games = m ? matchGameList(m) : [];
+  const live = games.find(g => g.status === "live");
+  const armaLive = live && isArmageddon(live);
+  const arma = games.find(g => isArmageddon(g));
+  let state = "", why = "";
+  if (m && m.winner) {
+    state = `<span class="bk-state won">${m.decided_by === "armageddon" ? "Won in Armageddon" : (m.stage === "semifinals" ? "Through" : "Won")}</span>`;
+    if (arma && m.decided_by === "armageddon") why = arma.result === "1/2-1/2" ? `Armageddon drawn: ${m.winner} goes through on Black's draw odds` : `${m.winner} won the Armageddon decider`;
+  } else if (armaLive) { state = `<span class="bk-state arma">Armageddon live</span>`; why = "Game 1 drawn: colours swapped, draw = Black wins"; }
+  else if (live) state = `<span class="bk-state live">Live</span>`;
+  else if (o.preview) state = `<span class="bk-state">Provisional</span>`;
+  else state = `<span class="bk-state">${games.length ? "Decider next" : "Up next"}</span>`;
+  const shown = live || games.filter(g => (g.moves || []).length || g.status === "finished").slice(-1)[0];
+  const cls = ["bk-match", o.cls || "", live ? "live" : "", armaLive ? "arma" : "", m && m.winner ? "done" : "", shown && !o.preview ? "click" : ""].filter(Boolean).join(" ");
+  const attrs = shown && !o.preview ? ` data-bk-game="${esc(shown.id)}" title="${live ? "Watch this game" : "Show this game"}"` : "";
+  return `<div class="${cls}"${attrs}><div class="bk-head"><span class="t">${esc(o.label)}</span>${state}</div>`
+    + bkRow(o.a, o.aSeed, o.aTbd, m, games) + bkRow(o.b, o.bSeed, o.bTbd, m, games)
+    + (why ? `<div class="bk-why">${esc(why)}</div>` : "") + `</div>`;
+}
+function renderBracket() {
+  const card = document.getElementById("bracketCard");
+  const f = fmtInfo(), k = ko();
+  const show = !!(k || (f && String(f.type || "").includes("knockout")));
+  if (card.hidden === show) card.hidden = !show;
+  document.getElementById("side").classList.toggle("ko-first", !!k);
+  if (!show) return;
+  document.getElementById("bracketTitle").textContent = k ? "Knockout bracket" : "Road to the final";
+  const champ = k && k.champion ? `<div class="bk-champ won">${crownSvg("", "bk")}<span><span class="bk-head" style="justify-content:center;margin:0">Champion</span><b>${esc(k.champion)}</b></span></div>`
+    : `<div class="bk-champ">${crownSvg("", "bk", true)}<span>Champion: to be crowned</span></div>`;
+  let html;
+  if (k) {
+    const ms = k.matches || [];
+    const semis = ms.filter(m => m.stage === "semifinals");
+    const sf1 = ms.find(m => m.id === "sf1") || semis[0] || null, sf2 = ms.find(m => m.id === "sf2") || semis[1] || null;
+    const fin = ms.find(m => m.id === "final") || null, third = ms.find(m => m.id === "third") || null;
+    const semi = (m, n) => bkMatchHtml(m, { label: (m && m.label) || `Semifinal ${n}`, a: m && m.a, b: m && m.b, aSeed: m && seedOf(m.a), bSeed: m && seedOf(m.b), aTbd: "To be decided", bTbd: "To be decided" });
+    const fa = fin ? fin.a : sf1 && sf1.winner, fb = fin ? fin.b : sf2 && sf2.winner;
+    const ta = third ? third.a : loserOf(sf1), tb = third ? third.b : loserOf(sf2);
+    html = `<div class="bk-semis">${semi(sf1, 1)}${semi(sf2, 2)}</div><div class="bk-join"></div>`
+      + bkMatchHtml(fin, { label: "Final", cls: "bk-final", a: fa, b: fb, aSeed: seedOf(fa), bSeed: seedOf(fb), aTbd: "Winner of Semifinal 1", bTbd: "Winner of Semifinal 2" })
+      + champ
+      + `<div class="bk-third">${bkMatchHtml(third, { label: "Third place", a: ta, b: tb, aSeed: seedOf(ta), bSeed: seedOf(tb), aTbd: "Loser of Semifinal 1", bTbd: "Loser of Semifinal 2" })}</div>`;
+  } else {
+    const cfg = data.config || {};
+    const size = f.ko_size || 4, rr = f.rr_rounds || cfg.rounds;
+    const rows = (data.standings || []).slice().sort((a, b) => (a.rank || 99) - (b.rank || 99));
+    const played = rows.some(r => (r.played || 0) > 0);
+    const done = (data.rounds || []).filter(r => !r.stage && r.status === "finished").length;
+    const nm = i => (played && rows[i] ? rows[i].name : null);
+    const note = played ? `Provisional: the top ${size} now, after ${done} of ${rr} rounds. Semifinals are 1 v ${size} and 2 v ${size - 1}.`
+      : `The top ${size} of the round robin meet here: 1 v ${size} and 2 v ${size - 1}.`;
+    html = `<div class="bk-note">${esc(note)}</div><div class="bk-semis">`
+      + bkMatchHtml(null, { label: "Semifinal 1", preview: true, a: nm(0), b: nm(size - 1), aSeed: 1, bSeed: size, aTbd: "Seed 1", bTbd: `Seed ${size}` })
+      + bkMatchHtml(null, { label: "Semifinal 2", preview: true, a: nm(1), b: nm(size - 2), aSeed: 2, bSeed: size - 1, aTbd: "Seed 2", bTbd: `Seed ${size - 1}` })
+      + `</div><div class="bk-join"></div>`
+      + bkMatchHtml(null, { label: "Final", preview: true, cls: "bk-final", aTbd: "Winner of Semifinal 1", bTbd: "Winner of Semifinal 2" })
+      + champ;
+  }
+  setHTML(document.getElementById("bracket"), html);
+}
+
+// ---- auto-focus without commentary: the most interesting live board -----------------------------
+function liveClockMs(game, side, now) {
+  let clk = game.clocks ? game.clocks[side] : ((data.config || {}).timeControlMs || 0);
+  if (game.thinking && game.thinking.side === side && game.thinking.since_epoch_ms) clk -= Math.max(0, now - game.thinking.since_epoch_ms);
+  return clk;
+}
+function boardInterest(game, now) {
+  const hit = pairingOf(game.id), pr = hit ? hit.pairing : null;
+  const moves = game.moves || [], total = moves.length;
+  const ann = (data.annotations || {})[game.id] || {};
+  const rank = Math.min(standingRow(game.white).rank || 99, standingRow(game.black).rank || 99);
+  const san = total ? String(moves[total - 1].san || "") : "";
+  const bad = m => m === "??" || m === "?";
+  let tier = 5, why = "the leaders";
+  if ((pr && pr.match === "final") || game.match === "final") { tier = 0; why = "the Final"; }
+  else if (isArmageddon(game, pr)) { tier = 1; why = "Armageddon"; }
+  else if (bad(ann[total]) || bad(ann[total - 1])) { tier = 2; why = "a fresh mistake"; }
+  else if (/[+#x]/.test(san)) { tier = 3; why = /[+#]/.test(san) ? "a check" : "a capture"; }
+  else if (Math.min(liveClockMs(game, "white", now), liveClockMs(game, "black", now)) < 60000) { tier = 4; why = "a clock under 1:00"; }
+  return { id: game.id, tier, rank, why };
+}
+function clipDriven(now) {
+  return !!(data.commentary && commentaryOn && !needGesture && lastClipAt && (clipPlaying || now - lastClipAt < CLIP_DRIVE_MS));
+}
+let focusLiveAt = 0;          // last time the auto-focused game was seen live (a finished game stays up a while)
+function autoTick(force) {
+  if (!autoFocus || !data || !data.games) return;
+  const now = Date.now();
+  if (clipDriven(now)) { autoReason = "following the commentary"; return; }   // the commentary picks the board
+  const live = Object.values(data.games).filter(g => g.status === "live");
+  if (!live.length) return;                                     // nothing live: keep what is shown
+  const scored = live.map(g => boardInterest(g, now)).sort((a, b) => a.tier - b.tier || a.rank - b.rank || (a.id < b.id ? -1 : 1));
+  const best = scored[0];
+  const cur = focusId ? scored.find(x => x.id === focusId) : null;
+  if (cur) focusLiveAt = now;
+  if (cur && best.tier >= cur.tier) { autoReason = cur.why; return; }   // as interesting as any: stay
+  const since = cur ? lastAutoSwitch : Math.max(lastAutoSwitch, focusLiveAt);
+  if (!force && focusId && data.games[focusId] && now - since < AUTO_GAP_MS) return;
+  autoReason = best.why;
+  lastAutoSwitch = now;
+  setFocus(best.id, { auto: true });
+}
+
+// ---- opening hook: a 6 second title card --------------------------------------------------
+let polls = 0;
+let introEl = null, introDone = false, introTimer = null;
+function maybeIntro() {
+  if (introDone || !data || !data.id) return;
+  const games = Object.values(data.games || {});
+  const anyFinished = games.some(g => g.status === "finished");
+  const started = games.some(g => g.status === "live" && (g.moves || []).length > 0);
+  if (introForced || (!anyFinished && started)) showIntro();
+  else if (anyFinished) introDone = true;
+}
+function showIntro() {
+  introDone = true;
+  const cfg = data.config || {}, f = fmtInfo();
+  const names = (data.players || []).map(p => p.name).filter(Boolean);
+  const steps = f ? [["", `Round robin: ${f.rr_rounds || cfg.rounds} rounds`], ["ko", `Top ${f.ko_size || 4}: semifinals`], ["ko", "Final"], ["arma", "Draw? Armageddon decides"]]
+    : [["", `Swiss: ${cfg.rounds || ""} rounds`], ["ko", "Most points takes the crown"]];
+  const fmtHtml = steps.map(([cls, t], i) => (i ? `<span class="arr" style="--i:${i * 2 - 1}">&rarr;</span>` : "") + `<span class="${cls}" style="--i:${i * 2}">${esc(t)}</span>`).join("");
+  const grid = names.map((nm, i) => {
+    const dx = (i % 2 ? 1 : -1) * (30 + (i * 17) % 40), dy = ((i * 37) % 70) - 35, r = ((i * 53) % 50) - 25;
+    return `<div class="intro-p" style="--i:${i};--dx:${dx}vw;--dy:${dy}vh;--r:${r}deg">${esc(nm)}</div>`;
+  }).join("");
+  const el = document.createElement("div");
+  el.className = "intro";
+  el.dataset.intro = "";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", "Tournament intro, click or press Escape to skip");
+  el.innerHTML = `<div class="intro-kicker">${esc(data.title || "AI Chess")}</div>`
+    + `<h2 class="intro-head"><span class="a">${names.length ? names.length + " AIs." : "The AIs."}</span> <span class="b">1 crown.</span></h2>`
+    + `<div class="intro-grid">${grid}</div><div class="intro-fmt">${fmtHtml}</div><div class="intro-skip">Click or press Esc to skip</div><div class="intro-bar"></div>`;
+  document.body.appendChild(el);
+  introEl = el;
+  introTimer = setTimeout(hideIntro, 6000);
+}
+function hideIntro() {
+  if (!introEl) return;
+  clearTimeout(introTimer);
+  const el = introEl;
+  introEl = null;
+  el.classList.add("leaving");
+  setTimeout(() => el.remove(), 380);
+}
+
+// ---- champion moment ------------------------------------------------------------------------
+let champSeen = null;
+function checkChampion() {
+  const k = ko();
+  const name = k && k.champion;
+  if (!name || champSeen === name) return;
+  champSeen = name;
+  // Crowned while watching (or #champion): play it. Page opened later: show it without the show.
+  showChampion(polls > 1 || champForced);
+}
+function champHtml(k) {
+  const seed = (k.seeds || []).find(s => s.name === k.champion);
+  const fin = (k.matches || []).find(m => m.id === "final");
+  let line = "";
+  if (fin) {
+    const done = matchGameList(fin).filter(g => g.result && g.result !== "*");
+    const g = done[done.length - 1];
+    if (g) line = `Final: ${g.white} ${g.result === "1/2-1/2" ? "½-½" : g.result} ${g.black}${fin.decided_by === "armageddon" ? ", Armageddon decider" : ""}${g.termination ? ` (${g.termination})` : ""}`;
+  }
+  return crownSvg("champ-crown", "big")
+    + `<div class="champ-kicker">${esc(data.title || "AI Chess")}</div>`
+    + `<div class="champ-name" id="champName">${esc(k.champion)}</div><div class="champ-sub">is the champion</div>`
+    + (seed ? `<div class="champ-seed">Seed ${seed.seed} after the round robin${seed.points !== undefined && seed.points !== null ? `, ${seed.points} points` : ""}</div>` : "")
+    + `<div class="podium">${k.runner_up ? `<div class="silver"><div class="lbl">Runner-up</div><div class="nm">${esc(k.runner_up)}</div></div>` : ""}`
+    + `${k.third ? `<div class="bronze"><div class="lbl">Third place</div><div class="nm">${esc(k.third)}</div></div>` : ""}</div>`
+    + (line ? `<p class="champ-line">${esc(line)}</p>` : "")
+    + `<button type="button" class="champ-btn" data-close-champion>Back to the boards</button>`;
+}
+function showChampion(animate) {
+  const k = ko();
+  if (!k || !k.champion) return;
+  const ov = document.getElementById("champOverlay");
+  document.getElementById("champCard").innerHTML = champHtml(k);
+  ov.classList.toggle("play", !!animate);
+  ov.hidden = false;
+  stopConfetti();
+  let still = false;
+  try { still = matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { /* old browser */ }
+  if (animate && !still) startConfetti();
+}
+function hideChampion() {
+  document.getElementById("champOverlay").hidden = true;
+  stopConfetti();
+}
+let confettiRaf = 0;
+function stopConfetti() {
+  if (confettiRaf) cancelAnimationFrame(confettiRaf);
+  confettiRaf = 0;
+  const cv = document.getElementById("confetti");
+  const ctx = cv.getContext && cv.getContext("2d");
+  if (ctx) ctx.clearRect(0, 0, cv.width, cv.height);
+}
+function startConfetti() {
+  const cv = document.getElementById("confetti");
+  const ctx = cv.getContext && cv.getContext("2d");
+  if (!ctx) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+  cv.style.opacity = "1";
+  const colors = ["#f5b942", "#ffd479", "#5b9dff", "#34c77b", "#ff5d5d", "#eef1f5", "#c58bff"];
+  const parts = [];
+  const spawn = (n, burst) => {
+    for (let i = 0; i < n; i++) {
+      const left = Math.random() < 0.5;
+      const p = burst
+        ? { x: left ? -10 : innerWidth + 10, y: innerHeight * (0.55 + Math.random() * 0.3), vx: (left ? 1 : -1) * (5 + Math.random() * 10), vy: -(9 + Math.random() * 11) }
+        : { x: Math.random() * innerWidth, y: -20 - Math.random() * 60, vx: (Math.random() - 0.5) * 2, vy: 1.5 + Math.random() * 2.5 };
+      Object.assign(p, { w: 6 + Math.random() * 6, h: 9 + Math.random() * 8, rot: Math.random() * 6.3, vr: (Math.random() - 0.5) * 0.3,
+        phase: Math.random() * 6.3, c: colors[(Math.random() * colors.length) | 0], round: Math.random() < 0.2 });
+      parts.push(p);
+    }
+  };
+  spawn(160, true);
+  const t0 = performance.now();
+  let last = t0;
+  const frame = t => {
+    const age = (t - t0) / 1000, dt = Math.min(2.5, (t - last) / 16.67);
+    last = t;
+    if (age < 6) spawn(Math.random() < 0.6 ? 2 : 1, false);
+    if (age > 8.2 && cv.style.opacity !== "0") cv.style.opacity = "0";     // settles: fades out over ~1.2 s
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      p.vx *= Math.pow(0.985, dt);
+      p.vy = Math.min(p.vy + 0.2 * dt, 4.5 + p.h * 0.1);
+      p.x += (p.vx + Math.sin(p.phase + age * 3) * 0.7) * dt;
+      p.y += p.vy * dt;
+      p.rot += p.vr * dt;
+      if (p.y > innerHeight + 30) { parts.splice(i, 1); continue; }
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.scale(1, Math.cos(p.rot * 1.7));
+      ctx.fillStyle = p.c;
+      if (p.round) { ctx.beginPath(); ctx.arc(0, 0, p.w / 2, 0, 6.283); ctx.fill(); } else ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+    if (age < 9.6) confettiRaf = requestAnimationFrame(frame);
+    else { ctx.clearRect(0, 0, innerWidth, innerHeight); confettiRaf = 0; }
+  };
+  confettiRaf = requestAnimationFrame(frame);
 }
 
 // ---- move sound: a short wooden click, synthesized (no audio files) -------------------------
@@ -695,14 +1180,14 @@ function stopClip() {
 function clipWanted(clip) {
   const game = (data.games || {})[clip.game];
   if (!game) return false;
-  if (focusId && clip.game !== focusId) return false;          // focus mode: only the focused board
+  if (focusId && focusPinned && clip.game !== focusId) return false;   // viewer's own focus: only that board
   return (game.moves || []).length - (clip.ply || 0) <= 2;     // stale: more than 2 plies behind
 }
 function syncCommentaryTarget() {
   if (!data || !data.commentary) return;
-  if (focusId && caption && caption.game !== focusId) stopClip();   // entered focus on another board
-  // Entering focus pins the commentator to that board; leaving it hands the choice back.
-  const want = focusId && data.games && data.games[focusId] ? focusId : null;
+  if (focusId && focusPinned && caption && caption.game !== focusId) stopClip();   // the viewer focused another board
+  // A board the viewer picks pins the commentator; auto-focus and leaving focus hand the choice back.
+  const want = focusId && focusPinned && data.games && data.games[focusId] ? focusId : null;
   if (want !== focusSent && !(focusSent === undefined && want === null)) {
     focusSent = want;
     const q = want ? `?game=${encodeURIComponent(want)}` : "";
@@ -721,6 +1206,7 @@ function showOnAir(gameId) {
 }
 function clipDone() {
   clearTimeout(clipTimer);
+  lastClipAt = Date.now();
   clipPlaying = false;
   caption = null;
   render();
@@ -732,7 +1218,11 @@ function playNextClip() {
     const clip = commentaryQueue.shift();
     if (!clipWanted(clip)) continue;
     clipPlaying = true;
+    lastClipAt = Date.now();
     caption = { game: clip.game, text: clip.text || "" };
+    // Auto-focus follows the commentary: show the board this clip is about.
+    if (autoFocus && clip.game !== focusId) { autoReason = "following the commentary"; lastAutoSwitch = Date.now(); setFocus(clip.game, { auto: true }); }
+    else if (autoFocus) autoReason = "following the commentary";
     render();
     showOnAir(clip.game);
     if (clip.audio) {
@@ -780,6 +1270,12 @@ setInterval(pollCommentary, 2000);
 document.addEventListener("click", ev => {
   unlockAudio();
   if (needGesture) { needGesture = false; playNextClip(); }
+  if (ev.target.closest("[data-intro]")) { hideIntro(); return; }
+  if (ev.target.closest("[data-close-champion]")) { hideChampion(); return; }
+  if (ev.target.closest("[data-show-champion]")) { showChampion(false); return; }
+  if (ev.target.closest("[data-toggle-autofocus]")) { setAutoFocus(!autoFocus); return; }
+  const bk = ev.target.closest("[data-bk-game]");
+  if (bk) { setFocus(bk.dataset.bkGame); return; }
   if (ev.target.closest("[data-toggle-analysis]")) {
     analysisOn = !analysisOn;
     store("swissAnalysis", analysisOn ? "on" : "off");
@@ -833,6 +1329,8 @@ document.addEventListener("click", ev => {
   render();
 });
 document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape" && introEl) { hideIntro(); return; }
+  if (ev.key === "Escape" && !document.getElementById("champOverlay").hidden) { hideChampion(); return; }
   if (!data || !data.games) return;
   if (ev.key === "Escape") {
     if (focusId) setFocus(null);
@@ -851,7 +1349,15 @@ async function poll() {
   try {
     const q = params.get("id") ? `?id=${encodeURIComponent(params.get("id"))}` : "";
     const res = await fetch(`/api/tournament${q}`, { cache: "no-store" });
-    if (res.ok) { data = await res.json(); soundForNewMoves(); render(); }
+    if (res.ok) {
+      data = await res.json();
+      polls++;
+      soundForNewMoves();
+      render();
+      autoTick(false);
+      maybeIntro();
+      checkChampion();
+    }
   } catch (e) { /* keep the last frame */ }
 }
 poll();
