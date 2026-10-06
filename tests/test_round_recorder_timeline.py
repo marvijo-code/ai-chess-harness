@@ -248,6 +248,116 @@ class MixPlanTests(unittest.TestCase):
         self.assertIn("anullsrc", silent[0])
 
 
+class FastForwardTests(unittest.TestCase):
+    def test_merge_and_subtract(self):
+        self.assertEqual(tl.merge_intervals([(5, 8), (0, 2), (1, 3), (8, 9)]), [(0, 3), (5, 9)])
+        self.assertEqual(tl.merge_intervals([(0, 2), (2.5, 3)], join=1.0), [(0, 3)])
+        self.assertEqual(tl.subtract_intervals((0, 100), [(10, 20), (15, 30), (90, 120)]), [(0, 10), (30, 90)])
+        self.assertEqual(tl.subtract_intervals((0, 10), [(-5, 50)]), [])
+
+    def test_clip_busy_lead_and_tail(self):
+        self.assertEqual(tl.clip_busy([(100.0, 110.0)]), [(99.0, 110.5)])
+
+    def test_gaps_longer_than_min_become_ff(self):
+        busy = tl.clip_busy([(20.0, 30.0), (45.0, 50.0), (120.0, 130.0)])
+        ff = tl.ff_spans(0.0, 200.0, busy, [])
+        # 0..19 (19 s) yes, 30.5..44 (13.5 s) yes, 50.5..119 yes, 130.5..200 yes
+        self.assertEqual([(round(a, 3), round(b, 3)) for a, b, _ in ff],
+                         [(0.0, 19.0), (30.5, 44.0), (50.5, 119.0), (130.5, 200.0)])
+        self.assertTrue(all(s == tl.FF_SPEED for *_, s in ff))
+
+    def test_short_gap_stays_normal(self):
+        busy = tl.clip_busy([(20.0, 30.0), (40.0, 50.0)])       # gap 30.5..39 = 8.5 s < 10
+        ff = tl.ff_spans(19.0, 50.5, busy, [])
+        self.assertEqual(ff, [])
+        busy = tl.clip_busy([(20.0, 30.0), (41.5, 50.0)])       # gap 30.5..40.5 = exactly 10 s: not longer
+        self.assertEqual(tl.ff_spans(19.0, 50.5, busy, []), [])
+
+    def test_tours_are_not_fast_forwarded_and_ff_fills_next_to_them(self):
+        ff = tl.ff_spans(0.0, 300.0, tl.clip_busy([(0.0, 10.0)]), [(50.0, 150.0, 10)])
+        self.assertEqual([(a, b) for a, b, _ in ff], [(10.5, 50.0), (150.0, 300.0)])
+
+    def test_cards_and_champion_are_busy(self):
+        evs = [page("director", 50, k="rcard", a="show", mode="results", round=5),
+               page("director", 80, k="rcard", a="hide", mode="results", round=5),
+               page("director", 150, k="champion", a="show"),
+               page("director", 400, k="rcard", a="hide", mode="intro")]           # stray hide: ignored
+        iv = tl.overlay_intervals(evs, T0, T0 + 200)
+        self.assertEqual([(round(a - T0, 3), round(b - T0, 3)) for a, b in iv], [(50.0, 80.0), (150.0, 200.0)])
+        plan = tl.plan_spans(evs, T0, T0, T0 + 200, 0.0, 200.0, [])
+        self.assertEqual([(round(a, 3), round(b, 3)) for a, b, _ in plan["ff"]], [(0.0, 50.0), (80.0, 150.0)])
+
+    def test_tour_never_starts_inside_speech(self):
+        trimmed = tl.trim_tours([(100.0, 200.0, 10)], tl.clip_busy([(95.0, 104.0)]))
+        self.assertEqual(trimmed, [(104.5, 200.0, 10)])
+        self.assertEqual(tl.trim_tours([(100.0, 106.0, 10)], tl.clip_busy([(95.0, 99.0)])), [])   # too short left
+
+    def test_plan_segments_frame_exact_and_kinds(self):
+        evs = [tour("start", 300, speed=10), tour("end", 420)]
+        clips = [(5.0, 15.0), (200.0, 212.0), (299.0, 303.0), (500.0, 510.0)]
+        plan = tl.plan_spans(evs, T0, T0, T0 + 600, 0.0, 600.0, clips)
+        segk = plan["segments"]
+        self.assertEqual(segk[0][0], 0.0)
+        self.assertEqual(segk[-1][1], 600.0)
+        for (a, b, s, k), nxt in zip(segk, segk[1:] + [None]):
+            self.assertAlmostEqual(a * 30, round(a * 30), places=4)
+            if nxt:
+                self.assertAlmostEqual(b, nxt[0])
+            if s > 1:
+                self.assertEqual(round((b - a) * 30) % s, 0)
+            for cs, ce in clips:                        # no sped-up segment overlaps speech
+                if s > 1:
+                    self.assertFalse(a < ce and cs < b, (a, b, cs, ce))
+        kinds = [k for *_, k in segk]
+        self.assertIn("ff", kinds)
+        self.assertIn("tour", kinds)
+        tour_seg = [x for x in segk if x[3] == "tour"][0]
+        self.assertGreaterEqual(tour_seg[0], 303.5 - 1 / 30)      # trimmed past the clip tail
+        segs = [x[:3] for x in segk]
+        self.assertAlmostEqual(tl.output_duration(segs), sum(r[5] for r in tl.output_table(segs)) / 30)
+        # clip offsets stay where the plan put them (linear inside normal segments)
+        self.assertAlmostEqual(tl.remap(200.0, segs) + 12.0, tl.remap(212.0, segs), places=6)
+
+    def test_no_fast_forward_switch(self):
+        plan = tl.plan_spans([], T0, T0, T0 + 100, 0.0, 100.0, [], fast_forward=False)
+        self.assertEqual(plan["ff"], [])
+        self.assertEqual(plan["segments"], [(0.0, 100.0, 1, "normal")])
+
+    def test_cue_only_on_ff_segments(self):
+        segk = tl.build_segments_k(0.0, 100.0, [(10.0, 40.0, 5, "ff"), (50.0, 80.0, 10, "tour")])
+        cue = tl.cue_filter(">> x5", "/f/DejaVuSans-Bold.ttf")
+        vf = tl.video_filter([s[:3] for s in segk], kinds=[s[3] for s in segk], cue=cue)
+        lines = vf.split(";\n")
+        self.assertEqual(sum("drawtext" in ln for ln in lines), 1)
+        self.assertIn("fps=30,drawtext=", [ln for ln in lines if "/5" in ln][0])
+        self.assertIn("fontcolor=0xffd479", cue)
+
+
+@unittest.skipIf(mix is None, "numpy not installed")
+class MasterAudioTests(unittest.TestCase):
+    def test_retries_until_loudness_and_peak_fit(self):
+        calls = []
+        seq = iter([(-16.7, -1.1), (-16.1, -1.7)])
+
+        def fake_ebur(path):
+            if str(path).endswith("premix.flac"):
+                return -22.0, -8.0, ""
+            i, tp = next(seq)
+            return i, tp, ""
+
+        old_ebur, old_sh = mix.ebur, mix.sh
+        mix.ebur, mix.sh = fake_ebur, lambda cmd: calls.append(cmd)
+        try:
+            res = mix.master_audio(Path("premix.flac"), Path("final.flac"), 60.0)
+        finally:
+            mix.ebur, mix.sh = old_ebur, old_sh
+        self.assertEqual(res["attempts"], 2)
+        self.assertEqual(len(calls), 2)
+        self.assertAlmostEqual(res["gain_db"], 6.0 + 0.7, places=3)
+        self.assertLess(res["limit_db"], mix.FINAL_LIMIT_DB)        # lowered after the -1.1 dBTP miss
+        self.assertIn("latency=1", " ".join(map(str, calls[0])))
+
+
 class SeriesBookTests(unittest.TestCase):
     def test_rounds_json_and_rec_done_markers(self):
         import json

@@ -78,25 +78,49 @@ writes each one to `events.jsonl` as `{kind: "director", t: <page epoch ms>, ...
 - `{k:"rcard", a:"show"|"hide", mode:"intro"|"results"|"ko", round}` - full-screen round card
 - `{k:"champion", a:"show"|"hide"}` - champion overlay
 
-### Time-lapse edit (mix.py --round R)
+### Time-lapse and fast-forward edit (mix.py --round R)
 
-A lapse span runs from a tour `start` to the next tour `end`, clamped to the round window (a start with no
-end closes at the window end). A span in which a commentary clip starts plays at normal speed; spans
-shorter than 8 s are ignored; speed = the event's `speed` (default 10). The segment table
-`[(raw_start, raw_end, speed)]` covers the round, frame aligned, each lapse segment a whole multiple of its
-speed in frames. The video is ONE pass: per segment `trim=start_frame:end_frame,setpts=(PTS-STARTPTS)/S`
-(`fps=30` after it when S > 1) joined with `concat`, libx264 ultrafast CRF 0 yuv444p 30 fps, 2 threads, nice 19.
+Two kinds of sped-up span:
+
+- Tour span (x10): from a tour `start` to the next tour `end`, clamped to the round window (a start with
+  no end closes at the window end). A tour in which a host clip starts plays at normal speed; a tour that
+  begins while a clip is still playing starts after that clip (plus its tail); spans shorter than 8 s are
+  ignored; speed = the event's `speed` (default 10). The page shows its own ribbon here.
+- Fast-forward span (x5, `FF_SPEED`): every other gap longer than 10 s (`FF_MIN_GAP`) that is not busy.
+  Busy = a host clip playing (offset to offset + played) with a 1.0 s lead and a 0.5 s tail, a round card
+  on screen (`rcard show` to `hide`), the champion overlay (`champion show` to `hide`). A gold `>> x5`
+  cue (ffmpeg drawtext, DejaVu Sans Bold, bottom centre) is drawn on these segments only; without drawtext
+  or the font the cue is skipped with a warning. `--no-fast-forward` keeps the tour-only edit.
+
+Measured on the real takes: rounds 5, 6 and 7 (33.3, 30.1 and 26.0 min raw) plan to 12.1, 10.6 and 10.5
+min with fast-forward, against 24.6, 22.8 and 18.5 min with tours only.
+
+The segment table `[(raw_start, raw_end, speed, kind)]` covers the round, frame aligned, each sped-up
+segment a whole multiple of its speed in frames. The video is ONE pass: per segment
+`trim=start_frame:end_frame,setpts=(PTS-STARTPTS)/S` (`fps=30` after it when S > 1, plus the cue on
+fast-forward segments) joined with `concat`, libx264 ultrafast CRF 0 yuv444p 30 fps, 2 threads, nice 19.
 The audio is built on the OUTPUT timeline: each speech clip offset and click time goes through `remap(t)`
-(piecewise linear), clicks inside lapse spans are dropped, a clip still playing at the window start is kept
-from that point, the music bed is looped for the output duration and ducked under the speech, the 24-bit
-FLAC premix gets a two-pass loudnorm (-16 LUFS, true peak target -1.7 dBTP) inside the same final pass,
-FLAC in MKV. Outputs per round, in the run dir:
+(piecewise linear), clicks inside sped-up spans are dropped, a clip still playing at the window start is
+kept from that point, the music bed is looped for the output duration and ducked under the speech. The
+24-bit FLAC premix then gets a gain to -16 LUFS and a limiter at -2.0 dBFS written straight to the
+delivered 16-bit FLAC; that file is measured (EBUR128, true peak) and the pass re-run with a corrected
+gain (and a lower ceiling after a true-peak miss) until it lands within -16 +-0.3 LUFS and <= -1.5 dBTP
+(at most 3 passes). The video pass muxes those exact bytes (`-c:a copy`). Outputs per round, in the run dir:
 
-- `round<R>-live-DRAFT001.mkv` (lossless video, FLAC audio)
-- `round<R>-verify.txt`: durations (video, audio, planned), frames vs duration x 30, loudness, the segment
-  table (raw span, speed, output span), normal-speed tours and why, dropped clicks, volumedetect at clip offsets
-- `grabs-r<R>/`: 4 frame grabs, one inside the longest lapse span when there is one
+- `round<R>-live-DRAFT001.mkv` (lossless video, FLAC audio) and `round<R>-live-DRAFT001.mkv.sha256`
+- `round<R>-verify.txt`: durations (video, audio, planned), frames vs duration x 30, loudness, raw vs
+  output length and how much raw time each speed covers, the segment table (raw span, speed, output
+  span, kind), tours kept normal and why, dropped clicks, volumedetect at clip offsets
+- `grabs-r<R>/`: 4 frame grabs, one inside the longest fast-forward span and one inside the longest tour
 - `mix-r<R>/plan.json` and the filter scripts
+
+Re-mix a finished round with a new name (the raw must still be on the VPS; not while `aclmix` is mixing):
+
+```bash
+cd ~/acl-chess-round-rec && nice -n 19 python3 bin/mix.py runs/<series-run> round7-live-DRAFT002.mkv --round 7 --port 18770 > runs/<series-run>/mix-r7-draft002.log 2>&1
+```
+
+`-SeriesStatus` and `-CollectNew` follow the newest DRAFT of each round that has a `.sha256` file.
 
 ### Disk (the VPS has about 14 GB free)
 

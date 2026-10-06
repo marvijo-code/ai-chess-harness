@@ -166,10 +166,11 @@ if ($seriesMode) {
     $r = Invoke-Vps "bash ~/$RemoteBase/bin/series-status.sh $RunDir"
     $rows = @()
     foreach ($line in ($r.Text -split "`n")) {
-      $m = [regex]::Match($line, '^ROUND key=(\S+) recorded=(\S+) mixed=(\S+) raw=(\S+) draft=(\S+) take_s=(\S+) reason=(\S+) sha256=(\S+)')
+      $m = [regex]::Match($line, '^ROUND key=(\S+) recorded=(\S+) mixed=(\S+) raw=(\S+) draft=(\S+) take_s=(\S+) reason=(\S+) sha256=(\S+)(?: name=(\S+))?')
       if ($m.Success) {
         $rows += [pscustomobject]@{ Key = $m.Groups[1].Value; Recorded = $m.Groups[2].Value; Mixed = $m.Groups[3].Value
-          Raw = $m.Groups[4].Value; Draft = $m.Groups[5].Value; Sha = $m.Groups[8].Value }
+          Raw = $m.Groups[4].Value; Draft = $m.Groups[5].Value; Sha = $m.Groups[8].Value
+          Name = $(if ($m.Groups[9].Success) { $m.Groups[9].Value } else { "round$($m.Groups[1].Value)-live-DRAFT001.mkv" }) }
       }
     }
     return @{ Text = $r.Text; Rows = $rows }
@@ -206,7 +207,8 @@ if ($seriesMode) {
     foreach ($row in $s.Rows) {
       if ($row.Mixed -ne "rc=0") { continue }
       if ($row.Key -notmatch '^[0-9]+(p[0-9]+)?$') { Write-Host "skipping odd key $($row.Key)"; continue }
-      $remoteName = "round$($row.Key)-live-DRAFT001.mkv"
+      $remoteName = $row.Name
+      if ($remoteName -notmatch '^round[0-9]+(p[0-9]+)?-live-DRAFT[0-9]{3}\.mkv$') { Write-Host "skipping odd draft name $remoteName"; continue }
       $sha = $row.Sha
       if ($sha -notmatch '^[0-9a-f]{64}$') {
         $h = Invoke-Vps "sha256sum ~/$RemoteBase/$RunDir/$remoteName | cut -d' ' -f1"
@@ -214,7 +216,7 @@ if ($seriesMode) {
         if ($sha -notmatch '^[0-9a-f]{64}$') { Write-Host "round $($row.Key): no SHA-256 on the VPS ($sha); skipped"; continue }
       }
       if ($ledger.ContainsKey($row.Key) -and $ledger[$row.Key].sha -eq $sha -and (Test-Path $ledger[$row.Key].dest)) { continue }
-      $n = 1
+      $n = [int]([regex]::Match($remoteName, 'DRAFT([0-9]{3})').Groups[1].Value)
       $dest = Join-Path $OutDir ("round{0}-live-DRAFT{1:000}.mkv" -f $row.Key, $n)
       while (Test-Path $dest) {
         if ((Get-FileHash -Algorithm SHA256 $dest).Hash.ToLower() -eq $sha) { break }
