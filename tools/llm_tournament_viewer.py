@@ -163,15 +163,17 @@ body.focus-mode main { grid-template-columns: minmax(0, 1fr); }
 body.focus-mode .side { display: none; }
 body.focus-mode .boards { display: block; }
 .boards > .card.focused { max-width: none; display: grid; gap: 4px 22px; align-items: start;
-  --fboard: max(340px, min(calc(100vh - 290px), calc(100vw - 560px)));
+  --fboard: max(340px, min(calc(100vh - 290px - var(--hdr-extra, 0px)), calc(100vw - 560px)));
   grid-template-columns: var(--fboard) minmax(300px, 1fr); grid-template-areas: "head head" "boardcol infocol"; }
 .card.focused .game-head { grid-area: head; }
 .card.focused .boardcol { grid-area: boardcol; min-width: 0; }
 .card.focused .infocol { grid-area: infocol; min-width: 0; display: flex; flex-direction: column; height: calc(var(--fboard) + 64px); }
 .card.focused .infocol .evalline { margin-top: 6px; }
+.card.focused .infocol > * { flex-shrink: 0; }   /* only the move list and the thinking panel give up height */
 .card.focused .moves { max-height: none; flex: 1 1 auto; min-height: 140px; font-size: 14px; }
-.card.focused .thinking { flex: 0 1 auto; min-height: 0; }
-.card.focused .think-body { max-height: 45vh; font-size: 12px; }
+.card.focused .infocol > .thinking { flex: 0 1 auto; min-height: 34px; overflow: hidden; }
+.card.focused .think-body { max-height: 45vh; font-size: 12px; flex: 1 1 auto; min-height: 0; }
+@media (max-height: 820px) { .card.focused .moves { min-height: 72px; } }
 .card.switch-in { animation: switch-in .45s ease both; }
 @keyframes switch-in { from { opacity: .2; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 /* ---- round robin + knockouts ---------------------------------------------------------------- */
@@ -288,6 +290,31 @@ body.focus-mode .boards { display: block; }
   .intro *, .champ-overlay * { animation-duration: .01s !important; animation-delay: 0s !important; }
 }
 @media (max-width: 700px) { .intro-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Compact bracket beside the big board: focus mode on wide screens only (the side panel is hidden there). */
+.mini-bk { display: none; }
+@media (min-width: 1280px) { .card.focused .mini-bk:not(:empty) { display: block; flex: none; margin-bottom: 4px; } }
+.mb-title { display: flex; justify-content: space-between; align-items: baseline; gap: 2px 10px; flex-wrap: wrap; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.mb-title .mb-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.mb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 6px; }
+.mb-m { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 5px 6px; min-width: 0; }
+.mb-m.click { cursor: pointer; } .mb-m.click:hover { border-color: var(--accent); }
+.mb-m.live { border-color: rgba(52, 199, 123, .55); }
+.mb-m.arma { border-color: rgba(255, 93, 93, .65); }
+.mb-m.done { border-color: rgba(245, 185, 66, .35); }
+.mb-m.here { box-shadow: 0 0 0 2px rgba(91, 157, 255, .55); }
+.mb-h { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 6px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 2px; line-height: 1.3; }
+.mb-h .t { color: var(--text); font-weight: 700; }
+.mb-h .live { color: var(--ok); font-weight: 700; } .mb-h .arma { color: #ff8a7a; font-weight: 700; } .mb-h .won { color: #ffd479; }
+.mb-p { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 5px; align-items: center; padding: 2px 2px; border-radius: 6px; font-size: 12.5px; }
+.mb-p .bk-seed { font-size: 10.5px; line-height: 15px; }
+.mb-n { min-width: 0; overflow-wrap: anywhere; line-height: 1.2; font-weight: 600; }
+.mb-n.tbd, .mb-champ .tbd { color: var(--muted); font-weight: 400; font-style: italic; font-size: 12px; }
+.mb-p.win { background: rgba(245, 185, 66, .15); } .mb-p.win .mb-n { color: #ffd479; }
+.mb-p.out { opacity: .5; }
+.mb-champ { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 1px; border-style: dashed; }
+.mb-champ svg { width: 24px; height: 22px; }
+.mb-champ.won { border: 1px solid rgba(245, 185, 66, .7); background: rgba(245, 185, 66, .14); }
+.mb-champ.won b { color: #ffd479; font-size: 13.5px; overflow-wrap: anywhere; line-height: 1.2; }
 @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
 @media (max-width: 900px) {
   .boards > .card.focused { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "boardcol" "infocol"; }
@@ -474,7 +501,7 @@ function cardFor(id) {
     <div class="boardcol"><div class="pbar" data-part="black"></div>
       <div class="board-wrap" data-part="wrap"><div class="evalbar" data-part="evalbar" title="Stockfish evaluation, White at the bottom"><div class="white" data-part="evalwhite"></div><div class="mid"></div></div><div class="board" data-part="board"></div></div>
       <div class="pbar" data-part="white"></div><div class="caption" data-part="caption" style="display:none"></div></div>
-    <div class="infocol"><div class="evalline" data-part="evalline"></div><div class="comment" data-part="comment"></div>
+    <div class="infocol"><div class="mini-bk" data-part="minibk"></div><div class="evalline" data-part="evalline"></div><div class="comment" data-part="comment"></div>
       <div class="comment" data-part="result" style="display:none"></div><div class="moves" data-part="moves"></div><div class="nav" data-part="nav"></div>
       <div class="thinking" data-part="thinking"><button type="button" class="think-head" data-part="thinkhead" data-think-toggle aria-expanded="false"></button><div class="think-body" data-part="thinkbody" hidden></div></div></div>`;
   const parts = { head: el.querySelector("[data-focus-head]") };
@@ -680,6 +707,7 @@ function updateCard(c, game, now) {
   setHTML(p.head, `<span class="tag ${koGame ? "ko" : ""}">${esc(label)}${pinned && ply < total ? " - replay" : ""}</span><span class="head-right">${onAir ? `<span class="air-tag" title="The spoken commentary is about this board">On commentary</span>` : ""}${pill}${btn}</span>${arma}`);
   updateBar(p.black, game, "black", now);
   updateBar(p.white, game, "white", now);
+  setHTML(p.minibk, focused ? miniBracketHtml(game.id) : "");
   const boardKey = `${total}|${ply}|${game.fen}`;
   if (c.boardKey !== boardKey) {
     c.boardKey = boardKey;
@@ -879,29 +907,22 @@ function bkMatchHtml(m, o) {
     + bkRow(o.a, o.aSeed, o.aTbd, m, games) + bkRow(o.b, o.bSeed, o.bTbd, m, games)
     + (why ? `<div class="bk-why">${esc(why)}</div>` : "") + `</div>`;
 }
-function renderBracket() {
-  const card = document.getElementById("bracketCard");
+// The bracket as data: the side panel and the compact focus-mode bracket draw the same slots.
+function bracketSlots() {
   const f = fmtInfo(), k = ko();
-  const show = !!(k || (f && String(f.type || "").includes("knockout")));
-  if (card.hidden === show) card.hidden = !show;
-  document.getElementById("side").classList.toggle("ko-first", !!k);
-  if (!show) return;
-  document.getElementById("bracketTitle").textContent = k ? "Knockout bracket" : "Road to the final";
-  const champ = k && k.champion ? `<div class="bk-champ won">${crownSvg("", "bk")}<span><span class="bk-head" style="justify-content:center;margin:0">Champion</span><b>${esc(k.champion)}</b></span></div>`
-    : `<div class="bk-champ">${crownSvg("", "bk", true)}<span>Champion: to be crowned</span></div>`;
-  let html;
+  if (!(k || (f && String(f.type || "").includes("knockout")))) return null;
+  const out = { ko: !!k, champion: k && k.champion ? k.champion : null };
   if (k) {
     const ms = k.matches || [];
     const semis = ms.filter(m => m.stage === "semifinals");
     const sf1 = ms.find(m => m.id === "sf1") || semis[0] || null, sf2 = ms.find(m => m.id === "sf2") || semis[1] || null;
     const fin = ms.find(m => m.id === "final") || null, third = ms.find(m => m.id === "third") || null;
-    const semi = (m, n) => bkMatchHtml(m, { label: (m && m.label) || `Semifinal ${n}`, a: m && m.a, b: m && m.b, aSeed: m && seedOf(m.a), bSeed: m && seedOf(m.b), aTbd: "To be decided", bTbd: "To be decided" });
+    const semi = (m, n) => ({ m, o: { label: (m && m.label) || `Semifinal ${n}`, a: m && m.a, b: m && m.b, aSeed: m && seedOf(m.a), bSeed: m && seedOf(m.b), aTbd: "To be decided", bTbd: "To be decided" } });
     const fa = fin ? fin.a : sf1 && sf1.winner, fb = fin ? fin.b : sf2 && sf2.winner;
     const ta = third ? third.a : loserOf(sf1), tb = third ? third.b : loserOf(sf2);
-    html = `<div class="bk-semis">${semi(sf1, 1)}${semi(sf2, 2)}</div><div class="bk-join"></div>`
-      + bkMatchHtml(fin, { label: "Final", cls: "bk-final", a: fa, b: fb, aSeed: seedOf(fa), bSeed: seedOf(fb), aTbd: "Winner of Semifinal 1", bTbd: "Winner of Semifinal 2" })
-      + champ
-      + `<div class="bk-third">${bkMatchHtml(third, { label: "Third place", a: ta, b: tb, aSeed: seedOf(ta), bSeed: seedOf(tb), aTbd: "Loser of Semifinal 1", bTbd: "Loser of Semifinal 2" })}</div>`;
+    out.sf1 = semi(sf1, 1); out.sf2 = semi(sf2, 2);
+    out.fin = { m: fin, o: { label: "Final", cls: "bk-final", a: fa, b: fb, aSeed: seedOf(fa), bSeed: seedOf(fb), aTbd: "Winner of Semifinal 1", bTbd: "Winner of Semifinal 2" } };
+    out.third = { m: third, o: { label: "Third place", a: ta, b: tb, aSeed: seedOf(ta), bSeed: seedOf(tb), aTbd: "Loser of Semifinal 1", bTbd: "Loser of Semifinal 2" } };
   } else {
     const cfg = data.config || {};
     const size = f.ko_size || 4, rr = f.rr_rounds || cfg.rounds;
@@ -909,16 +930,65 @@ function renderBracket() {
     const played = rows.some(r => (r.played || 0) > 0);
     const done = (data.rounds || []).filter(r => !r.stage && r.status === "finished").length;
     const nm = i => (played && rows[i] ? rows[i].name : null);
-    const note = played ? `Provisional: the top ${size} now, after ${done} of ${rr} rounds. Semifinals are 1 v ${size} and 2 v ${size - 1}.`
+    out.note = played ? `Provisional: the top ${size} now, after ${done} of ${rr} rounds. Semifinals are 1 v ${size} and 2 v ${size - 1}.`
       : `The top ${size} of the round robin meet here: 1 v ${size} and 2 v ${size - 1}.`;
-    html = `<div class="bk-note">${esc(note)}</div><div class="bk-semis">`
-      + bkMatchHtml(null, { label: "Semifinal 1", preview: true, a: nm(0), b: nm(size - 1), aSeed: 1, bSeed: size, aTbd: "Seed 1", bTbd: `Seed ${size}` })
-      + bkMatchHtml(null, { label: "Semifinal 2", preview: true, a: nm(1), b: nm(size - 2), aSeed: 2, bSeed: size - 1, aTbd: "Seed 2", bTbd: `Seed ${size - 1}` })
-      + `</div><div class="bk-join"></div>`
-      + bkMatchHtml(null, { label: "Final", preview: true, cls: "bk-final", aTbd: "Winner of Semifinal 1", bTbd: "Winner of Semifinal 2" })
-      + champ;
+    out.short = played ? `Provisional top ${size} after ${done} of ${rr} rounds` : `Top ${size} of the round robin`;
+    out.sf1 = { m: null, o: { label: "Semifinal 1", preview: true, a: nm(0), b: nm(size - 1), aSeed: 1, bSeed: size, aTbd: "Seed 1", bTbd: `Seed ${size}` } };
+    out.sf2 = { m: null, o: { label: "Semifinal 2", preview: true, a: nm(1), b: nm(size - 2), aSeed: 2, bSeed: size - 1, aTbd: "Seed 2", bTbd: `Seed ${size - 1}` } };
+    out.fin = { m: null, o: { label: "Final", preview: true, cls: "bk-final", aTbd: "Winner of Semifinal 1", bTbd: "Winner of Semifinal 2" } };
+    out.third = null;
   }
+  return out;
+}
+function renderBracket() {
+  const card = document.getElementById("bracketCard");
+  const sl = bracketSlots();
+  if (card.hidden === !!sl) card.hidden = !sl;
+  document.getElementById("side").classList.toggle("ko-first", !!(sl && sl.ko));
+  if (!sl) return;
+  document.getElementById("bracketTitle").textContent = sl.ko ? "Knockout bracket" : "Road to the final";
+  const champ = sl.champion ? `<div class="bk-champ won">${crownSvg("", "bk")}<span><span class="bk-head" style="justify-content:center;margin:0">Champion</span><b>${esc(sl.champion)}</b></span></div>`
+    : `<div class="bk-champ">${crownSvg("", "bk", true)}<span>Champion: to be crowned</span></div>`;
+  const html = (sl.note ? `<div class="bk-note">${esc(sl.note)}</div>` : "")
+    + `<div class="bk-semis">${bkMatchHtml(sl.sf1.m, sl.sf1.o)}${bkMatchHtml(sl.sf2.m, sl.sf2.o)}</div><div class="bk-join"></div>`
+    + bkMatchHtml(sl.fin.m, sl.fin.o) + champ
+    + (sl.third ? `<div class="bk-third">${bkMatchHtml(sl.third.m, sl.third.o)}</div>` : "");
   setHTML(document.getElementById("bracket"), html);
+}
+// Compact bracket beside the big board (focus mode, wide screens only; CSS hides it elsewhere).
+function miniMatch(m, o, curId) {
+  const games = m ? matchGameList(m) : [];
+  const live = games.find(g => g.status === "live");
+  const armaLive = live && isArmageddon(live);
+  const arma = games.some(g => isArmageddon(g));
+  let state;
+  if (m && m.winner) state = `<span class="won">${m.decided_by === "armageddon" ? "Won in Armageddon" : (m.stage === "semifinals" ? "Through" : "Won")}</span>`;
+  else if (armaLive) state = `<span class="arma">Armageddon live</span>`;
+  else if (live) state = `<span class="live">Live</span>`;
+  else if (arma) state = `<span class="arma">Armageddon next</span>`;
+  else state = `<span>${o.preview ? "Provisional" : (games.length ? "Decider next" : "Up next")}</span>`;
+  const shown = live || games.filter(g => (g.moves || []).length || g.status === "finished").slice(-1)[0];
+  const here = !!curId && games.some(g => g.id === curId);
+  const click = shown && !o.preview && shown.id !== curId;
+  const row = (name, seed, tbd) => {
+    tbd = String(tbd || "").replace(/^(Winner|Loser) of Semifinal (\d)$/, (x, w, n) => `${w}, semi ${n}`);
+    if (!name) return `<div class="mb-p"><span class="bk-seed">${seed || "-"}</span><span class="mb-n tbd">${esc(tbd)}</span></div>`;
+    const win = m && m.winner === name, out = m && m.winner && m.winner !== name;
+    return `<div class="mb-p ${win ? "win" : ""} ${out ? "out" : ""}"><span class="bk-seed">${seed || "-"}</span><span class="mb-n">${esc(name)}</span></div>`;
+  };
+  const cls = ["mb-m", live ? "live" : "", armaLive ? "arma" : "", m && m.winner ? "done" : "", here ? "here" : "", click ? "click" : ""].filter(Boolean).join(" ");
+  const attrs = click ? ` data-bk-game="${esc(shown.id)}" title="${live ? "Watch this game" : "Show this game"}"` : "";
+  return `<div class="${cls}"${attrs}><div class="mb-h"><span class="t">${esc(o.label)}</span>${state}</div>`
+    + row(o.a, o.aSeed, o.aTbd) + row(o.b, o.bSeed, o.bTbd) + `</div>`;
+}
+function miniBracketHtml(curId) {
+  const sl = bracketSlots();
+  if (!sl) return "";
+  const champ = sl.champion ? `<div class="mb-m mb-champ won">${crownSvg("", "mb")}<span class="mb-h"><span class="t">Champion</span></span><b>${esc(sl.champion)}</b></div>`
+    : `<div class="mb-m mb-champ">${crownSvg("", "mb", true)}<span class="mb-h"><span class="t">Champion</span></span><span class="tbd">To be crowned</span></div>`;
+  return `<div class="mb-title"><span>${sl.ko ? "Knockout bracket" : "Road to the final"}</span>${sl.short ? `<span class="mb-note">${esc(sl.short)}</span>` : ""}</div><div class="mb-grid">`
+    + miniMatch(sl.sf1.m, sl.sf1.o, curId) + miniMatch(sl.sf2.m, sl.sf2.o, curId) + miniMatch(sl.fin.m, sl.fin.o, curId)
+    + (sl.third ? miniMatch(sl.third.m, sl.third.o, curId) : "") + champ + `</div>`;
 }
 
 // ---- auto-focus without commentary: the most interesting live board -----------------------------
@@ -1360,6 +1430,14 @@ async function poll() {
     }
   } catch (e) { /* keep the last frame */ }
 }
+// A header that wraps onto more rows (narrow screens) takes height from the focused board, so the
+// whole card still fits the screen; a one-row header changes nothing.
+(function watchHeader() {
+  const hdr = document.querySelector("header");
+  const set = () => document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight - 70) + "px");
+  try { new ResizeObserver(set).observe(hdr); } catch (e) { window.addEventListener("resize", set); }
+  set();
+})();
 poll();
 setInterval(poll, 1000);
 setInterval(render, 500);   // clocks tick between polls; unchanged parts are not touched
