@@ -5,10 +5,12 @@ Runs on the VPS after rec.py finished.
 Usage: mix.py <run_dir> <out_name> [--format mkv|mp4] [--port 18770]
        mix.py <run_dir> --round R [--port 18770]     (series take: rounds.json + raw-r<R>.mkv, time-lapse edit)
 
-Series round mode: the round's window from rounds.json, board-tour spans (director events) sped up, one
+Series round mode: the round's window from rounds.json, board-tour spans (director events) at x10 and every
+quiet gap between host lines longer than 10 s at x5 (auto fast-forward, ">> x5" cue drawn on the video), one
 lossless video pass (trim + setpts/S + fps=30 per segment, concat; CRF 0 yuv444p, nice 19, 2 threads),
-audio built on the OUTPUT timeline (speech and clicks remapped, clicks inside lapse spans dropped, ducked
-music bed, two-pass loudnorm to -16 LUFS), FLAC in MKV: round<R>-live-DRAFT001.mkv + round<R>-verify.txt.
+audio built on the OUTPUT timeline (speech and clicks remapped, clicks inside sped-up spans dropped, ducked
+music bed, gain + limiter to -16 LUFS and true peak <= -1.5 dBTP, verified on the final bytes), FLAC in MKV:
+round<R>-live-DRAFT001.mkv (or the out_name given) + round<R>-verify.txt.
 
   mkv (fast): the raw lossless take (H.264 CRF 0, yuv444p) is stream-copied, audio is FLAC.
   mp4       : video re-encoded to H.264 CRF 0 yuv420p (slow), audio AAC 320k.
@@ -132,7 +134,6 @@ def add_music(work, vdur, bed):
 
 # ---- series round mode: one round of a series take, with time-lapse spans ---------------------------
 
-FINAL_TP = -1.7          # loudnorm true-peak target: a margin under the -1.5 dBTP ceiling
 PREMIX_HEADROOM_DB = -6  # the 24-bit premix keeps headroom; the final loudnorm restores the level
 
 
@@ -198,7 +199,40 @@ def speech_parts(clips, dur):
     return parts, len(clips)
 
 
-def mix_round(run, key, music, port, out_name=None):
+FINAL_LIMIT_DB = -2.0    # sample-peak ceiling of the final limiter: keeps the true peak under -1.5 dBTP
+CUE_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+
+def cue_available():
+    if not Path(CUE_FONT).exists():
+        return False
+    out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True).stdout
+    return " drawtext " in out
+
+
+def master_audio(premix, out, dur, tries=3):
+    """Premix -> delivered 16-bit FLAC at -16 LUFS integrated, true peak <= -1.5 dBTP, measured on the
+    written bytes; the gain (and if needed the limiter ceiling) is corrected and the pass re-run."""
+    i0, tp0, _ = ebur(premix)
+    gain, limit_db = -16.0 - i0, FINAL_LIMIT_DB
+    res = {"premix_I": i0, "premix_TP": tp0}
+    for k in range(1, tries + 1):
+        lim = 10 ** (limit_db / 20)
+        sh(["ffmpeg", "-hide_banner", "-y", "-i", premix, "-af",
+            f"volume={gain:.3f}dB,alimiter=limit={lim:.4f}:attack=5:release=50:level=0:latency=1,"
+            f"aresample={SR},apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}",
+            "-ar", SR, "-c:a", "flac", "-sample_fmt", "s16", out])
+        i, tp, _ = ebur(out)
+        res.update(I=i, TP=tp, gain_db=round(gain, 3), limit_db=round(limit_db, 3), attempts=k)
+        if abs(i + 16) <= 0.3 and tp <= -1.5:
+            break
+        gain += -16.0 - i
+        if tp > -1.5:
+            limit_db -= tp + 1.6
+    return res
+
+
+def mix_round(run, key, music, port, out_name=None, fast_forward=True):
     t_start = time.time()
     try:
         os.nice(19 - os.nice(0))            # the next round is recording on the same 4 cores
@@ -231,15 +265,6 @@ def mix_round(run, key, music, port, out_name=None):
     raw_start = min(max(0.0, entry["start_epoch"] - t0), vdur)
     raw_end = min(max(0.0, end_epoch - t0), nfr_raw / tl.FPS)
     events = tl.load_events(run / "events.jsonl")
-    spans, rejected = tl.lapse_spans(events, entry["start_epoch"], end_epoch)
-    segs = tl.build_segments(raw_start, raw_end, [(s["start"] - t0, s["end"] - t0, s["speed"]) for s in spans])
-    rows = tl.output_table(segs)
-    dur = tl.output_duration(segs)
-    total_frames = sum(r[5] for r in rows)
-    print(f"round {key}: raw {vdur:.3f}s, window raw {raw_start:.3f}-{raw_end:.3f}, t0={t0:.3f} ({t0_src}); "
-          f"{len(spans)} lapse spans, {len(rejected)} kept normal; output {dur:.3f}s", flush=True)
-    print(tl.fmt_table(rows), flush=True)
-
     clips = round_clips(events, t0, raw_start, raw_end)
     for c in clips:
         p = cdir / c["name"]
@@ -252,12 +277,25 @@ def mix_round(run, key, music, port, out_name=None):
         c["played"] = min(c["played"], c["wav_seconds"])
         seek = c.get("seek", 0.0)
         c["play"] = max(0.0, c["played"] - seek)
-        c["out_offset"] = 0.0 if seek else round(tl.remap(c["raw_offset"], segs), 4)
+    plan = tl.plan_spans(events, t0, entry["start_epoch"], end_epoch, raw_start, raw_end,
+                         [(c["raw_offset"], c["raw_offset"] + c["played"]) for c in clips], fast_forward=fast_forward)
+    segk = plan["segments"]
+    segs = [s[:3] for s in segk]
+    kinds = [s[3] for s in segk]
+    rows = tl.output_table(segs)
+    dur = tl.output_duration(segs)
+    total_frames = sum(r[5] for r in rows)
+    print(f"round {key}: raw {vdur:.3f}s, window raw {raw_start:.3f}-{raw_end:.3f}, t0={t0:.3f} ({t0_src}); "
+          f"{len(plan['tours'])} tour spans, {len(plan['rejected'])} tours kept normal, {len(plan['ff'])} "
+          f"fast-forward spans; output {dur:.3f}s", flush=True)
+    print(tl.fmt_table(rows, kinds), flush=True)
+    for c in clips:
+        c["out_offset"] = 0.0 if c.get("seek") else round(tl.remap(c["raw_offset"], segs), 4)
     clips = [c for c in clips if c["play"] > 0.05 and c["out_offset"] < dur]
     clicks_raw, dropped = round_clicks(events, t0, raw_start, raw_end, segs)
     clicks = [round(tl.remap(x, segs), 4) for x in clicks_raw]
     clicks = [x for x in clicks if 0 <= x < dur - 0.06]
-    print(f"{len(clips)} clips, {len(clicks)} clicks kept, {dropped} clicks dropped inside lapse spans", flush=True)
+    print(f"{len(clips)} clips, {len(clicks)} clicks kept, {dropped} clicks dropped inside sped-up spans", flush=True)
 
     inputs = []
     for c in clips:
@@ -314,23 +352,22 @@ def mix_round(run, key, music, port, out_name=None):
     temp.append(premix)
     sh(["ffmpeg", "-hide_banner", "-y", *inputs, "-i", clicks_wav, *bed_in, "-/filter_complex", work / "premix.filter",
         "-map", "[m]", "-ar", SR, "-c:a", "flac", "-sample_fmt", "s32", premix])
-    # 4) loudness pass 1 (measure)
-    out = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(premix), "-af",
-                          f"loudnorm=I=-16:TP={FINAL_TP}:LRA=11:print_format=json", "-f", "null", "-"],
-                         capture_output=True, text=True).stderr
-    m = json.loads(out[out.rindex("{"):out.rindex("}") + 1])
-    # 5) ONE video pass (lapse edit, lossless) + loudness pass 2 + mux
-    vf = tl.video_filter(segs)
-    af = (f"[1:a]loudnorm=I=-16:TP={FINAL_TP}:LRA=11:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
-          f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true,"
-          f"aresample={SR},apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}[a]")
-    (work / "final.filter").write_text(vf + ";\n" + af)
+    # 4) final audio: gain + true-peak-safe limiter straight to the delivered 16-bit FLAC, measured, retried
+    final_audio = work / "final-audio.flac"
+    temp.append(final_audio)
+    m = master_audio(premix, final_audio, dur)
+    print(f"final audio I={m['I']} LUFS TP={m['TP']} dBTP after {m['attempts']} pass(es)", flush=True)
+    # 5) ONE video pass (lapse edit, lossless, fast-forward cue) + mux of the verified audio bytes
+    cue = tl.cue_filter(f">> x{tl.FF_SPEED}", CUE_FONT) if cue_available() else None
+    if not cue:
+        print("WARNING: drawtext or the cue font is missing; fast-forward spans get no on-video cue", flush=True)
+    (work / "final.filter").write_text(tl.video_filter(segs, kinds=kinds, cue=cue))
     master = run / out_name
     t_video = time.time()
-    sh(["ffmpeg", "-hide_banner", "-y", "-threads", "2", "-i", raw, "-i", premix, "-/filter_complex",
-        work / "final.filter", "-map", "[v]", "-map", "[a]",
+    sh(["ffmpeg", "-hide_banner", "-y", "-threads", "2", "-i", raw, "-i", final_audio, "-/filter_complex",
+        work / "final.filter", "-map", "[v]", "-map", "1:a:0",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0", "-pix_fmt", "yuv444p", "-r", "30", "-threads", "2",
-        "-c:a", "flac", "-sample_fmt", "s16", "-t", f"{dur:.3f}", master])
+        "-c:a", "copy", "-t", f"{dur:.3f}", master])
     video_secs = time.time() - t_video
 
     # ---- verification ---------------------------------------------------------------------------
@@ -350,15 +387,19 @@ def mix_round(run, key, music, port, out_name=None):
                      "-of", "compact", master]).stdout.strip())
     mi2, mtp2, summ = ebur(master)
     lines.append(f"loudness master I={mi2} LUFS true_peak={mtp2} dBTP "
-                 f"({'OK' if abs(mi2 + 16) <= 0.5 and mtp2 < -1.5 else 'CHECK'})")
+                 f"({'OK' if abs(mi2 + 16) <= 0.5 and mtp2 <= -1.5 else 'CHECK'}) audio passes={m['attempts']}")
     lines.append(re.sub(r"\s+", " ", summ))
+    sped = {k: sum(r[1] - r[0] for r, kd in zip(rows, kinds) if kd == k) for k in ("tour", "ff")}
+    lines.append(f"raw {raw_end - raw_start:.1f}s -> output {dur:.1f}s; tours x10 cover {sped['tour']:.1f}s raw, "
+                 f"fast-forward x{tl.FF_SPEED} covers {sped['ff']:.1f}s raw; cue={'drawtext' if cue else 'none'}")
     lines.append("segments (raw seconds -> output seconds):")
-    lines.append(tl.fmt_table(rows))
-    for s in spans:
-        lines.append(f"lapse span raw {s['start'] - t0:.3f}-{s['end'] - t0:.3f} x{s['speed']:g}")
-    for s in rejected:
+    lines.append(tl.fmt_table(rows, kinds))
+    for a, b, s in plan["tours"]:
+        lines.append(f"tour span raw {a:.3f}-{b:.3f} x{s:g}")
+    for s in plan["rejected"]:
         lines.append(f"normal-speed tour raw {s['start'] - t0:.3f}-{s['end'] - t0:.3f} ({s['why_normal']})")
-    lines.append(f"clips={len(clips)} clicks_kept={len(clicks)} clicks_dropped_in_lapse={dropped}")
+    lines.append(f"fast-forward spans: {len(plan['ff'])}")
+    lines.append(f"clips={len(clips)} clicks_kept={len(clicks)} clicks_dropped_in_sped_up={dropped}")
     picks = sorted({0, len(clips) // 3, (2 * len(clips)) // 3, len(clips) - 1}) if clips else []
     for k in picks[:3]:
         c = clips[k]
@@ -371,10 +412,11 @@ def mix_round(run, key, music, port, out_name=None):
     gdir = run / f"grabs-r{key}"
     gdir.mkdir(exist_ok=True)
     grabs = []
-    lapse_rows = [r for r in rows if r[2] > 1]
-    if lapse_rows:
-        r = max(lapse_rows, key=lambda r: r[4] - r[3])
-        grabs.append(((r[3] + r[4]) / 2, f"lapse-x{r[2]}"))
+    for want in ("ff", "tour"):
+        cand = [r for r, kd in zip(rows, kinds) if kd == want]
+        if cand:
+            r = max(cand, key=lambda r: r[4] - r[3])
+            grabs.append(((r[3] + r[4]) / 2, f"{want}-x{r[2]}"))
     for k in picks:
         c = clips[k]
         grabs.append((c["out_offset"] + min(2.0, c["play"] / 2), c["name"].replace(".wav", "")))
@@ -389,17 +431,21 @@ def mix_round(run, key, music, port, out_name=None):
     lines.append(f"mix wall time {time.time() - t_start:.0f}s (video pass {video_secs:.0f}s)")
     (work / "plan.json").write_text(json.dumps({
         "key": key, "t0": t0, "t0_source": t0_src, "raw_seconds": vdur, "raw_start": raw_start, "raw_end": raw_end,
-        "segments": rows, "lapse_spans": spans, "normal_tours": rejected, "output_seconds": dur, "clips": clips,
-        "clicks": clicks, "clicks_dropped_in_lapse": dropped, "speech_gain_db": gain, "loudnorm_pass1": m,
+        "segments": rows, "segment_kinds": kinds, "tour_spans": plan["tours"], "ff_spans": plan["ff"],
+        "busy": plan["busy"], "normal_tours": plan["rejected"], "output_seconds": dur, "clips": clips,
+        "clicks": clicks, "clicks_dropped_in_sped_up": dropped, "speech_gain_db": gain, "final_audio": m,
         "master_I": mi2, "master_TP": mtp2, "video_pass_seconds": video_secs}, indent=2))
     (run / f"round{key}-verify.txt").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     for p in temp:                          # the VPS disk is tight: keep plan/filters, drop big intermediates
         Path(p).unlink(missing_ok=True)
-    print("MASTER", master)
     bad = [ln for ln in lines if ln.endswith("(FAIL)")]
     if bad:
         raise SystemExit("verification failed: " + "; ".join(bad))
+    sha = subprocess.run(["sha256sum", str(master)], capture_output=True, text=True).stdout.split()[:1]
+    if sha:
+        Path(str(master) + ".sha256").write_text(sha[0] + "\n")
+    print("MASTER", master)
 
 
 def main():
@@ -411,10 +457,11 @@ def main():
     ap.add_argument("--format", choices=["mkv", "mp4"], default="mkv")
     ap.add_argument("--music", default=str(DEFAULT_BED), help="music bed (looped, ducked); '' for none")
     ap.add_argument("--port", type=int, default=18770)
+    ap.add_argument("--no-fast-forward", action="store_true", help="round mode: speed up tour spans only")
     a = ap.parse_args()
     run = Path(a.run).expanduser()
     if a.round_key is not None:
-        mix_round(run, a.round_key, a.music, a.port, a.out_name)
+        mix_round(run, a.round_key, a.music, a.port, a.out_name, fast_forward=not a.no_fast_forward)
         return
     if not a.out_name:
         raise SystemExit("usage: mix.py <run_dir> <out_name> | mix.py <run_dir> --round R")

@@ -6,6 +6,9 @@ Epochs are wall-clock seconds. Page events carry the page epoch `t` in milliseco
 
 - lapse spans: `director` tour start .. next tour end, clamped to the window; a span in which a commentary
   clip starts plays at normal speed; spans shorter than MIN_SPAN_S are ignored.
+- fast-forward spans: every gap longer than FF_MIN_GAP that is neither busy (a host clip playing with a
+  CLIP_LEAD_S lead and CLIP_TAIL_S tail, a round card or the champion overlay on screen) nor a tour span
+  plays at FF_SPEED.
 - segments: [(raw_start, raw_end, speed)] covering the round on the raw file's own time axis, frame aligned.
 - remap(t): raw time -> output time, piecewise linear over the segments.
 - RoundBoundary: decides when a round's take ends (series mode of rec.py).
@@ -21,6 +24,11 @@ RR_FALLBACK_S = 90.0        # round robin round with no results-card event: cut 
 KO_TAIL_S = 20.0            # knockout round (not the last one): tail after round_done
 FINAL_TAIL_S = 12.0         # after the champion line played and no clip is playing
 FINAL_CAP_S = 180.0         # cap after the champion first appeared
+FF_SPEED = 5                # auto fast-forward of quiet gaps between host lines
+FF_MIN_GAP = 10.0           # only gaps longer than this are fast-forwarded
+CLIP_LEAD_S = 1.0           # busy lead before each host clip starts
+CLIP_TAIL_S = 0.5           # busy tail after each host clip ends
+FF_CUE = ">> x5"            # drawn bottom centre during fast-forward segments
 
 
 def ev_epoch(e):
@@ -104,20 +112,109 @@ def lapse_spans(events, start, end, min_span=MIN_SPAN_S):
     return valid, rejected
 
 
+def merge_intervals(iv, join=0.0):
+    """Union of (a, b) intervals; intervals closer than `join` are merged."""
+    out = []
+    for a, b in sorted((a, b) for a, b in iv if b > a):
+        if out and a <= out[-1][1] + join:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
+
+
+def subtract_intervals(span, busy):
+    """Pieces of span (a, b) not covered by the (merged) busy intervals."""
+    a, b = span
+    pieces, cur = [], a
+    for x, y in merge_intervals(busy):
+        if y <= cur or x >= b:
+            continue
+        if x > cur:
+            pieces.append((cur, x))
+        cur = max(cur, y)
+    if cur < b:
+        pieces.append((cur, b))
+    return pieces
+
+
+def overlay_intervals(events, start, end):
+    """Round cards (rcard show..hide) and the champion overlay (show..hide), as epochs clamped to the window.
+
+    A show while one is open keeps the first; a show with no hide lasts to the window end; a hide with no
+    open show is ignored."""
+    out = []
+    for kind in ("rcard", "champion"):
+        evs = sorted((e for e in events if e.get("kind") == "director" and e.get("k") == kind
+                      and ev_epoch(e) is not None), key=ev_epoch)
+        open_ = None
+        for e in evs:
+            t = ev_epoch(e)
+            if e.get("a") == "show" and open_ is None:
+                open_ = t
+            elif e.get("a") == "hide" and open_ is not None:
+                out.append((open_, t))
+                open_ = None
+        if open_ is not None:
+            out.append((open_, max(end, open_)))
+    return [(max(a, start), min(b, end)) for a, b in out if min(b, end) > max(a, start)]
+
+
+def clip_busy(clips, lead=CLIP_LEAD_S, tail=CLIP_TAIL_S):
+    """(start, end) of host clips -> busy intervals with a lead before and a tail after."""
+    return [(s - lead, e + tail) for s, e in clips]
+
+
+def trim_tours(tours, clip_iv, min_span=MIN_SPAN_S):
+    """Tour spans (a, b, speed) minus the clip busy intervals: a tour never starts inside speech."""
+    out = []
+    for a, b, sp in tours:
+        for x, y in subtract_intervals((a, b), clip_iv):
+            if y - x >= min_span:
+                out.append((x, y, sp))
+    return out
+
+
+def ff_spans(start, end, busy, tours, speed=FF_SPEED, min_gap=FF_MIN_GAP):
+    """Fast-forward spans (a, b, speed): gaps of [start, end] outside busy intervals and tour spans that
+    are longer than min_gap."""
+    blocked = list(busy) + [(a, b) for a, b, *_ in tours]
+    return [(a, b, speed) for a, b in subtract_intervals((start, end), blocked) if b - a > min_gap]
+
+
+def plan_spans(events, t0, start_epoch, end_epoch, raw_start, raw_end, clip_raw, fast_forward=True):
+    """All sped-up spans of a round on the raw axis.
+
+    clip_raw: [(start, end)] of the host clips on the raw axis. Returns a dict with tours (x10, trimmed so
+    none starts inside speech), rejected tours, ff spans (FF_SPEED), the busy intervals and the segments
+    [(a, b, speed, kind)]."""
+    valid, rejected = lapse_spans(events, start_epoch, end_epoch)
+    civ = merge_intervals(clip_busy(clip_raw))
+    tours = trim_tours([(s["start"] - t0, s["end"] - t0, s["speed"]) for s in valid], civ)
+    busy = merge_intervals(civ + [(a - t0, b - t0) for a, b in overlay_intervals(events, start_epoch, end_epoch)])
+    ffs = ff_spans(raw_start, raw_end, busy, tours) if fast_forward else []
+    segk = build_segments_k(raw_start, raw_end, [(a, b, s, "tour") for a, b, s in tours]
+                            + [(a, b, s, "ff") for a, b, s in ffs])
+    return {"tours": tours, "rejected": rejected, "ff": ffs, "busy": busy, "segments": segk}
+
+
 def _snap(x, fps=FPS):
     return round(x * fps) / fps
 
 
-def build_segments(raw_start, raw_end, spans_raw, fps=FPS):
-    """Segments [(a, b, speed)] covering [raw_start, raw_end] on the raw time axis.
+def build_segments_k(raw_start, raw_end, spans_raw, fps=FPS):
+    """Segments [(a, b, speed, kind)] covering [raw_start, raw_end] on the raw time axis.
 
-    spans_raw: [(a, b, speed)] on the raw axis (already clamped, valid). All boundaries are snapped to
-    frames; a lapse segment's frame count is trimmed to a multiple of its (integer) speed so it decimates
-    to a whole number of output frames. Overlapping spans: the later one starts after the earlier ends.
+    spans_raw: [(a, b, speed[, kind])] on the raw axis (already clamped, valid); kind defaults to "tour",
+    normal-speed segments have kind "normal". All boundaries are snapped to frames; a sped-up segment's frame
+    count is trimmed to a multiple of its (integer) speed so it decimates to a whole number of output frames.
+    Overlapping spans: the later one starts after the earlier ends.
     """
     raw_start, raw_end = _snap(raw_start, fps), _snap(raw_end, fps)
     segs, cur = [], raw_start
-    for a, b, sp in sorted(spans_raw):
+    for span in sorted(spans_raw, key=lambda s: (s[0], s[1])):
+        a, b, sp = span[0], span[1], span[2]
+        kind = span[3] if len(span) > 3 else "tour"
         a, b = max(_snap(a, fps), cur), min(_snap(b, fps), raw_end)
         sp = max(1, int(round(sp)))
         if sp > 1:
@@ -127,12 +224,17 @@ def build_segments(raw_start, raw_end, spans_raw, fps=FPS):
         if b - a <= 0 or sp <= 1:
             continue
         if a > cur:
-            segs.append((cur, a, 1))
-        segs.append((a, b, sp))
+            segs.append((cur, a, 1, "normal"))
+        segs.append((a, b, sp, kind))
         cur = b
     if raw_end > cur:
-        segs.append((cur, raw_end, 1))
-    return [(round(a, 6), round(b, 6), s) for a, b, s in segs]
+        segs.append((cur, raw_end, 1, "normal"))
+    return [(round(a, 6), round(b, 6), s, k) for a, b, s, k in segs]
+
+
+def build_segments(raw_start, raw_end, spans_raw, fps=FPS):
+    """Segments [(a, b, speed)] (see build_segments_k)."""
+    return [s[:3] for s in build_segments_k(raw_start, raw_end, spans_raw, fps)]
 
 
 def seg_frames(seg, fps=FPS):
@@ -172,16 +274,27 @@ def in_lapse(t, segs):
     return any(s > 1 and a <= t < b for a, b, s in segs)
 
 
-def video_filter(segs, fps=FPS, in_label="0:v", out_label="v"):
-    """filter_complex text: split + per-segment trim (frame exact) + setpts/S (+ fps for S>1) + concat."""
+def cue_filter(text, fontfile):
+    """drawtext in the page's gold ribbon style, bottom centre."""
+    txt = text.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+    return (f"drawtext=fontfile='{fontfile}':text='{txt}':fontsize=30:fontcolor=0xffd479:"
+            f"box=1:boxcolor=0x0e1013@0.94:boxborderw=12|26:x=(w-text_w)/2:y=h-text_h-34")
+
+
+def video_filter(segs, fps=FPS, in_label="0:v", out_label="v", kinds=None, cue=None):
+    """filter_complex text: split + per-segment trim (frame exact) + setpts/S (+ fps for S>1) + concat.
+    kinds: per segment kind; `cue` (a filter string) is appended to the "ff" segments only."""
     n = len(segs)
     lines = [f"[{in_label}]split={n}" + "".join(f"[s{k}]" for k in range(n))] if n > 1 else []
-    for k, (a, b, s) in enumerate(segs):
+    for k, seg in enumerate(segs):
+        a, b, s = seg[0], seg[1], seg[2]
         src = f"[s{k}]" if n > 1 else f"[{in_label}]"
         fa, fb = int(round(a * fps)), int(round(b * fps))
         chain = f"{src}trim=start_frame={fa}:end_frame={fb},setpts=(PTS-STARTPTS)/{s}"
         if s > 1:
             chain += f",fps={fps}"
+        if cue and kinds and kinds[k] == "ff":
+            chain += "," + cue
         lines.append(chain + f"[g{k}]")
     lines.append("".join(f"[g{k}]" for k in range(n)) + f"concat=n={n}:v=1:a=0[{out_label}]")
     return ";\n".join(lines)
@@ -318,10 +431,10 @@ def _int(x):
         return None
 
 
-def fmt_table(rows):
-    out = ["raw_start  raw_end    speed  out_start  out_end    frames"]
-    for a, b, s, oa, ob, n in rows:
-        out.append(f"{a:9.3f}  {b:9.3f}  {s:>5}  {oa:9.3f}  {ob:9.3f}  {n:>6}")
+def fmt_table(rows, kinds=None):
+    out = ["raw_start  raw_end    speed  out_start  out_end    frames" + ("  kind" if kinds else "")]
+    for k, (a, b, s, oa, ob, n) in enumerate(rows):
+        out.append(f"{a:9.3f}  {b:9.3f}  {s:>5}  {oa:9.3f}  {ob:9.3f}  {n:>6}" + (f"  {kinds[k]}" if kinds else ""))
     return "\n".join(out)
 
 

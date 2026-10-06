@@ -26,11 +26,14 @@ for e in rows:
     dur = (e["end_epoch"] - e["start_epoch"]) if e.get("end_epoch") else None
     rec = cat(f"R{k}_REC_DONE")
     mixed = cat(f"R{k}_MIX_DONE")
-    draft = f"round{k}-live-DRAFT001.mkv"
+    # The newest DRAFT that has a SHA-256 file (a remix writes DRAFT002, ...); else DRAFT001.
+    done = sorted(f[:-7] for f in os.listdir(run)
+                  if f.startswith(f"round{k}-live-DRAFT") and f.endswith(".mkv.sha256"))
+    draft = done[-1] if done else f"round{k}-live-DRAFT001.mkv"
     sha = cat(draft + ".sha256")
     print(f"ROUND key={k} recorded={'rc=' + rec if rec is not None else 'recording'} "
           f"mixed={'rc=' + mixed if mixed is not None else 'no'} raw={size(e['raw'])} draft={size(draft)} "
-          f"take_s={dur and round(dur)} reason={e.get('stop_reason')} sha256={sha or '-'}")
+          f"take_s={dur and round(dur)} reason={e.get('stop_reason')} sha256={sha or '-'} name={draft}")
 PY
 echo "--- rec.log"; tail -6 "$run/rec.log" 2>/dev/null
 echo "--- mixer.log"; tail -4 "$run/mixer.log" 2>/dev/null
