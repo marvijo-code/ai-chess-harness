@@ -74,9 +74,15 @@ STRIPPED_ENV = {
 SYSTEM_PROMPT = (
     "You are a strong chess player in a game against another AI. You get the position and must answer "
     'with only one JSON object: {"move": "<a move from the legal list, SAN or UCI>", "comment": "<one or two short sentences about your idea>"}. '
-    "Choose the move with your own reasoning: do not run code, call tools, or write or use a chess engine. "
-    "While you think, write a line `BEST SO FAR: <move>` each time your preferred move changes."
+    "Choose the move with your own reasoning: do not run code, call tools, or write or use a chess engine."
 )
+# After the move cap the model gets its own thinking back and answers: first at the configured effort,
+# then (only if that brings no move) at the lowest effort the route allows. Measured 2026-10-06 with the
+# thinking cut halfway: DeepSeek answered in 6 s and GLM Flash in 2 s at High; Grok, whose visible
+# thinking is only a short summary, re-thought for 49 s at High and answered in 2 s at low.
+ANSWER_WITH_THOUGHTS_SECONDS = 20.0
+THOUGHTS_HEAD_CHARS = 20_000
+THOUGHTS_TAIL_CHARS = 100_000
 # The note the referee plays when a model is still thinking at its move cap (its own latest choice).
 BEST_SO_FAR = re.compile(r"BEST\s+SO\s+FAR\s*[:=\-]?\s*[*`\"']*\s*(?:\d+\s*\.+\s*)?([A-Za-z0-9=+#\-]{2,8})", re.I)
 MARKER_UNSAFE = re.compile(r"[\s\[\]{};]+")
@@ -185,13 +191,14 @@ def move_budget_seconds(board: chess.Board, remaining_ms: object, increment_ms: 
 
 
 def arbiter_cutoff_seconds(board: chess.Board, remaining_ms: object, increment_ms: object = 0) -> float:
-    """Move cap for streaming models: 2x the budget (20-90 s), never past 25% of its clock.
+    """Move cap for streaming models: 1.5x the budget (15-60 s), never past 25% of its clock.
 
-    Past the cap the referee plays the model's own latest `BEST SO FAR` note; with no note yet the
-    model keeps thinking at full effort on its own clock (2026-10-06: the old low-effort "answer now"
-    retry with a 6-8 s limit decided 5 of 10 games by forfeit, owner: "it doesn't look fair")."""
+    Past the cap the thinking stops and the model answers from its own full thinking (owner 2026-10-06:
+    "give models their original thoughts so they can make informed decisions"). Without a cap High effort
+    flagged Grok and DeepSeek in run 4 (Grok averaged 41 s a move, up to 134 s; DeepSeek ran into its
+    token limit three times in one move)."""
     budget = move_budget_seconds(board, remaining_ms, increment_ms)
-    cutoff = min(90.0, max(20.0, 2.0 * budget))
+    cutoff = min(60.0, max(15.0, 1.5 * budget))
     try:
         cutoff = min(cutoff, max(4.0, 0.25 * float(remaining_ms) / 1000))  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -245,9 +252,8 @@ def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejectio
             "if it reaches 0:00 you lose on time."
         )
         if cap_seconds is not None:
-            lines.append(f"If you are still thinking after about {cap_seconds:.0f} seconds, the referee plays your latest "
-                         "BEST SO FAR move. So in the first lines of your thinking write `BEST SO FAR: <move>` for your "
-                         "first instinct, then write a new BEST SO FAR line after each candidate you check.")
+            lines.append(f"If you are still thinking after about {cap_seconds:.0f} seconds, your thinking is stopped, "
+                         "you are shown all of it, and you must give your move at once.")
     if nudge:
         lines.append(nudge)
     if board.is_check():
@@ -523,25 +529,54 @@ class SubscriptionChessClient:
                                     headers, timeout, self._cutoff_s)
         self.usage_log.append(streamed.get("usage") or {})
         content = streamed.get("content") or ""
-        if streamed.get("cut") and not content.strip():
-            # Referee: still thinking at the move cap, so its own latest BEST SO FAR note is played.
-            board = self._board or chess.Board()
-            note = latest_note((streamed.get("reasoning") or "") + "\n" + content, board)
-            if note is None:
-                raise ProviderError("cut at the move cap without a legal BEST SO FAR note")
-            self.log(f"{self.provider} {self.model} referee: still thinking after {time.monotonic() - started:.1f}s "
-                     f"(cap {self._cutoff_s:.0f}s); playing its latest BEST SO FAR note {note.uci()}")
-            self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
-            return json.dumps({"move": note.uci(), "comment": "Still thinking at the move cap; the referee played its latest BEST SO FAR move."})
+        # Still thinking at the cap, or out of output tokens before any answer (DeepSeek, run 4).
+        if not content.strip() and (streamed.get("cut") or streamed.get("finish") == "length"):
+            return self._answer_with_thoughts(route["url"], payload, headers, style, streamed, started)
         if not content.strip():
             raise ValueError(f"the reply was empty (finish_reason={streamed.get('finish')}, "
                              f"reasoning_chars={len(streamed.get('reasoning') or '')})")
         return content
 
+    def _answer_with_thoughts(self, url: str, payload: dict, headers: dict, style: str, streamed: dict,
+                              started: float) -> str:
+        """The model's thinking was stopped: give it all of that thinking back as its own earlier turn and
+        ask for the move. Same effort first; the lowest effort the route allows only if that brings no move."""
+        thoughts = streamed.get("reasoning") or ""
+        if len(thoughts) > THOUGHTS_HEAD_CHARS + THOUGHTS_TAIL_CHARS:
+            thoughts = (thoughts[:THOUGHTS_HEAD_CHARS] + "\n[... middle of the thinking omitted for length ...]\n"
+                        + thoughts[-THOUGHTS_TAIL_CHARS:])
+        why = "ran out of output space" if streamed.get("finish") == "length" else f"reached the {self._cutoff_s:.0f}s move cap"
+        self.log(f"{self.provider} {self.model} thinking stopped after {time.monotonic() - started:.1f}s ({why}); "
+                 f"returning its {len(thoughts)} chars of thinking and asking for the move")
+        self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
+        messages = payload["messages"] + [
+            {"role": "assistant", "content": "My thinking on this move so far:\n" + (thoughts or "(no visible thinking)")},
+            {"role": "user", "content": "Your time for this move is up. Your full thinking so far is above. "
+                                        "Reply now with only the JSON object for your move."}]
+        for level in ("same", "lowest"):
+            follow = {**payload, "messages": messages, "max_tokens": 6000, "stream": True,
+                      "stream_options": {"include_usage": True}}
+            if level == "lowest":
+                if style == "openrouter":
+                    follow["reasoning"] = {"effort": "low"}  # Grok and GLM refuse reasoning off on OpenRouter
+                elif style == "effort":
+                    follow.pop("reasoning_effort", None)
+                    follow["thinking"] = {"type": "disabled"}
+            answer = self.http_stream(url, follow, headers, int(ANSWER_WITH_THOUGHTS_SECONDS) + 10, ANSWER_WITH_THOUGHTS_SECONDS)
+            self.usage_log.append(answer.get("usage") or {})
+            if (answer.get("content") or "").strip():
+                if level == "lowest":
+                    self.log(f"{self.provider} {self.model} answered at the lowest effort after a "
+                             f"{ANSWER_WITH_THOUGHTS_SECONDS:.0f}s answer at its own effort brought no move")
+                return answer["content"]
+        note = latest_note(streamed.get("reasoning") or "", self._board or chess.Board())
+        if note is not None:
+            return json.dumps({"move": note.uci(), "comment": "Its own last stated choice from its thinking."})
+        raise ValueError("time was up and no move came back after its thinking was returned to it")
+
     def _http_stream(self, url: str, payload: dict, headers: dict, timeout: int, cutoff: float | None) -> dict:
-        """Stream a chat completion at full effort. Past the cutoff, with no answer text yet, the stream is
-        `cut` only once the thinking holds a legal BEST SO FAR note; without one the model keeps thinking
-        on its own clock. No bytes for STALL_SECONDS = gateway stall (infrastructure)."""
+        """Stream a chat completion. Past the cutoff, with no answer text yet, the stream is `cut` and the
+        thinking so far is returned. No bytes for STALL_SECONDS = gateway stall (infrastructure)."""
         body = json.dumps(payload).encode("utf-8")
         state = {"content": "", "reasoning": "", "usage": {}, "finish": None, "done": False, "error": None,
                  "last": time.monotonic(), "resp": None}
@@ -583,8 +618,7 @@ class SubscriptionChessClient:
         worker.start()
         while not state["done"]:
             now = time.monotonic()
-            if (cutoff is not None and now - started > cutoff and not state["content"].strip()
-                    and latest_note(state["reasoning"], self._board or chess.Board()) is not None):
+            if cutoff is not None and now - started > cutoff and not state["content"].strip():
                 _close_quietly(state.get("resp"))
                 return {**state, "cut": True}
             if now - state["last"] > STALL_SECONDS:
