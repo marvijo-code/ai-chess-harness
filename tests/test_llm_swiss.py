@@ -284,6 +284,54 @@ class ThinkTimeTest(unittest.TestCase):
         self.assertIn("Decide faster", sp.build_prompt(chess.Board(), {}, [], [], nudge=note))
 
 
+class KnockoutTest(unittest.TestCase):
+    def test_round_robin_then_semis_armageddon_final_and_a_champion(self):
+        import tempfile
+
+        names = [f"P{i}" for i in range(10)]
+        state = play_out(new_state(names, 9), random.Random(3))
+        pairs = {swiss.pair_key(p["white"], p["black"]) for r in state["rounds"] for p in r["pairings"]}
+        self.assertEqual(len(pairs), 45, "nine rounds = full round robin")
+        state["config"].update(format="round-robin+knockout", knockoutSize=4)
+        state.update(id="t", title="t")
+        seeds = [r["name"] for r in swiss.compute_standings(state)[:4]]
+        # sf1 draws then the Armageddon is drawn too (Black wins); sf2 decisive; final decisive; third: draw, then White wins.
+        script = {"Semifinal 1 - Game 1": "1/2-1/2", "Semifinal 1 - Armageddon decider": "1/2-1/2",
+                  "Semifinal 2 - Game 1": "0-1", "Final": "1-0", "Third place": "1/2-1/2",
+                  "Third place - Armageddon decider": "1-0"}
+        starts = {}
+
+        def fake_play(game_id, white, black, cfg, ts, live_pgn, log, replace_engine, start_ms=None):
+            game = ts.state["games"][game_id]
+            starts[game["label"]] = start_ms
+            game.update(result=script[game["label"]], status="finished", end_kind="board")
+
+        tmp = Path(tempfile.mkdtemp())
+        old = swiss.play_game, swiss.write_archive
+        swiss.play_game, swiss.write_archive = fake_play, (lambda _s: None)
+        try:
+            ts = swiss.TournamentState(state, tmp / "t-tournament.json")
+            ok = swiss.run_knockouts(state, ts, dict(swiss.DEFAULTS, **state["config"]), lambda n: n, lambda e: None,
+                                     lambda _m: None)
+        finally:
+            swiss.play_game, swiss.write_archive = old
+        self.assertTrue(ok)
+        ko = state["knockout"]
+        sf1, sf2 = ko["matches"][:2]
+        self.assertEqual((sf1["a"], sf1["b"], sf2["a"], sf2["b"]), (seeds[0], seeds[3], seeds[1], seeds[2]))
+        self.assertEqual(sf1["winner"], seeds[0], "Armageddon colours swapped: seed 1 had Black and draw odds")
+        self.assertEqual(sf1["decided_by"], "armageddon")
+        self.assertEqual(sf2["winner"], seeds[2])
+        self.assertEqual(ko["champion"], seeds[0], "the final is 1-0 and seed 1 (a) has White")
+        self.assertEqual(ko["runner_up"], seeds[2])
+        self.assertIsNotNone(ko["third"])
+        self.assertEqual(starts["Semifinal 1 - Armageddon decider"], {"white": 600_000, "black": 450_000})
+        self.assertIsNone(starts["Final"])
+        self.assertEqual(state["stage"], "finished")
+        table = swiss.compute_standings(state)
+        self.assertAlmostEqual(sum(r["points"] for r in table), 45, msg="knockout games stay out of the table")
+
+
 class AnswerStepTest(unittest.TestCase):
     def test_the_lowest_effort_answer_waits_on_the_clock_not_a_share(self):
         import chess

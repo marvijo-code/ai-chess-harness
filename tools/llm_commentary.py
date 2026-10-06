@@ -46,7 +46,62 @@ COMMENTATOR_PROMPT = (
     "When the notes say the commentary just moved to this board, start by naming the board (for example "
     "'Over on board three'). Mention the tournament standings only when the notes give them and it adds drama."
 )
+EVENT_PROMPT = (
+    "You are the hype host of a YouTube chess tournament between AI models. Write ONE spoken line of 25 to 45 words "
+    "for the moment described. Big energy, vivid, specific to the names and facts given, a hook that makes viewers stay. "
+    "Plain words only: no markdown, no lists, no dashes, no emojis. Do not invent results or facts."
+)
 MARK_SCORE = {"??": 6.0, "?": 4.0, "?!": 1.5, "!": 3.0}
+
+
+def next_event(state: dict, done: set) -> dict | None:
+    """The next big moment to announce (opening hook, knockouts, an Armageddon decider, the final, the champion)."""
+    games = state.get("games") or {}
+    names = [spoken(p["name"]) for p in state.get("players") or []]
+    fmt = state.get("format") or {}
+    ko = state.get("knockout") or {}
+    live = [g for g in games.values() if g.get("status") == "live"]
+    if "opening" not in done and live and not any(g.get("result", "*") != "*" for g in games.values()):
+        rr = fmt.get("rr_rounds")
+        how = (f"a round robin of {rr} rounds where everyone plays everyone, then the top {fmt.get('ko_size', 4)} "
+               "go to knockout semifinals and a final, and a drawn knockout game goes to an Armageddon decider") if rr else "a Swiss tournament"
+        return {"key": "opening", "game": live[0]["id"],
+                "facts": f"The tournament is starting. {len(names)} AI players: {', '.join(names)}. Format: {how}. "
+                         "Only one of them will be crowned champion. Open the show."}
+    champion = ko.get("champion")
+    if champion and "champion" not in done:
+        final = next((m for m in ko.get("matches") or [] if m.get("id") == "final"), {})
+        game_id = (final.get("games") or [None])[-1]
+        return {"key": "champion", "game": game_id,
+                "facts": f"The final is over. {spoken(champion)} is the champion, beating {spoken(ko.get('runner_up') or '?')} "
+                         f"({final.get('decided_by') or 'game'}). Third place: {spoken(ko.get('third') or '?')}. "
+                         "Crown the champion and close the show with a memorable outro that invites viewers to "
+                         "say in the comments who they think should face the champion next."}
+    for match in ko.get("matches") or []:
+        for game_id in match.get("games") or []:
+            game = games.get(game_id) or {}
+            if game.get("armageddon") and game.get("status") == "live" and f"arm-{game_id}" not in done:
+                return {"key": f"arm-{game_id}", "game": game_id,
+                        "facts": f"{match['label']} was drawn, so it goes to an Armageddon decider: "
+                                 f"{spoken(game['white'])} has White and more time, {spoken(game['black'])} has Black "
+                                 "with less time but a draw sends Black through. Sudden death."}
+    stage = state.get("stage")
+    if stage == "semifinals" and "knockouts" not in done and ko.get("seeds"):
+        seeds = ko["seeds"]
+        sf = [m for m in ko.get("matches") or [] if m.get("stage") == "semifinals"]
+        first = next((g for m in sf for g in m.get("games") or []), None)
+        if first:
+            return {"key": "knockouts", "game": first,
+                    "facts": "The round robin is over. Knockouts begin. Seeds: "
+                             + ", ".join(f"{s['seed']}. {spoken(s['name'])} with {s['points']:g} points" for s in seeds)
+                             + ". Semifinal 1: seed 1 against seed 4. Semifinal 2: seed 2 against seed 3. Lose and you are out."}
+    if stage == "final" and "final" not in done:
+        final = next((m for m in ko.get("matches") or [] if m.get("id") == "final"), None)
+        if final and final.get("games"):
+            return {"key": "final", "game": final["games"][0],
+                    "facts": f"The final starts: {spoken(final['a'])} against {spoken(final['b'])}. One game for the crown, "
+                             "and an Armageddon decider if it is drawn."}
+    return None
 RECENT_RESULT_SECONDS = 180
 
 
@@ -135,6 +190,7 @@ class Commentator:
         self._focus: str | None = None
         self._last_game: str | None = None
         self._last_poll = 0.0
+        self._events_done: set = set(saved.get("events", []))
         self.always = os.environ.get("COMMENTARY_ALWAYS", "").strip() in {"1", "true", "yes"}
         self._last_said: dict[str, float] = {}
         self._busy_until = 0.0
@@ -194,6 +250,9 @@ class Commentator:
             return None  # nobody is listening
         state = json.loads(self.state_path.read_text(encoding="utf-8"))
         games = state.get("games") or {}
+        event = next_event(state, self._events_done)
+        if event and event.get("game") in games:
+            return self._emit_event(event, games[event["game"]])
         all_marks = self._annotations(state)
         game_id = self.pick(state, all_marks)
         if game_id is None:
@@ -229,6 +288,36 @@ class Commentator:
             self._busy_until = time.time() + max(MIN_GAP_SECONDS, seconds + 1.0)
             self._save_ledger()
         self.log(f"commentary {game_id} ply {plies}: {text} (${cost:.4f}, total ${self.spent_usd:.4f})")
+        return clip
+
+    def _emit_event(self, event: dict, game: dict) -> dict | None:
+        body = {"model": TEXT_MODEL, "max_tokens": 160, "temperature": 0.9,
+                "messages": [{"role": "system", "content": EVENT_PROMPT}, {"role": "user", "content": event["facts"]}]}
+        data, _headers = self.http("/chat/completions", body)
+        reply = json.loads(data)
+        self.spent_usd += float((reply.get("usage") or {}).get("cost") or 0.0)
+        text = clean_line(((reply.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+        if not text:
+            return None
+        pcm, cost = self._speak(text)
+        with self._lock:
+            self._seq += 1
+            name = f"clip-{self._seq}.wav"
+            with wave.open(str(self.out_dir / name), "wb") as out:
+                out.setnchannels(1)
+                out.setsampwidth(2)
+                out.setframerate(SAMPLE_RATE)
+                out.writeframes(pcm)
+            seconds = len(pcm) / (2 * SAMPLE_RATE)
+            clip = {"seq": self._seq, "ply": len(game.get("moves") or []), "text": text, "audio": name,
+                    "seconds": round(seconds, 1), "final": event["key"] == "champion", "event": event["key"]}
+            self._clips.setdefault(game["id"], []).append(clip)
+            self._events_done.add(event["key"])
+            self.spent_usd += cost
+            self._last_game = game["id"]
+            self._busy_until = time.time() + seconds + 1.0
+            self._save_ledger()
+        self.log(f"commentary event {event['key']}: {text} (${cost:.4f}, total ${self.spent_usd:.4f})")
         return clip
 
     def pick(self, state: dict, all_marks: dict) -> str | None:
@@ -323,5 +412,5 @@ class Commentator:
             return {}
 
     def _save_ledger(self) -> None:
-        self.ledger.write_text(json.dumps({"spent_usd": round(self.spent_usd, 6), "clips": self._clips}, indent=1),
-                               encoding="utf-8")
+        self.ledger.write_text(json.dumps({"spent_usd": round(self.spent_usd, 6), "clips": self._clips,
+                                           "events": sorted(self._events_done)}, indent=1), encoding="utf-8")
