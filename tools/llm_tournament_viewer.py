@@ -103,6 +103,8 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 18px; pa
 .card.on-air { border-color: rgba(91, 157, 255, .65); box-shadow: 0 0 0 1px rgba(91, 157, 255, .35); transition: border-color .3s ease, box-shadow .3s ease; }
 .air-tag { font-size: 11.5px; font-weight: 600; color: var(--accent); background: rgba(91, 157, 255, .13); border: 1px solid rgba(91, 157, 255, .4); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
 .caption::before { content: "Commentary: "; color: var(--accent); font-weight: 600; }
+.caption .cap-on { display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 999px; background: rgba(91, 157, 255, .22); color: #cfe0ff;
+  font: 600 11.5px/1.6 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: nowrap; }
 .moves { position: relative; margin-top: 8px; padding: 6px 9px; border-radius: 10px; background: #12161c; border: 1px solid var(--line); font: 13px/1.65 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--muted); max-height: 110px; overflow-y: auto; overscroll-behavior: contain; word-break: break-word; }
 .moves .mv { cursor: pointer; border-radius: 4px; padding: 0 2px; }
 .moves .mv:hover { color: var(--text); }
@@ -354,6 +356,70 @@ body.focus-mode .boards { display: block; }
 }
 .lb-cut::before, .lb-cut::after { content: ""; flex: 1; border-top: 1px dashed rgba(245, 185, 66, .55); }
 @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+/* Standings on every view (owner 2026-10-06): the side column stays on screen while the boards scroll;
+   where the full table is not on screen (one column, or focus without the leaderboard column) a
+   standings strip rides in the sticky header. */
+@media (min-width: 1101px) {
+  .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+}
+.ticker { display: none; position: sticky; top: 0; z-index: 30; background: var(--bg); border-bottom: 1px solid var(--line); padding: 6px 22px;
+  flex-wrap: wrap; align-items: baseline; gap: 3px 12px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.ticker .tk-h { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+.ticker .tk { white-space: nowrap; }
+.ticker .tk i { font-style: normal; color: var(--muted); margin-right: 3px; }
+.ticker .tk b { color: var(--text); margin-left: 4px; }
+.ticker .tk.zone b { color: #ffd479; }
+.ticker .tk.me { color: #cfe0ff; }
+@media (max-width: 1100px) { .ticker:not(:empty) { display: flex; } }
+@media (max-width: 1279px) { body.focus-mode .ticker:not(:empty) { display: flex; } }
+@media (max-width: 520px) { .ticker { padding: 6px 16px; } }
+/* ---- round preview and round results: a full-screen card at the start and end of every round ---- */
+.rcard { position: fixed; inset: 0; z-index: 58; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: clamp(10px, 2.2vh, 24px);
+  padding: clamp(16px, 4vh, 48px) clamp(16px, 4vw, 64px); overflow-y: auto; cursor: pointer;
+  background: radial-gradient(ellipse at 50% 0%, rgba(91, 157, 255, .2), transparent 60%), radial-gradient(ellipse at 50% 100%, rgba(245, 185, 66, .14), transparent 55%), rgba(10, 12, 15, .97); }
+.rcard.leaving { animation: intro-out .35s ease forwards; }
+.rc-kicker { letter-spacing: .32em; text-transform: uppercase; color: var(--accent); font-weight: 700; font-size: clamp(12px, 1.7vh, 17px); text-align: center; animation: rise .5s ease both; }
+.rc-head { margin: 0; text-align: center; font-weight: 900; line-height: .95; letter-spacing: -.02em; font-size: clamp(44px, min(11vh, 11vw), 132px); }
+.rc-head span { display: inline-block; animation: slam .55s cubic-bezier(.2, 1.5, .4, 1) .15s both; }
+.rc-head .of { font-size: .38em; font-weight: 700; color: var(--muted); letter-spacing: 0; margin-left: .3em; animation-delay: .45s; }
+.rc-head .gold { background: linear-gradient(180deg, #fff6d2, #f5b942 65%, #c98a1a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.rc-sub { font-size: clamp(14px, 2.2vh, 22px); color: var(--muted); text-align: center; animation: rise .5s ease .6s both; }
+.rc-sub b { color: #ffd479; }
+.rc-body { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: clamp(14px, 2.4vw, 36px); width: min(1500px, 100%); align-items: start; }
+.rc-col h3 { margin: 0 0 8px; font-size: clamp(12px, 1.6vh, 15px); text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
+.rc-m { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 10px; padding: clamp(8px, 1.4vh, 14px) 14px; margin-bottom: 8px;
+  border-radius: 12px; background: rgba(23, 26, 31, .94); border: 1px solid var(--line); font-size: clamp(14px, 2.1vh, 22px); font-weight: 650;
+  animation: rc-in .5s cubic-bezier(.2, 1.2, .4, 1) both; animation-delay: calc(.8s + var(--i) * .22s); }
+@keyframes rc-in { from { opacity: 0; transform: translateX(-40px); } to { opacity: 1; transform: none; } }
+.rc-m .bd { white-space: nowrap; color: var(--muted); font-size: .7em; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.rc-m .pl { min-width: 0; overflow-wrap: anywhere; line-height: 1.15; }
+.rc-m .pl.b { text-align: right; }
+.rc-m .pl small { display: block; font-size: .64em; font-weight: 500; color: var(--muted); margin-top: 2px; }
+.rc-m .vs { color: var(--muted); font-size: .75em; font-weight: 700; text-align: center; min-width: 46px; }
+.rc-m .vs.res { color: var(--text); font-size: .85em; font-variant-numeric: tabular-nums; }
+.rc-m .pl.won { color: #ffd479; }
+.rc-m .pl.lost { color: var(--muted); font-weight: 500; }
+.rc-m .how { grid-column: 2 / -1; font-size: .62em; font-weight: 500; color: var(--muted); text-align: center; margin-top: -4px; }
+.rc-m.star { border-color: rgba(245, 185, 66, .75); background: linear-gradient(90deg, rgba(245, 185, 66, .16), rgba(23, 26, 31, .94) 70%); box-shadow: 0 0 28px rgba(245, 185, 66, .18); }
+.rc-m .tag { grid-column: 1 / -1; justify-self: start; font-size: .58em; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; color: #1a1205; background: #f5b942; border-radius: 6px; padding: 1px 8px; margin-bottom: -2px; }
+.rc-t { border-radius: 12px; background: rgba(23, 26, 31, .94); border: 1px solid var(--line); padding: 6px 10px; animation: rise .5s ease 1s both; }
+.rc-r { display: grid; grid-template-columns: 30px minmax(0, 1fr) 76px 74px; gap: 8px; align-items: center; padding: clamp(3px, .6vh, 6px) 6px; border-radius: 8px;
+  font-size: clamp(13px, 1.85vh, 19px); font-variant-numeric: tabular-nums; }
+.rc-r.head { color: var(--muted); font-size: clamp(10.5px, 1.3vh, 13px); text-transform: uppercase; letter-spacing: .06em; }
+.rc-r .k { color: var(--muted); text-align: center; }
+.rc-r .n { min-width: 0; overflow-wrap: anywhere; font-weight: 650; line-height: 1.15; }
+.rc-r .p { text-align: right; font-weight: 800; }
+.rc-r .wdl { text-align: right; color: var(--muted); }
+.rc-r.zone { background: rgba(245, 185, 66, .08); }
+.rc-r .p .gain { font-size: .7em; color: var(--ok); font-weight: 700; margin-left: 4px; }
+.rc-cut { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: clamp(10px, 1.3vh, 12.5px); color: #ffd479; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+.rc-cut::before, .rc-cut::after { content: ""; flex: 1; border-top: 1px dashed rgba(245, 185, 66, .55); }
+.rc-next { font-size: clamp(14px, 2.1vh, 21px); text-align: center; animation: rise .5s ease 1.8s both; }
+.rc-next b { color: #ffd479; }
+.rc-skip { position: absolute; bottom: 14px; right: 18px; font-size: 13px; color: var(--muted); }
+.rc-bar { position: absolute; left: 0; bottom: 0; height: 4px; background: linear-gradient(90deg, var(--accent), #f5b942); animation: intro-bar var(--dur, 12s) linear both; }
+@media (max-width: 900px) { .rc-body { grid-template-columns: minmax(0, 1fr); } .rc-m { grid-template-columns: 44px minmax(0, 1fr) auto minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .rcard * { animation-duration: .01s !important; animation-delay: 0s !important; } }
 @media (max-width: 900px) {
   .boards > .card.focused { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "boardcol" "infocol"; }
   .card.focused .infocol { height: auto; }
@@ -373,6 +439,7 @@ body.focus-mode .boards { display: block; }
   <h1 id="title">AI Chess Swiss</h1>
   <div class="chips" id="chips"></div>
 </header>
+<div class="ticker" id="ticker" aria-label="Standings"></div>
 <main>
   <section class="boards" id="boards"><div class="empty card">Waiting for the tournament to start...</div></section>
   <aside class="side" id="side">
@@ -775,7 +842,7 @@ function updateCard(c, game, now) {
   setHTML(p.result, game.termination ? `<div class="who">Result</div>${esc(game.termination)}` : "");
   const cap = caption && caption.game === game.id ? caption.text : "";
   p.caption.style.display = cap ? "" : "none";
-  setHTML(p.caption, esc(cap));
+  setHTML(p.caption, (cap && caption.tag ? `<span class="cap-on">${esc(caption.tag)}</span>` : "") + esc(cap));
   updateMoves(c, game, ply, pinned, ann);
   updateThinking(c, game, ply, total);
   setHTML(p.nav, `<button data-nav="first" title="First position">|&lt;</button><button data-nav="prev" title="Previous move (Left arrow)">&lt;</button><button data-nav="next" title="Next move (Right arrow)">&gt;</button><button data-nav="last" title="Last move">&gt;|</button>`
@@ -836,6 +903,7 @@ function render() {
   renderBoards();
   const games = data.games || {};
   document.getElementById("standingsTitle").textContent = fmt ? "Round robin table (Elo)" : "Standings (Elo)";
+  renderTicker();
   renderBracket();
   const rows = (data.standings || []).map(r => {
     const d = r.elo_delta || 0;
@@ -1033,6 +1101,16 @@ function miniBracketHtml(curId) {
     + (sl.third ? miniMatch(sl.third.m, sl.third.o, curId) : "") + champ + `</div>`;
 }
 
+// Standings strip in the sticky header, for layouts where the full table is not on screen.
+function renderTicker() {
+  const rows = (data.standings || []).slice().sort((a, b) => (a.rank || 99) - (b.rank || 99));
+  const f = fmtInfo(), size = f ? (f.ko_size || (data.config || {}).knockoutSize || 4) : 0;
+  const fg = focusId && data.games ? data.games[focusId] : null;
+  const html = rows.length ? `<span class="tk-h">Standings</span>` + rows.map((r, i) =>
+    `<span class="tk${size && i < size ? " zone" : ""}${fg && (r.name === fg.white || r.name === fg.black) ? " me" : ""}"><i>${r.rank || i + 1}</i>${esc(r.name)}<b>${esc(r.points ?? 0)}</b></span>`).join("") : "";
+  setHTML(document.getElementById("ticker"), html);
+}
+
 // Compact leaderboard for focus mode: the round-robin table (final once the knockouts start).
 function leaderboardHtml(game) {
   const rows = (data.standings || []).slice().sort((a, b) => (a.rank || 99) - (b.rank || 99));
@@ -1140,6 +1218,135 @@ function hideIntro() {
   clearTimeout(introTimer);
   const el = introEl;
   introEl = null;
+  el.classList.add("leaving");
+  setTimeout(() => el.remove(), 380);
+}
+
+// ---- round preview and round results ---------------------------------------------------------
+// Every round robin round opens with a preview card (pairings, the match of the round, the table)
+// and closes with a results card (results, the new table, the next round's headline match). The
+// card waits up to 25 s for the host's matching line (round-N / recap-N) and stays while it plays.
+const roundCardForced = (location.hash.match(/(?:^#|[#&])round-(intro|results)\b/) || [])[1] || "";
+const roundCardsShown = new Set();
+let rcardEl = null, rcardKey = "", rcardTimer = null, rcardShownAt = 0;
+const RCARD_MIN_MS = 11000, RCARD_WAIT_MS = 25000, RCARD_MAX_MS = 55000;
+const heardEvents = new Set();   // host lines (event keys) that started playing on this page
+let serverSkewMs = 0;         // server clock minus this page's clock
+function rrRounds() { return (data.rounds || []).filter(r => !r.stage); }
+function stateMoving() { return typeof data.state_age_s === "number" ? data.state_age_s < 240 : true; }
+function maybeRoundCard() {
+  if (!data || !data.id || introEl || rcardEl) return;
+  const games = data.games || {}, rr = rrRounds();
+  const cur = rr.find(r => r.round === data.current_round);
+  if (roundCardForced && !roundCardsShown.has("forced")) {
+    roundCardsShown.add("forced");
+    const done = rr.filter(r => r.status === "finished");
+    if (roundCardForced === "results" && done.length) showRoundCard("results", done[done.length - 1]);
+    else if (cur) showRoundCard("intro", cur);
+    return;
+  }
+  // Results first: the round that just ended (seen live, not on a page opened long after).
+  const fin = rr.filter(r => r.status === "finished");
+  const last = fin[fin.length - 1];
+  if (last && !roundCardsShown.has("recap-" + last.round)) {
+    const ends = (last.pairings || []).map(p => Date.parse((games[p.game_id] || {}).end || "")).filter(x => !isNaN(x));
+    const ago = ends.length ? Date.now() + serverSkewMs - Math.max(...ends) : Infinity;
+    if (ago < 300000 && polls > 1) { roundCardsShown.add("recap-" + last.round); showRoundCard("results", last); return; }
+    if (ago >= 300000) roundCardsShown.add("recap-" + last.round);
+  }
+  if (cur && cur.round > 1 && !roundCardsShown.has("round-" + cur.round)) {
+    const rg = (cur.pairings || []).map(p => games[p.game_id] || {});
+    const anyDone = rg.some(g => g.status === "finished");
+    const maxPly = Math.max(0, ...rg.map(g => (g.moves || []).length));
+    if (anyDone || maxPly > 6) { roundCardsShown.add("round-" + cur.round); return; }   // joined mid round
+    if (stateMoving() && rg.some(g => g.status === "live")) { roundCardsShown.add("round-" + cur.round); showRoundCard("intro", cur); }
+  }
+}
+function rcPlayer(name, extra = "") {
+  const r = standingRow(name);
+  const meta = r.rank ? `#${r.rank} - ${r.points ?? 0} pt${r.points === 1 ? "" : "s"}` : "";
+  return `${esc(name)}${meta || extra ? `<small>${esc(meta)}${extra}</small>` : ""}`;
+}
+function rcTable(changed) {
+  const rows = (data.standings || []).slice().sort((a, b) => (a.rank || 99) - (b.rank || 99));
+  const f = fmtInfo(), size = f ? (f.ko_size || (data.config || {}).knockoutSize || 4) : 0;
+  let html = `<div class="rc-r head"><span class="k">#</span><span>Player</span><span class="p">Pts</span><span class="wdl">W-D-L</span></div>`;
+  rows.forEach((r, i) => {
+    const gain = changed ? changed.get(r.name) : 0;
+    html += `<div class="rc-r${size && i < size ? " zone" : ""}"><span class="k">${r.rank || i + 1}</span><span class="n">${esc(r.name)}</span>`
+      + `<span class="p">${esc(r.points ?? 0)}${gain ? `<span class="gain" title="This round">+${gain === 0.5 ? "&frac12;" : esc(gain)}</span>` : ""}</span><span class="wdl">${r.wins || 0}-${r.draws || 0}-${r.losses || 0}</span></div>`;
+    if (size && i === size - 1 && rows.length > size) html += `<div class="rc-cut">top ${size} reach the knockouts</div>`;
+  });
+  return `<div class="rc-t">${html}</div>`;
+}
+function showRoundCard(mode, rnd) {
+  const games = data.games || {}, f = fmtInfo(), cfg = data.config || {};
+  const total = f ? (f.rr_rounds || cfg.rounds) : cfg.rounds;
+  const pairs = rnd.pairings || [];
+  const rankOf = n => standingRow(n).rank || 99;
+  // Match of the round: the two best-placed players meeting (lowest rank sum).
+  const star = pairs.slice().sort((a, b) => (rankOf(a.white) + rankOf(a.black)) - (rankOf(b.white) + rankOf(b.black)))[0];
+  let left = "", sub = "", next = "", changed = null;
+  if (mode === "intro") {
+    left = `<h3>The matches</h3>` + pairs.map((p, i) => `<div class="rc-m${p === star ? " star" : ""}" style="--i:${i}">`
+      + (p === star ? `<span class="tag">Match of the round</span>` : "")
+      + `<span class="bd">Board ${esc(p.board)}</span><span class="pl">${rcPlayer(p.white)}</span><span class="vs">vs</span><span class="pl b">${rcPlayer(p.black)}</span></div>`).join("");
+    const leader = (data.standings || []).find(r => r.rank === 1);
+    sub = (leader ? `Leader: <b>${esc(leader.name)}</b> on ${esc(leader.points)} - ` : "") + (f ? `top ${f.ko_size || 4} after round ${total} reach the knockouts` : "");
+  } else {
+    changed = new Map();
+    left = `<h3>Results</h3>` + pairs.map((p, i) => {
+      const g = games[p.game_id] || {}, res = g.result || "*";
+      const ww = res === "1-0", bw = res === "0-1";
+      if (ww) changed.set(p.white, 1); if (bw) changed.set(p.black, 1);
+      if (res === "1/2-1/2") { changed.set(p.white, 0.5); changed.set(p.black, 0.5); }
+      const score = res === "1/2-1/2" ? "&frac12;-&frac12;" : esc(res);
+      const how = String(g.termination || "").replace(/^.*?\b(lost on time|checkmate|stalemate|forfeit\w*|resign\w*|draw by [a-z ]+|threefold repetition|insufficient material|fifty-move rule|invalid replies)\b.*$/i, "$1");
+      return `<div class="rc-m" style="--i:${i}"><span class="bd">Board ${esc(p.board)}</span>`
+        + `<span class="pl ${ww ? "won" : bw ? "lost" : ""}">${esc(p.white)}</span><span class="vs res">${score}</span><span class="pl b ${bw ? "won" : ww ? "lost" : ""}">${esc(p.black)}</span>`
+        + (how ? `<span class="how">${esc(how)}</span>` : "") + `</div>`;
+    }).join("");
+    const nx = rrRounds().find(r => r.round === rnd.round + 1);
+    const top = nx && (nx.pairings || []).slice().sort((a, b) => (rankOf(a.white) + rankOf(a.black)) - (rankOf(b.white) + rankOf(b.black)))[0];
+    if (top) next = `<div class="rc-next">Next: round ${nx.round} - <b>${esc(top.white)}</b> vs <b>${esc(top.black)}</b></div>`;
+    else if (f && rnd.round >= total) next = `<div class="rc-next">Next: <b>the knockouts</b></div>`;
+    const leader = (data.standings || []).find(r => r.rank === 1);
+    sub = leader ? `<b>${esc(leader.name)}</b> leads on ${esc(leader.points)}` + (total && total > rnd.round ? ` - ${total - rnd.round} round${total - rnd.round === 1 ? "" : "s"} to go` : "") : "";
+  }
+  const head = mode === "intro"
+    ? `<span>Round ${esc(rnd.round)}</span>${total ? `<span class="of">of ${esc(total)}</span>` : ""}`
+    : `<span>Round ${esc(rnd.round)}</span> <span class="gold">results</span>`;
+  const el = document.createElement("div");
+  el.className = "rcard";
+  el.dataset.rcard = mode;
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", `Round ${rnd.round} ${mode === "intro" ? "preview" : "results"}, click or press Escape to skip`);
+  el.style.setProperty("--dur", RCARD_MIN_MS / 1000 + "s");
+  el.innerHTML = `<div class="rc-kicker">${esc(data.title || "AI Chess")}</div><h2 class="rc-head">${head}</h2>`
+    + (sub ? `<div class="rc-sub">${sub}</div>` : "")
+    + `<div class="rc-body"><div class="rc-col">${left}</div><div class="rc-col"><h3>${mode === "intro" ? "The table" : "The table now"}</h3>${rcTable(changed)}</div></div>`
+    + next + `<div class="rc-skip">Click or press Esc to skip</div><div class="rc-bar"></div>`;
+  document.body.appendChild(el);
+  rcardEl = el;
+  rcardKey = (mode === "intro" ? "round-" : "recap-") + rnd.round;
+  rcardShownAt = Date.now();
+  clearTimeout(rcardTimer);
+  rcardTimer = setTimeout(tickRoundCard, RCARD_MIN_MS);
+}
+function tickRoundCard() {
+  if (!rcardEl) return;
+  const age = Date.now() - rcardShownAt;
+  // Stay while the host's line for this round is still queued or playing.
+  const talking = (clipPlaying && caption && caption.event === rcardKey) || commentaryQueue.some(c => c.event === rcardKey);
+  const coming = data.commentary && commentaryOn && !heardEvents.has(rcardKey) && age < RCARD_WAIT_MS;   // still being voiced
+  if (age >= RCARD_MAX_MS || (age >= RCARD_MIN_MS && !talking && !coming)) { hideRoundCard(); return; }
+  rcardTimer = setTimeout(tickRoundCard, 500);
+}
+function hideRoundCard() {
+  if (!rcardEl) return;
+  clearTimeout(rcardTimer);
+  const el = rcardEl;
+  rcardEl = null;
   el.classList.add("leaving");
   setTimeout(() => el.remove(), 380);
 }
@@ -1318,7 +1525,19 @@ function clipWanted(clip) {
   const game = (data.games || {})[clip.game];
   if (!game) return false;
   if (focusId && focusPinned && clip.game !== focusId) return false;   // viewer's own focus: only that board
-  return (game.moves || []).length - (clip.ply || 0) <= 2;     // stale: more than 2 plies behind
+  // Speech must stay on the move it describes: drop a line once its board is 2 moves on, or when
+  // it waited too long (a round or champion line may wait for the line before it).
+  const age = Date.now() - (clip.got || Date.now());
+  if (clip.event) return age < 60000;
+  return (game.moves || []).length - (clip.ply || 0) <= 1 && age < 20000;
+}
+function clipTag(clip) {
+  // The move the line is about, so a viewer can tie the words to the board.
+  if (clip.thinking) return "thinking now";
+  if (clip.event) return "";
+  const game = (data.games || {})[clip.game] || {};
+  const mv = (game.moves || [])[(clip.ply || 0) - 1];
+  return mv ? `${Math.ceil(mv.ply / 2)}${mv.side === "white" ? "." : "..."} ${mv.san}` : "";
 }
 function syncCommentaryTarget() {
   if (!data || !data.commentary) return;
@@ -1356,7 +1575,8 @@ function playNextClip() {
     if (!clipWanted(clip)) continue;
     clipPlaying = true;
     lastClipAt = Date.now();
-    caption = { game: clip.game, text: clip.text || "" };
+    caption = { game: clip.game, text: clip.text || "", event: clip.event || "", tag: clipTag(clip) };
+    if (clip.event) heardEvents.add(clip.event);
     // Auto-focus follows the commentary: show the board this clip is about.
     if (autoFocus && clip.game !== focusId) { autoReason = "following the commentary"; lastAutoSwitch = Date.now(); setFocus(clip.game, { auto: true }); }
     else if (autoFocus) autoReason = "following the commentary";
@@ -1392,6 +1612,7 @@ async function pollCommentary() {
     const clips = (j.clips || []).filter(c => typeof c.seq === "number" && c.seq > lastSeq && c.game).sort((a, b) => a.seq - b.seq);
     for (const [i, clip] of clips.entries()) {
       lastSeq = clip.seq;
+      clip.got = Date.now() - Math.max(0, Number(clip.age_s) || 0) * 1000;   // when the server made it
       const game = (data.games || {})[clip.game];
       // Page just opened: no backlog, only the newest clip and only for a game still playing.
       if (!seqPrimed && (i < clips.length - 1 || !(game && game.status === "live"))) continue;
@@ -1401,13 +1622,14 @@ async function pollCommentary() {
     playNextClip();
   } catch (e) { /* try again next tick */ }
 }
-setInterval(pollCommentary, 2000);
+setInterval(pollCommentary, 1000);
 
 // ---- input --------------------------------------------------------------------------------
 document.addEventListener("click", ev => {
   unlockAudio();
   if (needGesture) { needGesture = false; playNextClip(); }
   if (ev.target.closest("[data-intro]")) { hideIntro(); return; }
+  if (ev.target.closest("[data-rcard]")) { hideRoundCard(); return; }
   if (ev.target.closest("[data-close-champion]")) { hideChampion(); return; }
   if (ev.target.closest("[data-show-champion]")) { showChampion(false); return; }
   if (ev.target.closest("[data-toggle-autofocus]")) { setAutoFocus(!autoFocus); return; }
@@ -1467,6 +1689,7 @@ document.addEventListener("click", ev => {
 });
 document.addEventListener("keydown", ev => {
   if (ev.key === "Escape" && introEl) { hideIntro(); return; }
+  if (ev.key === "Escape" && rcardEl) { hideRoundCard(); return; }
   if (ev.key === "Escape" && !document.getElementById("champOverlay").hidden) { hideChampion(); return; }
   if (!data || !data.games) return;
   if (ev.key === "Escape") {
@@ -1486,13 +1709,16 @@ async function poll() {
   try {
     const q = params.get("id") ? `?id=${encodeURIComponent(params.get("id"))}` : "";
     const res = await fetch(`/api/tournament${q}`, { cache: "no-store" });
+    const sentAt = Date.now();
     if (res.ok) {
       data = await res.json();
+      if (data.server_now_ms) serverSkewMs = data.server_now_ms - Math.round((sentAt + Date.now()) / 2);
       polls++;
       soundForNewMoves();
       render();
       autoTick(false);
       maybeIntro();
+      maybeRoundCard();
       checkChampion();
     }
   } catch (e) { /* keep the last frame */ }
@@ -1500,9 +1726,9 @@ async function poll() {
 // A header that wraps onto more rows (narrow screens) takes height from the focused board, so the
 // whole card still fits the screen; a one-row header changes nothing.
 (function watchHeader() {
-  const hdr = document.querySelector("header");
-  const set = () => document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight - 60) + "px");
-  try { new ResizeObserver(set).observe(hdr); } catch (e) { window.addEventListener("resize", set); }
+  const hdr = document.querySelector("header"), tick = document.getElementById("ticker");
+  const set = () => document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight + tick.offsetHeight - 60) + "px");
+  try { const ro = new ResizeObserver(set); ro.observe(hdr); ro.observe(tick); } catch (e) { window.addEventListener("resize", set); }
   set();
 })();
 poll();
@@ -2058,6 +2284,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(503, b'{"error":"state file busy"}', "application/json")
                 return
             state = json.loads(body)
+            now = time.time()
+            state["state_age_s"] = round(now - (state.get("updated_epoch_ms") or 0) / 1000, 1)   # paused = old
+            state["server_now_ms"] = int(now * 1000)
             if self.analyzer is not None:
                 live = {gid: g.get("fen") for gid, g in (state.get("games") or {}).items()
                         if g.get("status") == "live" and g.get("fen")}
