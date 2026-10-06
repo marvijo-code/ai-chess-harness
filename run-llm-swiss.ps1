@@ -64,8 +64,10 @@ if ($listener) {
 
 function Start-Detached([string]$Name, [string]$Line) {
   $cmdFile = Join-Path $LiveDir "$Slug-$Name.cmd"
-  Set-Content -LiteralPath $cmdFile -Value @('@echo off', $Line) -Encoding ASCII
-  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "cmd.exe /c `"$cmdFile`"" } | Out-Null
+  Set-Content -LiteralPath $cmdFile -Value @('@echo off', "cd /d `"$RepoRoot`"", $Line) -Encoding ASCII
+  # Hidden: a plain "cmd.exe /c" console pops up as a Windows Terminal window (owner: "no popup terminal windows").
+  $hidden = Join-Path $RepoRoot 'tools\run-hidden-cmd.vbs'
+  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "wscript.exe //B //Nologo `"$hidden`" `"$cmdFile`"" } | Out-Null
 }
 
 $viewerLine = '"{0}" "{1}\tools\llm_tournament_viewer.py" --port {2} --state "{3}" 1> "{4}" 2> "{5}"' -f `
