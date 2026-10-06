@@ -417,7 +417,8 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
             uci, lines = "0000", [f"info string engine failure: {exc}"]
         wall_ms = int((time.time() - started) * 1000)
         comment, tries, illegal = parse_info(lines)
-        if engine.is_uci and not comment:
+        if engine.is_uci:
+            # Its own "info string" lines are start-up notes (e.g. "Network replica 1: Shared memory"), not reasons.
             comment = uci_comment(lines, engine.player)
         if engine.is_uci:
             # Stockfish's "thinking" is its search: the info lines it printed for this move.
@@ -434,8 +435,8 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
             if uci == "flag":
                 replace_engine(engine)  # still thinking: restart it so the next game starts clean
             break
-        if uci == "0000" and comment.startswith("provider unavailable"):
-            # A plan limit or lost login is not chess: void the game; --resume replays it from move 1.
+        if uci == "0000" and comment.startswith(("provider unavailable", "engine failure")):
+            # A plan limit, lost login or crashed engine process is not chess: void the game; --resume replays it.
             result, termination, end_kind = "*", f"void: {engine.name} {comment}"[:200], "void"
             break
         if uci == "0000":

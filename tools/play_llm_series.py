@@ -142,10 +142,15 @@ class LlmEngine:
         env = os.environ.copy()
         if not self.is_uci:
             env.update(engine_env(player, cfg))
-        argv = [str(Path(player["path"]))] if self.is_uci else [sys.executable, str(ENGINE_SCRIPT)]
+        # A relative engine path is relative to the repo, whatever folder the runner was started from
+        # (2026-10-06: a detached runner started in System32 could not find Stockfish and crashed).
+        exe = Path(player["path"]) if self.is_uci else None
+        if exe is not None and not exe.is_absolute():
+            exe = ROOT / exe
+        argv = [str(exe)] if exe is not None else [sys.executable, str(ENGINE_SCRIPT)]
         self.proc = subprocess.Popen(
             argv,
-            cwd=str(Path(player["path"]).parent) if self.is_uci else None,
+            cwd=str(exe.parent) if exe is not None else None,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

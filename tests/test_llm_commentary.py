@@ -35,6 +35,7 @@ class CommentaryTest(unittest.TestCase):
         path.write_text(json.dumps(state), encoding="utf-8")
         c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=budget)
         c.http = FakeHttp()
+        c.always = True
         lc.time.sleep = lambda _s: None
         return c, path
 
@@ -50,6 +51,8 @@ class CommentaryTest(unittest.TestCase):
         self.assertAlmostEqual(c.spent_usd, 0.0029)
         tts = [b for p, b in c.http.calls if p == "/audio/speech"][0]
         self.assertEqual((tts["model"], tts["response_format"]), (lc.TTS_MODEL, "pcm"))
+        self.assertEqual(tts["input"], clip["text"], "only the commentary line is spoken, never the style prompt")
+        self.assertEqual(tts["instructions"], lc.TTS_STYLE)
 
     def test_no_new_move_means_no_call_and_the_gap_is_respected(self):
         c, _ = self.make(state_with([{"ply": 1, "side": "white", "san": "e4"}]))
@@ -75,6 +78,73 @@ class CommentaryTest(unittest.TestCase):
         self.assertIn("Grok four point seven", text)
         self.assertIn("played f6?", text)
         self.assertIn("Its own reason: center", text)
+
+
+class RoamingTest(unittest.TestCase):
+    def state(self):
+        quiet = {"id": "r1b1", "board": 1, "round": 2, "white": "Muse Spark 1.3", "black": "Qwen 3.8 Omni Flash",
+                 "status": "live", "result": "*", "moves": [{"ply": 1, "side": "white", "san": "e4"}]}
+        sharp = {"id": "r1b2", "board": 2, "round": 2, "white": "Grok 4.7", "black": "GPT-6.1 Sol", "status": "live",
+                 "result": "*", "moves": [{"ply": 1, "side": "white", "san": "e4"}, {"ply": 2, "side": "black", "san": "Qh4"}]}
+        standings = [{"name": "Grok 4.7", "rank": 1, "points": 1, "played": 1},
+                     {"name": "GPT-6.1 Sol", "rank": 2, "points": 1, "played": 1},
+                     {"name": "Muse Spark 1.3", "rank": 9, "points": 0, "played": 1}]
+        return {"id": "t1", "games": {"r1b1": quiet, "r1b2": sharp}, "standings": standings}
+
+    def make(self, state):
+        tmp = Path(tempfile.mkdtemp())
+        path = tmp / "t1-tournament.json"
+        path.write_text(json.dumps(state), encoding="utf-8")
+        (tmp / "t1-annotations.json").write_text(json.dumps({"annotations": {"r1b2": {"2": "??"}}}), encoding="utf-8")
+        c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=1.0)
+        c.http = FakeHttp()
+        c.always = True
+        lc.time.sleep = lambda _s: None
+        return c
+
+    def test_leaders_and_a_blunder_win_the_commentary(self):
+        c = self.make(self.state())
+        clip = c.tick()
+        self.assertEqual(c.clips_all(0)[0]["game"], "r1b2")
+        context = [b for p, b in c.http.calls if p == "/chat/completions"][0]["messages"][1]["content"]
+        self.assertIn("Board 2", context)
+        self.assertIn("just moved to this board", context)
+        self.assertIn("Grok four point seven 1 point;", context)
+        self.assertEqual(clip["ply"], 2)
+
+    def test_a_pinned_board_keeps_the_commentary_and_a_hint_does_not(self):
+        c = self.make(self.state())
+        c.focus("r1b1")  # unpinned hint from the all-boards grid: still roaming
+        self.assertEqual(c.pick(self.state(), {"r1b2": {"2": "??"}}), "r1b2")
+        c.focus("r1b1", pinned=True)
+        self.assertEqual(c.pick(self.state(), {"r1b2": {"2": "??"}}), "r1b1")
+        c.focus(None)
+        self.assertEqual(c.pick(self.state(), {"r1b2": {"2": "??"}}), "r1b2")
+
+    def test_a_fresh_result_gets_one_closing_line(self):
+        state = self.state()
+        state["games"]["r1b1"].update(status="finished", result="0-1", termination="checkmate")
+        state["games"]["r1b2"]["moves"] = state["games"]["r1b2"]["moves"][:1]
+        c = self.make(state)
+        c._done_ply = {"r1b1": 1, "r1b2": 1}
+        self.assertEqual(c.pick(state, {}), "r1b1")
+        c.tick()
+        self.assertIsNone(c.pick(state, {}), "result said once, no new moves elsewhere")
+
+
+class ListenerTest(unittest.TestCase):
+    def test_no_listener_means_no_spending(self):
+        tmp = Path(tempfile.mkdtemp())
+        path = tmp / "t1-tournament.json"
+        path.write_text(json.dumps(state_with([{"ply": 1, "side": "white", "san": "e4"}])), encoding="utf-8")
+        c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=1.0)
+        c.http = FakeHttp()
+        c.always = False
+        self.assertIsNone(c.tick())
+        self.assertEqual(c.http.calls, [])
+        c.clips_all(0)  # an unmuted page polls
+        lc.time.sleep = lambda _s: None
+        self.assertIsNotNone(c.tick())
 
 
 if __name__ == "__main__":

@@ -284,6 +284,35 @@ class ThinkTimeTest(unittest.TestCase):
         self.assertIn("Decide faster", sp.build_prompt(chess.Board(), {}, [], [], nudge=note))
 
 
+class AnswerStepTest(unittest.TestCase):
+    def test_the_lowest_effort_answer_waits_on_the_clock_not_a_share(self):
+        import chess
+        import os
+
+        os.environ.setdefault("OPENROUTER_API_KEY", "test-key")
+        client = sp.SubscriptionChessClient("openrouter-chat", lambda _m: None)
+        calls = []
+
+        def fake_stream(url, payload, headers, timeout, cutoff):
+            calls.append((timeout, cutoff))
+            if len(calls) < 3:
+                return {"content": "", "reasoning": "thinking", "usage": {}, "cut": True}
+            return {"content": '{"move": "e4"}', "usage": {}, "cut": False}
+
+        client.http_stream = fake_stream
+        move, _ = client.choose_move(chess.Board(), {"wtime": 300000, "btime": 300000, "winc": 10000}, [])
+        self.assertEqual(move, "e2e4")
+        timeout, cutoff = calls[2]
+        self.assertIsNone(cutoff, "no share cut on the last answer step")
+        self.assertGreater(timeout, 200, "bounded by the remaining clock")
+
+    def test_a_cut_off_reply_still_states_its_move(self):
+        import chess
+
+        move, _comment, raw = sp.parse_reply('{"move": "e4", "comment": "I take the centre and keep the bish', chess.Board())
+        self.assertEqual((move.uci(), raw), ("e2e4", "e4"))
+
+
 class BoardViewTest(unittest.TestCase):
     def test_diagram_has_coordinates_and_matches_the_fen(self):
         import chess

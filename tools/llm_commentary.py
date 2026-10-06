@@ -1,9 +1,11 @@
 """Spoken commentary for the live LLM tournament viewer (OpenRouter, metered).
 
-A background thread watches the tournament state JSON. For the board the viewer focuses (or the
-first live board) it writes one short commentator line every MIN_GAP_SECONDS at most, from the
-recent moves, the players' own move comments and the Stockfish move marks, then voices it with
-an OpenRouter speech model. Clips are WAV files in out_dir; the viewer polls `clips()` and plays
+A background thread watches the tournament state JSON. It roams the boards like a TV commentator:
+each line goes to the board that matters most right now (tournament leaders playing, fresh blunders
+or strong moves, checks, captures, time trouble, a result just in), with a nudge to rotate boards.
+A board the viewer pins (focus mode) keeps the commentary. At most one line every MIN_GAP_SECONDS,
+written from the recent moves, the players' own move comments and the Stockfish move marks, then
+voiced with an OpenRouter speech model. Clips are WAV files in out_dir; the viewer polls `clips()` and plays
 them one at a time. A hard spending cap stops all calls once reached.
 
 Measured 2026-10-06: Gemini 3.8 Flash TTS, a 12.5 s line = $0.0028 (PCM only, 24 kHz mono).
@@ -24,9 +26,11 @@ API = "https://openrouter.ai/api/v1"
 TEXT_MODEL = "google/gemini-3.1-flash-lite"
 TTS_MODEL = "google/gemini-3.8-flash-tts"
 TTS_VOICE = "Puck"
-TTS_STYLE = "Say like an excited but clear chess commentator"
+TTS_STYLE = "Speak like an excited but clear chess commentator."
 SAMPLE_RATE = 24000
 MIN_GAP_SECONDS = 12.0
+# Only spend while someone listens: an unmuted page polls clips every 2 s (COMMENTARY_ALWAYS=1 overrides).
+LISTENER_SECONDS = 20.0
 DEFAULT_BUDGET_USD = 1.5
 # Spoken names: say the version numbers the way a commentator would.
 SPOKEN = {"GPT-6.1 Sol": "GPT six point one Sol", "Grok 4.7": "Grok four point seven",
@@ -38,8 +42,35 @@ COMMENTATOR_PROMPT = (
     "Write ONE spoken line of 15 to 35 words about the latest moves on this board: name who moved, what it means, "
     "and react to any move mark (?? blunder, ? mistake, ?! inaccuracy, ! strong move). You may quote the player's own "
     "reason in a few words. Plain words only: no markdown, no lists, no dashes, no emojis, no move numbers, "
-    "write moves the way they are spoken (Knight takes e5, castles short). Do not invent moves or evaluations."
+    "write moves the way they are spoken (Knight takes e5, castles short). Do not invent moves or evaluations. "
+    "When the notes say the commentary just moved to this board, start by naming the board (for example "
+    "'Over on board three'). Mention the tournament standings only when the notes give them and it adds drama."
 )
+MARK_SCORE = {"??": 6.0, "?": 4.0, "?!": 1.5, "!": 3.0}
+RECENT_RESULT_SECONDS = 180
+
+
+def interest(game: dict, marks: dict, ranks: dict, done_ply: int, last_game: str | None, idle_seconds: float) -> float:
+    """How much a board deserves the next line. Higher = more interesting right now."""
+    score = 0.0
+    for name in (game.get("white"), game.get("black")):
+        rank = ranks.get(name)
+        if rank:
+            score += max(0, 4 - rank) * 1.5  # the top three are the story
+    fresh = (game.get("moves") or [])[done_ply:]
+    for move in fresh:
+        san = move.get("san", "")
+        score += MARK_SCORE.get(str(marks.get(str(move["ply"])) or ""), 0.0)
+        score += 10.0 if "#" in san else 1.0 if "+" in san else 0.0
+        score += 0.7 if "x" in san else 0.0
+    score += min(len(fresh), 4) * 0.3
+    clocks = game.get("clocks") or {}
+    if game.get("status") == "live" and min(clocks.get("white", 10 ** 9), clocks.get("black", 10 ** 9)) < 60000:
+        score += 3.0  # time trouble
+    score += min(idle_seconds / 60.0, 3.0)  # rotate: boards nobody talked about lately climb
+    if game.get("id") == last_game:
+        score -= 2.0
+    return score
 
 
 def spoken(name: str) -> str:
@@ -61,11 +92,15 @@ def _key() -> str | None:
     return None
 
 
-def build_context(game: dict, annotations: dict, from_ply: int) -> str:
+def build_context(game: dict, annotations: dict, from_ply: int, switched: bool = False, leaders: str = "") -> str:
     """The facts the commentator may use: players, the last few moves with marks and the movers' own comments."""
     moves = game.get("moves") or []
-    lines = [f"White: {spoken(game.get('white', '?'))}. Black: {spoken(game.get('black', '?'))}.",
+    lines = [f"Board {game.get('board', '?')}, round {game.get('round', '?')}."
+             + (" The commentary just moved to this board." if switched else ""),
+             f"White: {spoken(game.get('white', '?'))}. Black: {spoken(game.get('black', '?'))}.",
              f"Moves played so far: {len(moves)} half-moves."]
+    if leaders:
+        lines.append(f"Tournament standings now: {leaders}.")
     for move in moves[max(0, from_ply - 2):]:
         mover = spoken(game.get(move["side"], move["side"]))
         mark = (annotations or {}).get(str(move["ply"])) or ""
@@ -98,6 +133,10 @@ class Commentator:
         self._seq = max([c["seq"] for clips in self._clips.values() for c in clips] or [0])
         self._done_ply: dict[str, int] = {g: max(c["ply"] for c in clips) for g, clips in self._clips.items() if clips}
         self._focus: str | None = None
+        self._last_game: str | None = None
+        self._last_poll = 0.0
+        self.always = os.environ.get("COMMENTARY_ALWAYS", "").strip() in {"1", "true", "yes"}
+        self._last_said: dict[str, float] = {}
         self._busy_until = 0.0
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -114,13 +153,24 @@ class Commentator:
     def stop(self) -> None:
         self._stop.set()
 
-    def focus(self, game_id: str | None) -> None:
+    def focus(self, game_id: str | None, pinned: bool = False) -> None:
+        """A pinned board (viewer focus mode) keeps the commentary; None or an unpinned hint = roam."""
         with self._lock:
-            self._focus = game_id or None
+            if not game_id:
+                self._focus = None
+            elif pinned:
+                self._focus = game_id
 
     def clips(self, game_id: str, after_seq: int = 0) -> list[dict]:
+        self._last_poll = time.time()
         with self._lock:
-            return [dict(c) for c in self._clips.get(game_id, []) if c["seq"] > after_seq]
+            return [dict(c, game=game_id) for c in self._clips.get(game_id, []) if c["seq"] > after_seq]
+
+    def clips_all(self, after_seq: int = 0) -> list[dict]:
+        self._last_poll = time.time()
+        with self._lock:
+            found = [dict(c, game=g) for g, clips in self._clips.items() for c in clips if c["seq"] > after_seq]
+        return sorted(found, key=lambda c: c["seq"])
 
     def audio_path(self, name: str) -> Path | None:
         if not re.fullmatch(r"clip-\d+\.wav", name or ""):
@@ -140,23 +190,22 @@ class Commentator:
     def tick(self) -> dict | None:
         if self.spent_usd >= self.budget_usd or time.time() < self._busy_until:
             return None
+        if not self.always and time.time() - self._last_poll > LISTENER_SECONDS:
+            return None  # nobody is listening
         state = json.loads(self.state_path.read_text(encoding="utf-8"))
         games = state.get("games") or {}
-        with self._lock:
-            game_id = self._focus if self._focus in games else None
-        if game_id is None:
-            live = [g for g in games.values() if g.get("status") == "live"]
-            game_id = live[0]["id"] if live else None
+        all_marks = self._annotations(state)
+        game_id = self.pick(state, all_marks)
         if game_id is None:
             return None
         game = games[game_id]
         plies = len(game.get("moves") or [])
         done = self._done_ply.get(game_id, 0)
         finished = game.get("status") != "live" and game.get("result", "*") != "*"
-        if plies <= done and not (finished and done >= 0 and not self._said_result(game_id)):
-            return None
-        annotations = self._annotations(state).get(game_id, {})
-        context = build_context(game, annotations, done + 1)
+        annotations = all_marks.get(game_id, {})
+        top = [r for r in (state.get("standings") or []) if r.get("played")][:3]
+        leaders = "; ".join(f"{spoken(r['name'])} {r['points']:g} point{'' if r['points'] == 1 else 's'}" for r in top)
+        context = build_context(game, annotations, done + 1, switched=game_id != self._last_game, leaders=leaders)
         text = clean_line(self._write_line(context))
         if not text:
             return None
@@ -174,11 +223,49 @@ class Commentator:
                     "final": finished}
             self._clips.setdefault(game_id, []).append(clip)
             self._done_ply[game_id] = plies
+            self._last_game = game_id
+            self._last_said[game_id] = time.time()
             self.spent_usd += cost
             self._busy_until = time.time() + max(MIN_GAP_SECONDS, seconds + 1.0)
             self._save_ledger()
         self.log(f"commentary {game_id} ply {plies}: {text} (${cost:.4f}, total ${self.spent_usd:.4f})")
         return clip
+
+    def pick(self, state: dict, all_marks: dict) -> str | None:
+        """The board for the next line: the pinned one, else the most interesting board with something new."""
+        games = state.get("games") or {}
+        with self._lock:
+            pinned = self._focus if self._focus in games else None
+        ranks = {r["name"]: r.get("rank") for r in state.get("standings") or [] if r.get("played")}
+        now = time.time()
+        best, best_score = None, float("-inf")
+        for game_id, game in games.items():
+            if pinned and game_id != pinned:
+                continue
+            plies = len(game.get("moves") or [])
+            done = self._done_ply.get(game_id, 0)
+            finished = game.get("status") != "live" and game.get("result", "*") != "*"
+            recent_end = finished and self._ended_recently(game, now)
+            result_due = recent_end and not self._said_result(game_id)
+            if not (game.get("status") == "live" and plies > done) and not result_due:
+                continue
+            idle = now - self._last_said.get(game_id, now - 180)
+            score = interest(game, all_marks.get(game_id, {}), ranks, done, self._last_game, idle)
+            if result_due:
+                score += 8.0 if game.get("result") in ("1-0", "0-1") else 5.0
+            if score > best_score:
+                best, best_score = game_id, score
+        return best
+
+    @staticmethod
+    def _ended_recently(game: dict, now: float) -> bool:
+        try:
+            import datetime as dt
+
+            ended = dt.datetime.fromisoformat(str(game.get("end"))).timestamp()
+        except (TypeError, ValueError):
+            return True  # no end stamp: still worth one closing line
+        return now - ended < RECENT_RESULT_SECONDS
 
     def _said_result(self, game_id: str) -> bool:
         return any(c.get("final") for c in self._clips.get(game_id, []))
@@ -200,7 +287,9 @@ class Commentator:
         return ((reply.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
 
     def _speak(self, text: str) -> tuple[bytes, float]:
-        body = {"model": TTS_MODEL, "input": f"{TTS_STYLE}: {text}", "voice": TTS_VOICE, "response_format": "pcm"}
+        # Only the line itself is spoken; the delivery style goes in `instructions` (2026-10-06: a style prefix
+        # inside `input` was sometimes read aloud, "say it like an excited chess commentator...").
+        body = {"model": TTS_MODEL, "input": text, "instructions": TTS_STYLE, "voice": TTS_VOICE, "response_format": "pcm"}
         pcm, headers = self.http("/audio/speech", body)
         # The speech endpoint returns raw audio; its cost is read back from the generation record.
         return pcm, self._generation_cost(headers.get("X-Generation-Id") or headers.get("x-generation-id"))

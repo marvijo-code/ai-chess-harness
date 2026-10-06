@@ -20,6 +20,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -58,8 +59,8 @@ h1 { font-size: 22px; margin: 0; letter-spacing: .2px; }
 main { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 18px; padding: 18px 22px; align-items: start; }
 .boards { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 18px; min-width: 0; align-items: start; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; min-width: 0; }
-/* The whole game card (bars, board, comment, moves) must fit one 1080p screen. */
-.boards > .card[data-game] { width: 100%; max-width: max(360px, calc(100vh - 535px)); justify-self: center; }
+/* The whole game card (bars, board, comment, moves, collapsed thinking) must fit one 1080p screen. */
+.boards > .card[data-game] { width: 100%; max-width: max(360px, calc(100vh - 575px)); justify-self: center; }
 .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
 .game-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 6px 8px; cursor: pointer; min-width: 0; flex-wrap: wrap; }
 .card.focused .game-head { cursor: default; }
@@ -70,7 +71,7 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 18px; pa
 .pbar { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 10px; background: var(--panel-2); margin: 6px 0; min-width: 0; }
 .pbar .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; border: 1px solid #666; }
 .pbar .dot.w { background: #fff; } .pbar .dot.b { background: #111; }
-.pbar .name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pbar .name { font-weight: 600; flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
 .pbar .elo { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .pbar .clock { font: 600 18px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 4px 8px; border-radius: 6px; background: #0b0d10; min-width: 64px; text-align: center; }
 .pbar.to-move .clock { background: #fff; color: #000; }
@@ -98,6 +99,8 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 18px; pa
 .comment { margin-top: 10px; padding: 9px 11px; background: var(--panel-2); border-radius: 10px; font-size: 14px; min-height: 58px; overflow-wrap: anywhere; }
 .comment .who { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
 .caption { margin: 6px 0 0; padding: 6px 10px; border-radius: 10px 10px 10px 2px; background: rgba(91, 157, 255, .13); border: 1px solid rgba(91, 157, 255, .35); font-size: 12.5px; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
+.card.on-air { border-color: rgba(91, 157, 255, .65); box-shadow: 0 0 0 1px rgba(91, 157, 255, .35); transition: border-color .3s ease, box-shadow .3s ease; }
+.air-tag { font-size: 11.5px; font-weight: 600; color: var(--accent); background: rgba(91, 157, 255, .13); border: 1px solid rgba(91, 157, 255, .4); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
 .caption::before { content: "Commentary: "; color: var(--accent); font-weight: 600; }
 .moves { position: relative; margin-top: 8px; padding: 6px 9px; border-radius: 10px; background: #12161c; border: 1px solid var(--line); font: 13px/1.65 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--muted); max-height: 110px; overflow-y: auto; overscroll-behavior: contain; word-break: break-word; }
 .moves .mv { cursor: pointer; border-radius: 4px; padding: 0 2px; }
@@ -128,14 +131,32 @@ td .route { display: block; color: var(--muted); font-size: 11px; font-weight: 4
 .pair { display: grid; grid-template-columns: minmax(0, 1fr) 62px minmax(0, 1fr); gap: 6px; align-items: center; padding: 5px 8px; border-radius: 8px; cursor: pointer; font-size: 14px; }
 .pair:hover { background: var(--panel-2); }
 .pair.sel { background: rgba(91, 157, 255, .16); }
-.pair .w { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pair .b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pair .w { text-align: right; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
+.pair .b { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
 .pair .r { text-align: center; font-weight: 700; }
 .pair .r.live { color: var(--ok); font-size: 12px; }
 .pair .why { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; text-align: center; margin-top: -2px; }
 .bye { font-size: 12.5px; color: var(--muted); padding: 2px 8px; }
 .empty { color: var(--muted); padding: 30px; text-align: center; }
 .rules { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 0; padding-left: 18px; }
+/* Thinking: what the model streams while it decides (collapsible, per card). */
+.thinking { margin-top: 8px; border-radius: 10px; background: #12161c; border: 1px solid var(--line); min-width: 0; display: flex; flex-direction: column; }
+.think-head { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 6px 10px; background: none; border: 0; border-radius: 10px; color: var(--muted); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.think-head:hover { color: var(--text); }
+.think-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.think-head .chev { flex: none; width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .15s ease; }
+.thinking.open .think-head .chev { transform: rotate(90deg); }
+.think-head .label { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; font-weight: 600; }
+.think-head .meta { flex: none; display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.think-head .meta .live { color: var(--ok); }
+.think-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); animation: think-pulse 1.4s ease-in-out infinite; }
+@keyframes think-pulse { 0%, 100% { opacity: .25; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .think-dot { animation: none; } }
+.think-body { border-top: 1px solid var(--line); padding: 6px 10px 8px; max-height: 240px; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  font: 11.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #8a93a0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.think-body[hidden] { display: none; }
+.think-body .think-note { font-family: "Segoe UI", system-ui, sans-serif; font-style: italic; color: var(--muted); white-space: normal; }
+.think-body .think-clip { display: block; font-family: "Segoe UI", system-ui, sans-serif; font-size: 11px; color: #6b7380; margin-bottom: 4px; white-space: normal; }
 /* Focus mode: one board, as large as the viewport allows, with its info column beside it. */
 body.focus-mode main { grid-template-columns: minmax(0, 1fr); }
 body.focus-mode .side { display: none; }
@@ -148,6 +169,8 @@ body.focus-mode .boards { display: block; }
 .card.focused .infocol { grid-area: infocol; min-width: 0; display: flex; flex-direction: column; height: calc(var(--fboard) + 64px); }
 .card.focused .infocol .evalline { margin-top: 6px; }
 .card.focused .moves { max-height: none; flex: 1 1 auto; min-height: 140px; font-size: 14px; }
+.card.focused .thinking { flex: 0 1 auto; min-height: 0; }
+.card.focused .think-body { max-height: 45vh; font-size: 12px; }
 @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
 @media (max-width: 900px) {
   .boards > .card.focused { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "boardcol" "infocol"; }
@@ -295,14 +318,21 @@ function cardFor(id) {
       <div class="board-wrap" data-part="wrap"><div class="evalbar" data-part="evalbar" title="Stockfish evaluation, White at the bottom"><div class="white" data-part="evalwhite"></div><div class="mid"></div></div><div class="board" data-part="board"></div></div>
       <div class="pbar" data-part="white"></div><div class="caption" data-part="caption" style="display:none"></div></div>
     <div class="infocol"><div class="evalline" data-part="evalline"></div><div class="comment" data-part="comment"></div>
-      <div class="comment" data-part="result" style="display:none"></div><div class="moves" data-part="moves"></div><div class="nav" data-part="nav"></div></div>`;
+      <div class="comment" data-part="result" style="display:none"></div><div class="moves" data-part="moves"></div><div class="nav" data-part="nav"></div>
+      <div class="thinking" data-part="thinking"><button type="button" class="think-head" data-part="thinkhead" data-think-toggle aria-expanded="false"></button><div class="think-body" data-part="thinkbody" hidden></div></div></div>`;
   const parts = { head: el.querySelector("[data-focus-head]") };
   el.querySelectorAll("[data-part]").forEach(n => { parts[n.dataset.part] = n; });
-  c = { id, el, parts, follow: true, top: 0, movesKey: null, boardKey: null, moveTotal: undefined, movePly: undefined };
+  c = { id, el, parts, follow: true, top: 0, movesKey: null, boardKey: null, moveTotal: undefined, movePly: undefined, think: newThink(null) };
   parts.moves.addEventListener("scroll", () => {
     const box = parts.moves;
     c.top = box.scrollTop;
     c.follow = box.scrollHeight - box.scrollTop - box.clientHeight < 8;
+  }, { passive: true });
+  parts.thinkbody.addEventListener("scroll", () => {
+    const box = parts.thinkbody;
+    if (box.hidden || !box.clientHeight) return;   // hidden or detached: keep the last real position
+    c.think.top = box.scrollTop;
+    c.think.follow = box.scrollHeight - box.scrollTop - box.clientHeight < 8;
   }, { passive: true });
   cards.set(id, c);
   return c;
@@ -353,6 +383,119 @@ function updateMoves(c, game, ply, pinned, ann) {
   c.moveTotal = total;
   c.movePly = ply;
 }
+// ---- thinking panel: the text a model streams while it decides a move -------------------------
+const THINK_KEEP = 150000;    // characters kept per panel; older text is dropped from the top
+const thinkOpen = { grid: store("swissThinking.grid") === "open", focus: store("swissThinking.focus") !== "closed" };
+function thinkMode() { return focusId ? "focus" : "grid"; }
+function newThink(key) { return { key, ply: 0, live: false, name: "", text: "", since: 0, size: 0, exists: null, clipped: false, loaded: false, inflight: false, follow: true, top: 0 }; }
+function sizeText(n) { return n < 1000 ? `${n} chars` : `${(n / 1000).toFixed(1)}k chars`; }
+function thinkTarget(game, ply, total) {
+  // Following a live game: the side to move is thinking about ply total + 1 right now.
+  if (game.status === "live" && ply >= total) return { ply: total + 1, live: true };
+  return { ply, live: false };   // the thinking that produced move `ply` (0 = start position)
+}
+function drawThinkHead(c) {
+  const t = c.think;
+  const meta = (t.live ? `<span class="think-dot"></span><span class="live">thinking...</span>` : "") + (t.exists ? `<span>${sizeText(t.size)}</span>` : "");
+  setHTML(c.parts.thinkhead, `<span class="chev"></span><span class="label">Thinking${t.name ? " - " + esc(t.name) : ""}</span><span class="meta">${meta}</span>`);
+}
+function restoreThinkScroll(c) {
+  const box = c.parts.thinkbody, t = c.think;
+  if (box.hidden) return;
+  box.scrollTop = t.live && t.follow ? box.scrollHeight : t.top;
+}
+// chunk: text just appended to t.text (append only), or null to redraw the whole panel.
+function paintThinking(c, chunk) {
+  const t = c.think, box = c.parts.thinkbody;
+  let note = "";
+  if (t.ply < 1) note = "Start position: pick a move to see the thinking behind it.";
+  else if (!t.loaded) note = "Loading...";
+  else if (!t.exists) note = "No visible thinking for this move.";
+  else if (!t.text) note = "Waiting for the first words...";
+  if (note) {
+    if (box._sig !== note) {
+      const d = document.createElement("div");
+      d.className = "think-note"; d.textContent = note;
+      box.replaceChildren(d); box._sig = note; box._text = null;
+      t.top = 0; box.scrollTop = 0;
+    }
+    return;
+  }
+  if (chunk !== null && box._sig === "text" && box._text) {
+    if (!chunk) return;
+    box._text.appendData(chunk);
+    if (t.live && t.follow) box.scrollTop = box.scrollHeight;   // at the bottom: follow the new words
+    return;                                                     // scrolled up: appending leaves the view still
+  }
+  const nodes = [];
+  if (t.clipped) {
+    const s = document.createElement("span");
+    s.className = "think-clip"; s.textContent = "Older text hidden - showing the newest part.";
+    nodes.push(s);
+  }
+  box._text = document.createTextNode(t.text);
+  nodes.push(box._text);
+  const first = box._sig !== "text";
+  box.replaceChildren(...nodes); box._sig = "text";
+  if (t.live) box.scrollTop = t.follow ? box.scrollHeight : t.top;
+  else if (first) { box.scrollTop = 0; t.top = 0; }              // replay: read it from the top
+  else box.scrollTop = t.top;
+}
+async function fetchThinking(c) {
+  const t = c.think;
+  if (t.inflight || t.ply < 1) return;
+  t.inflight = true;
+  const q = params.get("id") ? `&id=${encodeURIComponent(params.get("id"))}` : "";
+  try {
+    const res = await fetch(`/api/thinking?game=${encodeURIComponent(c.id)}&ply=${t.ply}&since=${t.since}${q}`, { cache: "no-store" });
+    const j = res.ok ? await res.json() : null;
+    if (!j || c.think !== t) return;   // failed (retried next tick) or already on another move
+    const firstLoad = !t.loaded;
+    t.loaded = true;
+    t.exists = !!j.exists;
+    let chunk = null;
+    if (!j.exists) { t.text = ""; t.since = 0; t.size = 0; t.clipped = false; }
+    else {
+      if (!firstLoad && t.since > 0 && j.from === t.since && !j.truncated) { chunk = j.text; t.text += j.text; }
+      else { t.text = j.text; t.clipped = !!j.truncated || j.from > 0; }
+      t.size = j.size; t.since = j.size;
+      if (t.text.length > THINK_KEEP) { t.text = t.text.slice(-Math.floor(THINK_KEEP * 0.8)); t.clipped = true; chunk = null; }
+    }
+    if (firstLoad || chunk !== "") paintThinking(c, firstLoad ? null : chunk);
+    drawThinkHead(c);
+  } catch (e) { /* try again next tick */ } finally { t.inflight = false; }
+}
+function updateThinking(c, game, ply, total) {
+  const p = c.parts;
+  const tg = thinkTarget(game, ply, total);
+  const key = `${game.id}|${tg.ply}`;
+  if (c.think.key !== key) {
+    c.think = newThink(key);
+    c.think.ply = tg.ply;
+    c.think.name = tg.ply > 0 ? game[tg.ply % 2 ? "white" : "black"] : "";
+    p.thinkbody._sig = null;
+  }
+  const t = c.think;
+  t.live = tg.live;
+  drawThinkHead(c);
+  const open = thinkOpen[thinkMode()];
+  p.thinking.classList.toggle("open", open);
+  if (p.thinkhead.getAttribute("aria-expanded") !== String(open)) p.thinkhead.setAttribute("aria-expanded", String(open));
+  if (!open) { if (!p.thinkbody.hidden) p.thinkbody.hidden = true; return; }
+  const opened = p.thinkbody.hidden;
+  if (opened) p.thinkbody.hidden = false;
+  if (p.thinkbody._sig === null || p.thinkbody._sig === undefined) paintThinking(c, null);
+  else if (opened) restoreThinkScroll(c);
+  if (!t.loaded) fetchThinking(c);
+}
+setInterval(() => {
+  if (!thinkOpen[thinkMode()]) return;
+  for (const c of cards.values()) {
+    const t = c.think;
+    if (c.el.isConnected && t.ply >= 1 && (t.live || !t.loaded)) fetchThinking(c);
+  }
+}, 1000);
+
 function updateCard(c, game, now) {
   const p = c.parts;
   const live = game.status === "live";
@@ -363,11 +506,13 @@ function updateCard(c, game, now) {
   const ply = pinned && replayPly !== null ? Math.min(replayPly, total) : total;
   const ann = (data.annotations || {})[game.id] || {};
   c.el.classList.toggle("focused", focused);
+  const onAir = !focusId && clipPlaying && caption && caption.game === game.id;
+  c.el.classList.toggle("on-air", !!onAir);
   const pill = live ? `<span class="result-pill live">LIVE - move ${Math.floor(total / 2) + 1}</span>`
     : `<span class="result-pill">${esc(game.result || "*")}</span>`;
   const btn = focused ? `<button class="linkbtn small" data-unfocus title="Back to all boards (Esc)">Back to all boards</button>`
     : `<button class="linkbtn small" data-focus="${esc(game.id)}" title="Show only this board, large">Focus</button>`;
-  setHTML(p.head, `<span class="tag">Round ${game.round} - Board ${game.board}${pinned && ply < total ? " - replay" : ""}</span><span class="head-right">${pill}${btn}</span>`);
+  setHTML(p.head, `<span class="tag">Round ${game.round} - Board ${game.board}${pinned && ply < total ? " - replay" : ""}</span><span class="head-right">${onAir ? `<span class="air-tag" title="The spoken commentary is about this board">On commentary</span>` : ""}${pill}${btn}</span>`);
   updateBar(p.black, game, "black", now);
   updateBar(p.white, game, "white", now);
   const boardKey = `${total}|${ply}|${game.fen}`;
@@ -397,6 +542,7 @@ function updateCard(c, game, now) {
   p.caption.style.display = cap ? "" : "none";
   setHTML(p.caption, esc(cap));
   updateMoves(c, game, ply, pinned, ann);
+  updateThinking(c, game, ply, total);
   setHTML(p.nav, `<button data-nav="first" title="First position">|&lt;</button><button data-nav="prev" title="Previous move (Left arrow)">&lt;</button><button data-nav="next" title="Next move (Right arrow)">&gt;</button><button data-nav="last" title="Last move">&gt;|</button>`
     + (pinned ? `<button data-nav="close">Back to live</button>` : "") + `<span class="ply">ply ${ply} / ${total}</span>`);
 }
@@ -426,7 +572,7 @@ function renderBoards() {
     }
     boards.replaceChildren(...nodes);
     // Re-attached cards lose their scroll offset: redraw their move lists once.
-    for (const g of shown) { const c = cardFor(g.id); c.movesKey = null; c.moveTotal = undefined; }
+    for (const g of shown) { const c = cardFor(g.id); c.movesKey = null; c.moveTotal = undefined; restoreThinkScroll(c); }
   }
   const now = Date.now();
   for (const g of shown) updateCard(cardFor(g.id), g, now);
@@ -446,7 +592,7 @@ function render() {
     `<span class="chip">Swiss, Elo start <b>${cfg.startElo}</b>, K=${cfg.eloK}</span>`,
     data.analysis_engine ? `<span class="chip btn ${analysisOn ? "on" : ""}" data-toggle-analysis title="Viewer-only engine analysis; the AI players never see it">${esc(data.analysis_engine)} analysis: <b>${analysisOn ? "on" : "off"}</b></span>` : "",
     `<span class="chip btn ${soundOn ? "on" : ""}" data-toggle-sound title="A short click whenever a new move appears on a visible board">Move sound: <b>${soundOn ? "on" : "off"}</b></span>`,
-    data.commentary ? `<span class="chip btn ${commentaryOn ? (needGesture ? "wait" : "on") : ""}" data-toggle-commentary title="Spoken commentary for the focused (or first live) board">Commentary: <b>${commentaryOn ? (needGesture ? "click to start" : "on") : "muted"}</b></span>` : "",
+    data.commentary ? `<span class="chip btn ${commentaryOn ? (needGesture ? "wait" : "on") : ""}" data-toggle-commentary title="Spoken commentary: it moves between the leaders and the most interesting games; in focus mode it stays on the focused board">Commentary: <b>${commentaryOn ? (needGesture ? "click to start" : "on") : "muted"}</b></span>` : "",
   ].join(""));
   renderBoards();
   const games = data.games || {};
@@ -475,6 +621,7 @@ function render() {
     "Swiss pairing: same score meets same score, no rematches, one bye each.",
     "Stockfish analysis is for viewers only: the AI players never see it.",
     data.annotation_engine ? "Move marks (?? ? ?! !) come from Stockfish 19 for viewers only." : "",
+    "Thinking shows what each model chose to reveal while deciding: raw reasoning for most API models, summaries for GPT and Claude, search lines for Stockfish.",
   ].filter(Boolean).map(x => `<li>${esc(x)}</li>`).join(""));
   syncCommentaryTarget();
 }
@@ -519,23 +666,25 @@ function soundForNewMoves() {
 }
 
 // ---- commentary player ------------------------------------------------------------------
+// The commentator picks the board itself (leaders, interesting games): clips arrive for every
+// game in one sequence. Focus mode pins it to the focused board and plays only that board.
 let caption = null;           // { game, text } shown under that board
 let needGesture = false;      // the browser blocked play(): wait for a click
 const commentaryQueue = [];
-const lastSeq = {};
+let lastSeq = 0;              // highest clip seq received (all games)
+let seqPrimed = false;        // first poll done (older clips of finished games are skipped)
 let clipPlaying = false;
 let clipTimer = null;
 let clipToken = 0;            // bumped by stopClip so a stopped clip's late callbacks are ignored
-let commentaryTarget = null;
-let focusSent = null;
+let focusSent;                // undefined = nothing sent yet; null = auto mode sent; id = pinned
+let lastUserScroll = 0;       // last time the viewer scrolled the page themselves
 const clipAudio = new Audio();
 clipAudio.preload = "auto";
-function targetGame() {
-  if (!data || !data.games) return null;
-  if (focusId) return data.games[focusId] ? focusId : null;
-  const live = shownGames().find(g => g.status === "live");
-  return live ? live.id : null;
-}
+// Count only the viewer's own scrolling (wheel, touch, keys, scrollbar), never our scrollIntoView.
+function userScrolled() { lastUserScroll = Date.now(); }
+for (const type of ["wheel", "touchmove"]) window.addEventListener(type, userScrolled, { passive: true });
+window.addEventListener("keydown", ev => { if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(ev.key)) userScrolled(); });
+window.addEventListener("pointerdown", ev => { if (ev.target === document.documentElement) userScrolled(); });   // page scrollbar
 function stopClip() {
   clipToken++;
   clearTimeout(clipTimer);
@@ -543,18 +692,32 @@ function stopClip() {
   clipPlaying = false;
   caption = null;
 }
+function clipWanted(clip) {
+  const game = (data.games || {})[clip.game];
+  if (!game) return false;
+  if (focusId && clip.game !== focusId) return false;          // focus mode: only the focused board
+  return (game.moves || []).length - (clip.ply || 0) <= 2;     // stale: more than 2 plies behind
+}
 function syncCommentaryTarget() {
   if (!data || !data.commentary) return;
-  const t = targetGame();
-  if (t !== commentaryTarget) {
-    commentaryTarget = t;
-    commentaryQueue.length = 0;
-    stopClip();
+  if (focusId && caption && caption.game !== focusId) stopClip();   // entered focus on another board
+  // Entering focus pins the commentator to that board; leaving it hands the choice back.
+  const want = focusId && data.games && data.games[focusId] ? focusId : null;
+  if (want !== focusSent && !(focusSent === undefined && want === null)) {
+    focusSent = want;
+    const q = want ? `?game=${encodeURIComponent(want)}` : "";
+    fetch(`/api/commentary/focus${q}`, { method: "POST", cache: "no-store" }).catch(() => {});
   }
-  if (t && t !== focusSent) {
-    focusSent = t;
-    fetch(`/api/commentary/focus?game=${encodeURIComponent(t)}`, { method: "POST", cache: "no-store" }).catch(() => {});
-  }
+}
+function showOnAir(gameId) {
+  // Grid only: bring the commented card into view if it is fully off-screen and the
+  // viewer has not scrolled in the last 10 s.
+  if (focusId || Date.now() - lastUserScroll < 10000) return;
+  const c = cards.get(gameId);
+  if (!c || !c.el.isConnected) return;
+  const r = c.el.getBoundingClientRect();
+  if (r.bottom > 0 && r.top < innerHeight) return;
+  c.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 function clipDone() {
   clearTimeout(clipTimer);
@@ -567,17 +730,16 @@ function playNextClip() {
   if (clipPlaying || needGesture || !commentaryOn) return;
   while (commentaryQueue.length) {
     const clip = commentaryQueue.shift();
-    const game = (data.games || {})[clip.game];
-    const total = game ? (game.moves || []).length : 0;
-    if (!game || clip.game !== commentaryTarget || total - (clip.ply || 0) > 2) continue;   // stale: 2+ moves behind
+    if (!clipWanted(clip)) continue;
     clipPlaying = true;
     caption = { game: clip.game, text: clip.text || "" };
     render();
+    showOnAir(clip.game);
     if (clip.audio) {
       const token = clipToken;
       clipAudio.src = `/api/commentary/audio/${encodeURIComponent(clip.audio)}`;
       clipAudio.play().catch(err => {
-        if (token !== clipToken) return;             // stopped on purpose (mute, other board)
+        if (token !== clipToken) return;             // stopped on purpose (mute, focus change)
         if (err && err.name === "NotAllowedError") {
           // Autoplay blocked until a user gesture: keep the clip and wait for the next click.
           clearTimeout(clipTimer);
@@ -595,17 +757,20 @@ function playNextClip() {
 clipAudio.addEventListener("ended", clipDone);
 clipAudio.addEventListener("error", () => { if (clipPlaying) clipDone(); });
 async function pollCommentary() {
-  if (!data || !data.commentary || !commentaryOn || !commentaryTarget) return;
-  const game = commentaryTarget;
+  if (!data || !data.commentary || !commentaryOn) return;
   try {
-    const res = await fetch(`/api/commentary?game=${encodeURIComponent(game)}&after=${lastSeq[game] || 0}`, { cache: "no-store" });
+    const res = await fetch(`/api/commentary?after=${lastSeq}`, { cache: "no-store" });
     if (!res.ok) return;
     const j = await res.json();
-    for (const clip of (j.clips || [])) {
-      if (typeof clip.seq !== "number" || clip.seq <= (lastSeq[game] || 0)) continue;
-      lastSeq[game] = clip.seq;
-      if (game === commentaryTarget) commentaryQueue.push(Object.assign({ game }, clip));
+    const clips = (j.clips || []).filter(c => typeof c.seq === "number" && c.seq > lastSeq && c.game).sort((a, b) => a.seq - b.seq);
+    for (const [i, clip] of clips.entries()) {
+      lastSeq = clip.seq;
+      const game = (data.games || {})[clip.game];
+      // Page just opened: no backlog, only the newest clip and only for a game still playing.
+      if (!seqPrimed && (i < clips.length - 1 || !(game && game.status === "live"))) continue;
+      commentaryQueue.push(clip);
     }
+    seqPrimed = true;
     playNextClip();
   } catch (e) { /* try again next tick */ }
 }
@@ -634,6 +799,13 @@ document.addEventListener("click", ev => {
     if (!commentaryOn) { commentaryQueue.length = 0; stopClip(); }
     render();
     if (commentaryOn) pollCommentary();
+    return;
+  }
+  if (ev.target.closest("[data-think-toggle]")) {
+    const mode = thinkMode();
+    thinkOpen[mode] = !thinkOpen[mode];
+    store(`swissThinking.${mode}`, thinkOpen[mode] ? "open" : "closed");
+    render();
     return;
   }
   if (ev.target.closest("[data-unfocus]")) { setFocus(null); return; }
@@ -1062,6 +1234,75 @@ def safe_audio_name(name: str) -> bool:
     return bool(name) and "/" not in name and "\\" not in name and ".." not in name and ":" not in name and not name.startswith(".")
 
 
+# ---- live thinking text (written by the runner next to the state file) ----------------------
+THINK_CHUNK = 60_000
+THINK_MAX_PLY = 1000
+_SAFE_ID = re.compile(r"^[A-Za-z0-9-]{1,80}$")
+_state_ids: dict[Path, str] = {}
+
+
+def safe_id(text: str) -> bool:
+    return bool(_SAFE_ID.match(text or ""))
+
+
+def state_id(state_path: Path) -> str:
+    """The state JSON's "id" (read once per file), falling back to its file name."""
+    state_path = Path(state_path)
+    if state_path not in _state_ids:
+        try:
+            sid = str(json.loads(state_path.read_bytes()).get("id") or "")
+        except (OSError, ValueError):
+            sid = ""
+        if not safe_id(sid):
+            return state_slug(state_path)   # unreadable mid-write: try again next time
+        _state_ids[state_path] = sid
+    return _state_ids[state_path]
+
+
+def thinking_path(state_path: Path, game: str, ply: int) -> Path:
+    return Path(state_path).parent / f"{state_id(state_path)}-{game}-ply{ply}.thinking.txt"
+
+
+def read_thinking(path: Path, since: int = 0, limit: int = THINK_CHUNK) -> dict:
+    """New text of a thinking file from byte offset `since`.
+
+    Never more than `limit` bytes: the first read (since 0) and a reader that fell far
+    behind get only the tail (truncated). "size" is the offset to pass as the next `since`;
+    a multi-byte character cut by a live writer is left for the next read.
+    """
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            start = max(0, min(since, size))
+            if since > size:            # the file was replaced: start over
+                start = 0
+            truncated = size - start > limit
+            if truncated:
+                start = size - limit
+            handle.seek(start)
+            raw = handle.read(size - start)
+    except FileNotFoundError:
+        return {"exists": False, "size": 0, "text": "", "from": 0, "truncated": False}
+    if truncated:                       # do not start inside a multi-byte character
+        skip = 0
+        while skip < min(3, len(raw)) and 0x80 <= raw[skip] <= 0xBF:
+            skip += 1
+        raw, start = raw[skip:], start + skip
+    end = len(raw)
+    for back in range(1, min(4, len(raw)) + 1):   # drop an unfinished trailing character
+        byte = raw[-back]
+        if byte < 0x80:
+            break
+        if byte >= 0xC0:
+            need = 2 if byte < 0xE0 else 3 if byte < 0xF0 else 4
+            if back < need:
+                end = len(raw) - back
+            break
+    raw = raw[:end]
+    return {"exists": True, "size": start + len(raw), "text": raw.decode("utf-8", errors="replace"), "from": start, "truncated": truncated}
+
+
 def fen_after(game: dict, ply: int) -> str:
     import chess
 
@@ -1112,12 +1353,38 @@ class Handler(BaseHTTPRequestHandler):
         if self.commentator is None:
             self._json({"enabled": False})
             return
+        if game and not safe_id(game):
+            self._json({"enabled": True, "error": "bad game id"}, 400)
+            return
         try:
-            self.commentator.focus(game or None)
+            # A game pins the commentary to that board; no game hands the choice back (auto).
+            if game:
+                self.commentator.focus(game, pinned=True)
+            else:
+                self.commentator.focus(None)
         except Exception as exc:
             self._json({"enabled": True, "game": game, "error": str(exc)})
             return
         self._json({"enabled": True, "game": game})
+
+    def _thinking(self, query: dict) -> None:
+        """?game=<id>&ply=<n>&since=<bytes>[&id=<tournament>]: the thinking text for one move."""
+        game = (query.get("game") or [""])[0]
+        wanted = (query.get("id") or [""])[0]
+        try:
+            ply = int((query.get("ply") or [""])[0])
+            since = int((query.get("since") or ["0"])[0] or 0)
+        except ValueError:
+            self._json({"error": "ply and since must be whole numbers"}, 400)
+            return
+        if not safe_id(game) or (wanted and not safe_id(wanted)) or not 1 <= ply <= THINK_MAX_PLY or since < 0:
+            self._json({"error": "bad game, id, ply or since"}, 400)
+            return
+        path = self.live_dir / f"{wanted}-tournament.json" if wanted else (self.state_path or newest_state(self.live_dir))
+        if not path or not path.exists():
+            self._json({"error": "no tournament state yet"}, 404)
+            return
+        self._json(read_thinking(thinking_path(path, game, ply), since))
 
     def do_GET(self) -> None:  # noqa: N802
         url = urlparse(self.path)
@@ -1183,7 +1450,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 after = 0
             try:
-                clips = list(self.commentator.clips(game, after) or [])
+                # No game: clips from every board in seq order (the commentator picks the board).
+                clips = list((self.commentator.clips(game, after) if game else self.commentator.clips_all(after)) or [])
             except Exception as exc:
                 self._json({"enabled": True, "clips": [], "error": str(exc)})
                 return
@@ -1205,6 +1473,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, audio.read_bytes(), kind)
         elif url.path == "/api/commentary/focus":
             self._commentary_focus(url)
+        elif url.path == "/api/thinking":
+            self._thinking(parse_qs(url.query))
         elif url.path == "/api/viewer-version":
             self._send(200, json.dumps({"version": VIEWER_VERSION}).encode(), "application/json")
         else:
