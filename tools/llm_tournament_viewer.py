@@ -438,6 +438,22 @@ body.focus-mode .boards { display: block; }
   .card.focused .infocol { height: auto; }
   .card.focused .moves { flex: none; max-height: 240px; min-height: 0; }
 }
+/* ---- hosted page (marvijo.com/ai-chess): one slim line that says how fresh the data is ---- */
+.hosted-banner { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px 16px; border-bottom: 1px solid var(--line);
+  background: var(--panel); color: var(--muted); font-size: 13px; line-height: 1.35; text-align: center; overflow-wrap: anywhere; }
+.hosted-banner .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.hosted-banner .msg { min-width: 0; }
+.hosted-banner.live { color: var(--text); }
+.hosted-banner.live .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(52, 199, 123, .18); }
+.hosted-banner.off { color: #ffd479; }
+.hosted-banner.off .dot { background: var(--warn); }
+.hosted-banner.final { color: var(--text); }
+.hosted-banner.final .dot { background: #f5b942; }
+.hosted-banner.final b { color: #ffd479; }
+/* ---- local page: is this tournament published to the hosted page? ---- */
+a.chip.pub { text-decoration: none; }
+.chip.pub.live { color: var(--ok); border-color: rgba(52, 199, 123, .45); }
+.chip.pub.off { color: var(--warn); border-color: rgba(245, 185, 66, .45); }
 @media (max-width: 520px) {
   main { padding: 12px 16px; } header { padding: 12px 16px; }
   .boards { grid-template-columns: minmax(0, 1fr); }
@@ -465,6 +481,18 @@ body.focus-mode .boards { display: block; }
 <div class="lapse" id="lapse" hidden role="status" aria-live="off"></div>
 <div class="champ-overlay" id="champOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="champName"><canvas id="confetti"></canvas><div class="champ-card" id="champCard"></div></div>
 <script>
+// Hosted mode (marvijo.com/ai-chess): the exporter sets these before this script. The local viewer leaves
+// them unset, so every request stays on this server's own /api/... paths.
+const API_BASE = window.AICHESS_API_BASE || "";
+const HOSTED = !!window.AICHESS_HOSTED;
+if (HOSTED) {
+  const banner = document.createElement("div");
+  banner.id = "hostedBanner";
+  banner.className = "hosted-banner wait";
+  banner.setAttribute("role", "status");
+  banner.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="msg">Connecting to the tournament...</span>`;
+  document.body.insertBefore(banner, document.body.firstChild);
+}
 const GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
 const NAG_CLASS = { "??": "blunder", "?": "mistake", "?!": "dubious", "!": "good" };
 const NAG_TITLE = { "??": "Blunder", "?": "Mistake", "?!": "Inaccuracy", "!": "Good move (the only good one)" };
@@ -548,15 +576,20 @@ function whiteShare(a) {
   if (a.cp === null || a.cp === undefined) return 50;
   return 100 / (1 + Math.exp(-a.cp / 250));
 }
+let analyzeOff = false;       // /api/analyze said {"enabled": false}: no replay analysis (hosted page)
 function evalFor(game, ply, total) {
   if (!analysisOn) return null;
   if (ply >= total && game.status === "live") return (data.analysis || {})[game.id] || null;
+  if (analyzeOff) return undefined;
   const key = `${game.id}|${ply}`;
   const have = replayEval[key];
   if ((!have || ((have.depth || 0) < 20 && !have.over)) && Date.now() - replayFetchAt > 700) {
     replayFetchAt = Date.now();
-    fetch(`/api/analyze?game=${encodeURIComponent(game.id)}&ply=${ply}`, { cache: "no-store" })
-      .then(r => r.ok ? r.json() : null).then(j => { if (j && !j.pending) replayEval[key] = j; }).catch(() => {});
+    fetch(`${API_BASE}/api/analyze?game=${encodeURIComponent(game.id)}&ply=${ply}`, { cache: "no-store" })
+      .then(r => r.ok ? r.json() : null).then(j => {
+        if (j && j.enabled === false) { analyzeOff = true; return; }
+        if (j && !j.pending) replayEval[key] = j;
+      }).catch(() => {});
   }
   return have || null;
 }
@@ -751,7 +784,7 @@ async function fetchThinking(c) {
   t.inflight = true;
   const q = params.get("id") ? `&id=${encodeURIComponent(params.get("id"))}` : "";
   try {
-    const res = await fetch(`/api/thinking?game=${encodeURIComponent(c.id)}&ply=${t.ply}&since=${t.since}${q}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/api/thinking?game=${encodeURIComponent(c.id)}&ply=${t.ply}&since=${t.since}${q}`, { cache: "no-store" });
     const j = res.ok ? await res.json() : null;
     if (!j || c.think !== t) return;   // failed (retried next tick) or already on another move
     const firstLoad = !t.loaded;
@@ -798,7 +831,7 @@ setInterval(() => {
     const t = c.think;
     if (c.el.isConnected && t.ply >= 1 && (t.live || !t.loaded)) fetchThinking(c);
   }
-}, 1000);
+}, HOSTED ? 2000 : 1000);
 
 function updateCard(c, game, now) {
   const p = c.parts;
@@ -890,7 +923,9 @@ function renderBoards() {
     // Re-attached cards lose their scroll offset: redraw their move lists once.
     for (const g of shown) { const c = cardFor(g.id); c.movesKey = null; c.moveTotal = undefined; restoreThinkScroll(c); }
   }
-  const now = Date.now();
+  // Hosted and offline: the clocks stop at the last update instead of running down to 0:00.
+  const age = HOSTED ? stateAgeS() : null;
+  const now = typeof age === "number" && age >= 90 && data.updated_epoch_ms ? Number(data.updated_epoch_ms) : Date.now();
   for (const g of shown) updateCard(cardFor(g.id), g, now);
 }
 
@@ -913,7 +948,9 @@ function render() {
     data.analysis_engine ? `<span class="chip btn ${analysisOn ? "on" : ""}" data-toggle-analysis title="Viewer-only engine analysis; the AI players never see it">${esc(data.analysis_engine)} analysis: <b>${analysisOn ? "on" : "off"}</b></span>` : "",
     `<span class="chip btn ${soundOn ? "on" : ""}" data-toggle-sound title="A short click whenever a new move appears on a visible board">Move sound: <b>${soundOn ? "on" : "off"}</b></span>`,
     data.commentary ? `<span class="chip btn ${commentaryOn ? (needGesture ? "wait" : "on") : ""}" data-toggle-commentary title="Spoken commentary: it moves between the leaders and the most interesting games; in focus mode it stays on the focused board">Commentary: <b>${commentaryOn ? (needGesture ? "click to start" : "on") : "muted"}</b></span>` : "",
+    publishChip(),
   ].join(""));
+  renderBanner();
   renderBoards();
   const games = data.games || {};
   document.getElementById("standingsTitle").textContent = fmt ? "Round robin table (Elo)" : "Standings (Elo)";
@@ -1264,6 +1301,7 @@ function tourReady() {
 function directorTick() {
   if (!data || !data.id) return;
   if (data.current_round !== roundSeen) { roundSeen = data.current_round; roundSeenAt = Date.now(); }
+  if (HOSTED) { tourPending = false; return; }       // the public page never tours (the tour is a recorder feature)
   if (tour) { runTour(); return; }
   const ids = tourBoards();
   if (!tourReady() || ids.length < TOUR_MIN_BOARDS || !stateMoving()) { tourPending = false; return; }
@@ -1280,7 +1318,7 @@ function directorTick() {
 function startTour(ids, why) {
   tour = { ids, i: 0, dwellAt: Date.now(), why };
   tourPending = false;
-  fetch("/api/commentary/tour?on=1", { method: "POST", cache: "no-store" }).catch(() => {});
+  if (!HOSTED) fetch(`${API_BASE}/api/commentary/tour?on=1`, { method: "POST", cache: "no-store" }).catch(() => {});
   director({ k: "tour", a: "start", speed: TOUR_SPEED, boards: ids, why });
   tourShow(0);
 }
@@ -1307,7 +1345,7 @@ function endTour(why) {
   tour = null;
   lastTourEnd = Date.now();
   lastAutoSwitch = 0;
-  fetch("/api/commentary/tour?on=0", { method: "POST", cache: "no-store" }).catch(() => {});
+  if (!HOSTED) fetch(`${API_BASE}/api/commentary/tour?on=0`, { method: "POST", cache: "no-store" }).catch(() => {});
   director({ k: "tour", a: "end", why });
   renderRibbon();
 }
@@ -1332,7 +1370,60 @@ const RCARD_MIN_MS = 11000, RCARD_WAIT_MS = 25000, RCARD_MAX_MS = 55000;
 const heardEvents = new Set();   // host lines (event keys) that started playing on this page
 let serverSkewMs = 0;         // server clock minus this page's clock
 function rrRounds() { return (data.rounds || []).filter(r => !r.stage); }
-function stateMoving() { return typeof data.state_age_s === "number" ? data.state_age_s < 240 : true; }
+function stateMoving() { const age = stateAgeS(); return typeof age === "number" ? age < 240 : true; }
+
+// ---- state freshness, hosted banner and publish chip ---------------------------------------------
+// The hosted page can show a state that is hours old (the laptop that runs the tournament is off), so
+// the age keeps growing between answers: state_age_s from the last answer + the time since it arrived.
+let stateAt = 0;              // when the last /api/tournament answer arrived (this page's clock)
+let feedFailed = false;       // hosted: the last poll got no answer (relay or function unreachable)
+function stateAgeS() {
+  if (!data || typeof data.state_age_s !== "number") return null;
+  return HOSTED && stateAt ? data.state_age_s + (Date.now() - stateAt) / 1000 : data.state_age_s;
+}
+function lastUpdateText() {
+  let ms = Number(data && data.updated_epoch_ms) || 0;
+  if (!ms && data && data.updated_at) ms = Date.parse(data.updated_at) || 0;
+  if (!ms) return "an unknown time";
+  const d = new Date(ms);
+  try { return d.toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+  catch (e) { return d.toLocaleString(); }
+}
+function renderBanner() {
+  const el = HOSTED ? document.getElementById("hostedBanner") : null;
+  if (!el) return;
+  let cls, msg;
+  const k = data && data.id ? ko() : null;
+  const champ = (k && k.champion) || (data && data.winner) || "";
+  if (data && data.id && data.finished && champ) {
+    cls = "final"; msg = `<b>Final result</b> - champion ${esc(champ)}`;
+  } else if (!data || !data.id) {
+    cls = feedFailed ? "off" : "wait";
+    msg = feedFailed ? "Offline: the tournament feed cannot be reached right now" : "Connecting to the tournament...";
+  } else {
+    const age = stateAgeS();
+    if (typeof age === "number" && age < 90) { cls = "live"; msg = "Live from the tournament"; }
+    else { cls = "off"; msg = `Offline: showing the last update from ${esc(lastUpdateText())}`; }
+  }
+  const name = `hosted-banner ${cls}`;
+  if (el.className !== name) el.className = name;
+  setHTML(el, `<span class="dot" aria-hidden="true"></span><span class="msg">${msg}</span>`);
+}
+function publishChip() {
+  const p = !HOSTED && data ? data.publish : null;
+  if (!p || typeof p !== "object") return "";
+  const age = typeof p.push_age_s === "number" ? p.push_age_s : null;
+  const live = !!(p.ok && p.relay_up && (age === null || age < 90));
+  const bits = [];
+  if (age !== null) bits.push(`last state push ${Math.round(age)} s ago`);
+  if (typeof p.clips_pushed === "number") bits.push(`${p.clips_pushed} clips pushed`);
+  if (p.error) bits.push(`error: ${p.error}`);
+  const title = (live ? "The public page is receiving this tournament" : "The public page is not receiving updates") + (bits.length ? ` (${bits.join(", ")})` : "");
+  const inner = `Published: <b>${live ? "live" : "offline"}</b>`;
+  const cls = `chip pub ${live ? "live" : "off"}`;
+  return p.url ? `<a class="${cls}" href="${esc(p.url)}" target="_blank" rel="noopener" title="${esc(title)}">${inner}</a>`
+    : `<span class="${cls}" title="${esc(title)}">${inner}</span>`;
+}
 function maybeRoundCard() {
   if (!data || !data.id || introEl || rcardEl) return;
   const games = data.games || {}, rr = rrRounds();
@@ -1701,7 +1792,8 @@ function syncCommentaryTarget() {
   if (want !== focusSent && !(focusSent === undefined && want === null)) {
     focusSent = want;
     const q = want ? `?game=${encodeURIComponent(want)}` : "";
-    fetch(`/api/commentary/focus${q}`, { method: "POST", cache: "no-store" }).catch(() => {});
+    // The public page only reads: one viewer must never steer the shared commentator.
+    if (!HOSTED) fetch(`${API_BASE}/api/commentary/focus${q}`, { method: "POST", cache: "no-store" }).catch(() => {});
   }
 }
 function showOnAir(gameId) {
@@ -1739,7 +1831,7 @@ function playNextClip() {
     showOnAir(clip.game);
     if (clip.audio) {
       const token = clipToken;
-      clipAudio.src = `/api/commentary/audio/${encodeURIComponent(clip.audio)}`;
+      clipAudio.src = `${API_BASE}/api/commentary/audio/${encodeURIComponent(clip.audio)}`;
       clipAudio.play().catch(err => {
         if (token !== clipToken) return;             // stopped on purpose (mute, focus change)
         if (err && err.name === "NotAllowedError") {
@@ -1761,7 +1853,7 @@ clipAudio.addEventListener("error", () => { if (clipPlaying) clipDone(); });
 async function pollCommentary() {
   if (!data || !data.commentary || !commentaryOn) return;
   try {
-    const res = await fetch(`/api/commentary?after=${lastSeq}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/api/commentary?after=${lastSeq}`, { cache: "no-store" });
     if (!res.ok) return;
     const j = await res.json();
     quietS = Number(j.quiet_s) || 0;                    // seconds the host has had nothing worth saying
@@ -1778,7 +1870,7 @@ async function pollCommentary() {
     playNextClip();
   } catch (e) { /* try again next tick */ }
 }
-setInterval(pollCommentary, 1000);
+setInterval(pollCommentary, HOSTED ? 1500 : 1000);
 
 // ---- input --------------------------------------------------------------------------------
 document.addEventListener("click", ev => {
@@ -1863,11 +1955,23 @@ document.addEventListener("keydown", ev => {
 
 async function poll() {
   try {
-    const q = params.get("id") ? `?id=${encodeURIComponent(params.get("id"))}` : "";
-    const res = await fetch(`/api/tournament${q}`, { cache: "no-store" });
+    let q = params.get("id") ? `?id=${encodeURIComponent(params.get("id"))}` : "";
+    // Hosted: ask only for a newer state; the answer is a tiny {"unchanged": true} when nothing moved.
+    if (HOSTED && data && data.updated_epoch_ms) q += `${q ? "&" : "?"}since=${encodeURIComponent(data.updated_epoch_ms)}`;
+    const res = await fetch(`${API_BASE}/api/tournament${q}`, { cache: "no-store" });
     const sentAt = Date.now();
+    if (HOSTED && !res.ok) { feedFailed = true; renderBanner(); return; }
     if (res.ok) {
-      data = await res.json();
+      const got = await res.json();
+      if (HOSTED && got && got.unchanged) {
+        feedFailed = false;
+        if (!data) return;
+        // Same state: only its age fields move on.
+        if (typeof got.state_age_s === "number") data.state_age_s = got.state_age_s;
+        if (got.server_now_ms) data.server_now_ms = got.server_now_ms;
+      } else data = got;
+      stateAt = Date.now();
+      feedFailed = false;
       if (data.server_now_ms) serverSkewMs = data.server_now_ms - Math.round((sentAt + Date.now()) / 2);
       polls++;
       soundForNewMoves();
@@ -1877,20 +1981,26 @@ async function poll() {
       maybeRoundCard();
       directorTick();
       checkChampion();
+      renderBanner();
     }
-  } catch (e) { /* keep the last frame */ }
+  } catch (e) {
+    if (HOSTED) { feedFailed = true; renderBanner(); }
+    /* keep the last frame */
+  }
 }
 // A header that wraps onto more rows (narrow screens) takes height from the focused board, so the
 // whole card still fits the screen; a one-row header changes nothing.
 (function watchHeader() {
   const hdr = document.querySelector("header"), tick = document.getElementById("ticker");
-  const set = () => document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight + tick.offsetHeight - 60) + "px");
-  try { const ro = new ResizeObserver(set); ro.observe(hdr); ro.observe(tick); } catch (e) { window.addEventListener("resize", set); }
+  const ban = document.getElementById("hostedBanner");   // hosted page only
+  const set = () => document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight + tick.offsetHeight + (ban ? ban.offsetHeight : 0) - 60) + "px");
+  try { const ro = new ResizeObserver(set); ro.observe(hdr); ro.observe(tick); if (ban) ro.observe(ban); } catch (e) { window.addEventListener("resize", set); }
   set();
 })();
 poll();
-setInterval(poll, 1000);
+setInterval(poll, HOSTED ? 2000 : 1000);
 setInterval(render, 500);   // clocks tick between polls; unchanged parts are not touched
+if (HOSTED) setInterval(renderBanner, 1000);   // the age grows between answers, also with no data at all
 </script>
 </body>
 </html>
@@ -2356,6 +2466,35 @@ def newest_state(live_dir: Path) -> Path | None:
     return files[0] if files else None
 
 
+PUBLIC_PAGE_URL = "https://marvijo.com/ai-chess"
+PUBLISH_FIELDS = ("ok", "relay_up", "last_state_push_epoch_ms", "clips_pushed", "error")
+
+
+def publish_status(live_dir: Path, state_path: Path, now: float | None = None) -> dict | None:
+    """The laptop pusher's report (<slug>-publish-status.json) for the local page's "Published" chip.
+
+    No file (nothing is being published) = None, so the page shows no chip. Only the known fields
+    pass, plus push_age_s (seconds since the last state push) and the public page URL.
+    """
+    path = Path(live_dir) / f"{state_slug(state_path)}-publish-status.json"
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"ok": False, "relay_up": False, "error": "publish status file unreadable", "url": PUBLIC_PAGE_URL}
+    if not isinstance(raw, dict):
+        raw = {}
+    out = {key: raw.get(key) for key in PUBLISH_FIELDS if key in raw}
+    if out.get("error") is not None:
+        out["error"] = str(out["error"])[:300]
+    pushed = raw.get("last_state_push_epoch_ms")
+    if isinstance(pushed, (int, float)) and pushed > 0:
+        out["push_age_s"] = round((time.time() if now is None else now) - pushed / 1000, 1)
+    out["url"] = PUBLIC_PAGE_URL
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     state_path: Path | None = None
     live_dir: Path = LIVE_DIR
@@ -2475,6 +2614,9 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 state["annotations"] = {}
             state["commentary"] = self.commentator is not None
+            publish = publish_status(self.live_dir, path, now)
+            if publish is not None:
+                state["publish"] = publish
             self._json(state)
         elif url.path == "/api/analyze":
             # Replay position: ?game=<id>&ply=<n>. Answers from cache and queues deeper work.
