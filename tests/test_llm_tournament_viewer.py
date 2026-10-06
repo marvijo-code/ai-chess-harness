@@ -447,6 +447,20 @@ class PageTest(unittest.TestCase):
         self.assertIn("const want = focusId && focusPinned && data.games && data.games[focusId] ? focusId : null;", viewer.PAGE)
         self.assertIn("if (focusId && focusPinned && clip.game !== focusId) return false;", viewer.PAGE)
 
+    def test_compact_bracket_beside_focused_board(self):
+        # one bracket model drives the side panel and the compact focus-mode bracket
+        for needle in ("function bracketSlots()", "function miniBracketHtml(curId)", 'data-part="minibk"',
+                       "setHTML(p.minibk, focused ? miniBracketHtml(game.id) : \"\");", "Armageddon live", "To be crowned"):
+            self.assertIn(needle, viewer.PAGE, needle)
+        # wide screens only, so phones and narrow windows keep the bracket below the boards
+        self.assertIn(".mini-bk { display: none; }", viewer.PAGE)
+        self.assertIn("@media (min-width: 1280px) { .card.focused .mini-bk:not(:empty) { display: block;", viewer.PAGE)
+        # a one-row header leaves the focused board as large as before; a wrapped header shrinks it to fit
+        self.assertIn("calc(100vh - 290px - var(--hdr-extra, 0px))", viewer.PAGE)
+        # compact matches reuse the bracket click (a manual pick: pins the commentator, Auto-focus off)
+        mini = viewer.PAGE[viewer.PAGE.index("function miniMatch("):viewer.PAGE.index("function miniBracketHtml(")]
+        self.assertIn("data-bk-game", mini)
+
     def test_no_external_assets(self):
         self.assertNotIn("http://", viewer.PAGE.replace("http://www.w3.org", ""))
         self.assertNotIn("https://", viewer.PAGE)
