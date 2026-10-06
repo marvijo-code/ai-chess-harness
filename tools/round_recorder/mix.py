@@ -28,6 +28,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from click_sound import SR, make_click, write_wav  # noqa: E402
 
 CLICK_PEAK_DB = -20.0
+# Channel music bed under the whole round (owner 2026-10-06: "i don't like silences without at least background
+# music"): about -30 LUFS on its own, ducked ~10 dB under the commentary, then the mix is set to -16 LUFS.
+MUSIC_LUFS = -30.0
+DEFAULT_BED = Path.home() / "acl-chess-round-rec" / "bed-cinematic-ambient.mp3"
 LIMIT_DB = -2.5
 
 
@@ -93,11 +97,36 @@ def build_mix(work, vdur, clips, clicks, gain):
     return ebur(work / "mix.wav")
 
 
+def add_music(work, vdur, bed):
+    """Replace mix.wav with speech + clicks + a looped, ducked music bed, two-pass loudness to -16 LUFS."""
+    (work / "mix.wav").replace(work / "mix_nomusic.wav")
+    fade_out = max(0.0, vdur - 4)
+    sh(["ffmpeg", "-hide_banner", "-y", "-stream_loop", "-1", "-i", bed, "-t", f"{vdur:.3f}", "-af",
+        f"aresample={SR},aformat=channel_layouts=stereo,loudnorm=I={MUSIC_LUFS}:TP=-6:LRA=11,"
+        f"afade=t=in:d=3,afade=t=out:st={fade_out:.3f}:d=4", "-c:a", "pcm_f32le", work / "music_bed.wav"])
+    sh(["ffmpeg", "-hide_banner", "-y", "-i", work / "mix_nomusic.wav", "-i", work / "music_bed.wav",
+        "-i", work / "speech_norm.wav", "-filter_complex",
+        "[2:a]aformat=channel_layouts=stereo[key];"
+        "[1:a][key]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=450:makeup=1[duck];"
+        f"[0:a][duck]amix=inputs=2:normalize=0:duration=first,atrim=0:{vdur:.3f}[m]",
+        "-map", "[m]", "-ar", SR, "-c:a", "pcm_f32le", work / "mix_music_raw.wav"])
+    out = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(work / "mix_music_raw.wav"), "-af",
+                          "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-"],
+                         capture_output=True, text=True).stderr
+    m = json.loads(out[out.rindex("{"):out.rindex("}") + 1])
+    sh(["ffmpeg", "-hide_banner", "-y", "-i", work / "mix_music_raw.wav", "-af",
+        f"loudnorm=I=-16:TP=-1.5:LRA=11:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
+        f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true,"
+        f"aresample={SR}", "-c:a", "pcm_f32le", work / "mix.wav"])
+    return ebur(work / "mix.wav")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
     ap.add_argument("out_name")
     ap.add_argument("--format", choices=["mkv", "mp4"], default="mkv")
+    ap.add_argument("--music", default=str(DEFAULT_BED), help="music bed (looped, ducked); '' for none")
     ap.add_argument("--port", type=int, default=18770)
     a = ap.parse_args()
     run = Path(a.run).expanduser()
@@ -161,6 +190,11 @@ def main():
         gain += -16.0 - mi
         mi, mtp, _ = build_mix(work, vdur, clips, clicks, gain)
     print(f"speech raw I={si} TP={stp}; gain {gain:.2f} dB; mix I={mi} TP={mtp}", flush=True)
+    if a.music and Path(a.music).exists():
+        mi, mtp, _ = add_music(work, vdur, a.music)
+        print(f"music bed {a.music}: mix with music I={mi} TP={mtp}", flush=True)
+    elif a.music:
+        print(f"WARNING: music bed {a.music} not found; mixing without music", flush=True)
     (work / "plan.json").write_text(json.dumps({
         "t0": t0, "t0_source": t0_src, "video_seconds": vdur, "clips": clips, "clicks": clicks,
         "speech_gain_db": gain, "mix_I": mi, "mix_TP": mtp, "click_peak_dbfs": CLICK_PEAK_DB}, indent=2))

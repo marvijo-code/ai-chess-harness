@@ -103,6 +103,12 @@ function Deploy-Scripts {
   if ($r.Code -ne 0) { throw "VPS mkdir failed: $($r.Text)" }
   & scp -q @sshOpts @files "$($Vps):$RemoteBase/bin/"
   if ($LASTEXITCODE -ne 0) { throw "scp of the scripts failed" }
+  # Channel music bed for the mix (no silent stretches); uploaded once.
+  $bed = "C:\dev\ai-tools\assets\audio\music\marvijo-channel-bed-cinematic-ambient.mp3"
+  if (Test-Path -LiteralPath $bed) {
+    $have = Invoke-Vps "test -f ~/$RemoteBase/bed-cinematic-ambient.mp3 && echo yes || echo no"
+    if ("$have" -notmatch "yes") { & scp -q @sshOpts $bed "$($Vps):$RemoteBase/bed-cinematic-ambient.mp3" }
+  }
   $r = Invoke-Vps "cd ~/$RemoteBase/bin && sed -i 's/\r`$//' *.sh *.py && chmod +x *.sh"
   if ($r.Code -ne 0) { throw "VPS script prep failed: $($r.Text)" }
 }
