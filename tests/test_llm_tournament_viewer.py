@@ -421,6 +421,131 @@ class PageTest(unittest.TestCase):
     def test_rules_note_present(self):
         self.assertIn("Move marks (?? ? ?! !) come from Stockfish 19 for viewers only.", viewer.PAGE)
 
+    def test_round_robin_and_knockout_pieces_present(self):
+        for needle in (
+            # header stage chip and rules
+            "Round robin - round <b>", "Semifinals", "Champion: <b>", "data-show-champion",
+            "Round robin, everyone plays everyone once; top ${koSize} to the knockouts.",
+            "Knockout draw: an Armageddon decider with colours swapped; White ${clock(cfg.armageddonWhiteMs || 600000)}, Black ${clock(cfg.armageddonBlackMs || 450000)}, a draw counts as a Black win.",
+            # board card label and Armageddon tag
+            "pairingOf(game.id)", "<b>ARMAGEDDON</b>", "draw = Black wins",
+            # bracket (and its round-robin preview)
+            'id="bracketCard"', "Road to the final", "Knockout bracket", "Champion: to be crowned", "data-bk-game", "Won in Armageddon",
+            "Winner of Semifinal 1", "Third place",
+            # champion moment
+            'id="champOverlay"', 'id="confetti"', "is the champion", "Runner-up", "Back to the boards", "data-close-champion", "#champion",
+            # opening hook
+            "1 crown.", "Click or press Esc to skip", "intro", "Draw? Armageddon decides",
+        ):
+            self.assertIn(needle, viewer.PAGE, needle)
+
+    def test_auto_focus_present(self):
+        for needle in ("data-toggle-autofocus", "Auto-focus: <b>", 'store("swissAutoFocus"', "following the commentary",
+                       "AUTO_GAP_MS = 20000", "history.replaceState", "focusPinned"):
+            self.assertIn(needle, viewer.PAGE, needle)
+        # auto switches never pin the commentator: only a focus the viewer chose is sent as a pin
+        self.assertIn("const want = focusId && focusPinned && data.games && data.games[focusId] ? focusId : null;", viewer.PAGE)
+        self.assertIn("if (focusId && focusPinned && clip.game !== focusId) return false;", viewer.PAGE)
+
+    def test_no_external_assets(self):
+        self.assertNotIn("http://", viewer.PAGE.replace("http://www.w3.org", ""))
+        self.assertNotIn("https://", viewer.PAGE)
+
+
+KNOCKOUT_STATE = {
+    "id": "ko-1",
+    "title": "AI Chess Championship",
+    "config": {"rounds": 9, "timeControlMs": 600000, "incrementMs": 0, "maxAttempts": 3, "startElo": 1500, "eloK": 32},
+    "format": {"type": "round-robin+knockout", "rr_rounds": 9, "ko_size": 4},
+    "stage": "semifinals",
+    "current_round": 10,
+    "players": [{"name": n} for n in ("A", "B", "C", "D")],
+    "standings": [{"name": n, "rank": i + 1, "points": 9 - i} for i, n in enumerate("ABCD")],
+    "rounds": [
+        {"round": 9, "pairings": [{"board": 1, "white": "A", "black": "B", "game_id": "r9b1"}], "status": "finished"},
+        {"round": 10, "stage": "semifinals", "label": "Semifinals", "status": "live", "pairings": [
+            {"board": 1, "white": "A", "black": "D", "game_id": "r10b1", "match": "sf1", "label": "Semifinal 1 - Game 1"},
+            {"board": 2, "white": "B", "black": "C", "game_id": "r10b2", "match": "sf2", "label": "Semifinal 2 - Game 1"},
+            {"board": 3, "white": "D", "black": "A", "game_id": "r10b3", "match": "sf1", "label": "Semifinal 1 - Armageddon decider", "armageddon": True},
+        ]},
+    ],
+    "games": {
+        "r9b1": {"id": "r9b1", "status": "finished", "result": "1-0", "white": "A", "black": "B", "moves": []},
+        "r10b1": {"id": "r10b1", "status": "finished", "result": "1/2-1/2", "white": "A", "black": "D", "moves": [], "match": "sf1"},
+        "r10b2": {"id": "r10b2", "status": "live", "result": "*", "white": "B", "black": "C", "moves": [], "match": "sf2"},
+        "r10b3": {"id": "r10b3", "status": "live", "result": "*", "white": "D", "black": "A", "moves": [], "match": "sf1",
+                  "armageddon": True, "draw_odds": "black", "clocks": {"white": 600000, "black": 450000, "running": "white"}},
+    },
+    "knockout": {
+        "seeds": [{"seed": i + 1, "name": n, "points": 9 - i} for i, n in enumerate("ABCD")],
+        "matches": [
+            {"id": "sf1", "stage": "semifinals", "label": "Semifinal 1", "a": "A", "b": "D", "games": ["r10b1", "r10b3"], "winner": None, "decided_by": None},
+            {"id": "sf2", "stage": "semifinals", "label": "Semifinal 2", "a": "B", "b": "C", "games": ["r10b2"], "winner": None, "decided_by": None},
+        ],
+        "champion": None, "runner_up": None, "third": None,
+    },
+}
+
+
+class KnockoutStateTest(unittest.TestCase):
+    """A round robin + knockout state passes through /api/tournament untouched, next to the page."""
+
+    def serve(self, state):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / f"{state['id']}-tournament.json"
+        path.write_text(json.dumps(state), encoding="utf-8")
+
+        class H(viewer.Handler):
+            pass
+
+        H.state_path, H.live_dir = path, Path(tmp.name)
+        H.analyzer = H.annotator = H.commentator = None
+        server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    def fetch(self, url):
+        with urllib.request.urlopen(url, timeout=5) as res:
+            return res.status, res.headers.get("Content-Type", ""), res.read()
+
+    def test_knockout_fields_pass_through(self):
+        base = self.serve(KNOCKOUT_STATE)
+        status, kind, body = self.fetch(base + "/api/tournament")
+        self.assertEqual(status, 200)
+        self.assertIn("application/json", kind)
+        state = json.loads(body)
+        for key in ("format", "stage", "knockout", "rounds", "games", "standings"):
+            self.assertEqual(state[key], KNOCKOUT_STATE[key], key)
+        self.assertTrue(state["games"]["r10b3"]["armageddon"])
+        self.assertEqual(state["games"]["r10b3"]["draw_odds"], "black")
+
+    def test_champion_state_and_page(self):
+        crowned = json.loads(json.dumps(KNOCKOUT_STATE))
+        crowned.update(stage="finished", finished=True, winner="A")
+        crowned["knockout"].update(champion="A", runner_up="B", third="C")
+        base = self.serve(crowned)
+        status, _, body = self.fetch(base + "/api/tournament")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["knockout"]["champion"], "A")
+        status, kind, page = self.fetch(base + "/")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", kind)
+        self.assertIn(b'id="bracketCard"', page)
+        self.assertIn(b'id="champOverlay"', page)
+
+    def test_old_state_without_new_fields(self):
+        old = {k: v for k, v in KNOCKOUT_STATE.items() if k not in ("format", "stage", "knockout")}
+        old["rounds"] = old["rounds"][:1]
+        base = self.serve(old)
+        status, _, body = self.fetch(base + "/api/tournament")
+        self.assertEqual(status, 200)
+        state = json.loads(body)
+        self.assertNotIn("knockout", state)
+        self.assertNotIn("format", state)
+
 
 if __name__ == "__main__":
     unittest.main()
