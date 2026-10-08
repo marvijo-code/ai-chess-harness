@@ -29,20 +29,57 @@ tools/aichess_push.py  -- reads the viewer, so it follows the new tournament too
 
 ## Roster (configs/ai-chess-vps.json)
 
+The owner's top 5 plus Stockfish:
+
 | Player | Route | Notes |
 | --- | --- | --- |
 | Sonnet 5.5 | `claude` CLI, `claude-sonnet-5-5`, effort high | Claude subscription |
 | GPT-6.1 Sol | `codex` CLI, `gpt-6.1-sol`, effort high | ChatGPT subscription |
-| DeepSeek V4.1 Flash | `opencode-go`, `deepseek-v4.1-flash` | OpenCode Go subscription |
-| GLM 5.3 Flash | `opencode-go`, `glm-5.3-flash` | The Z.ai Coding Plan route (`zai`) answered HTTP 429 code 1113 (insufficient balance) on 2026-10-08 |
-| MiMo V2.6 Pro | `opencode-go`, `mimo-v2.6-pro` | Stand-in for Gemini 3.8 Flash |
-| Gemini 3.8 Flash | `enabled: false` | Waits for a Gemini CLI subscription route |
+| DeepSeek V4.1 Flash | `alibaba`, `deepseek-v4.1-flash`, effort high | Alibaba (Bailian) Token Plan subscription, Anthropic Messages wire |
+| GLM 5.3 Flash | `opencode-go`, `glm-5.3-flash` | Its only subscription route. OpenCode Go monthly limit reached on 2026-10-08, resets 2026-10-14 07:24 UTC (09:24 SAST). Z.ai answered code 1113 (no plan). |
+| Gemini 3.8 Flash | `enabled: false` | No subscription route yet |
 | Stockfish 19 | Linux binary, ladder from depth 4 | `Threads 1`, `Hash 16` |
 
 No player uses `openrouter-chat` or any other metered route. Time control 10 min + 10 s,
 3 tries per move, `showLegalMoves: true`, no board image (the FEN and the diagram carry the
 position; an image would be uncached input on every move). No fallback move ever: a failed
-move after 3 tries is a forfeit, as before.
+move after 3 tries is a forfeit, as before. `maxConcurrentGames: 2` caps the boards played at
+once (RAM); with 4 or 5 players a round has 2 boards anyway.
+
+### Roster check and benching
+
+Every NEW tournament starts with one real move from every enabled player (all at once, 300 s at
+most). A player whose move hits a usage limit, missing funds or plan, or a login or key problem is
+benched for that tournament; any other failure benches it as "preflight failed". The state has
+`benched: [{name, route, kind, reason, resets_at, checked_at}]`, the viewer shows
+"benched: subscription limit, resets <time>" in the notes card, and `tournaments/<slug>.md` has a
+"Benched for this tournament" table. The reset time comes from the error (Claude epoch, ISO time)
+or, for OpenCode Go, from its usage endpoint. The tournament runs with the rest when at least
+`forever.minPlayers` (3, Stockfish included) can play; otherwise the runner checks again after
+`forever.rosterRetrySeconds` (900). The next tournament checks again, so GLM joins by itself after
+its reset. A limit DURING a game still waits and retries the same move (see Usage limits).
+With fewer than 4 players the knockout is a final between the top two (no third-place game).
+
+### Alibaba Token Plan route (`alibaba`)
+
+`POST https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/v1/messages` with
+`Authorization: Bearer $ALIBABA_TOKEN_PLAN_API_KEY` and `anthropic-version: 2023-06-01` (the
+OpenAI-compatible path answers 404). `deepseek-v4.1-flash` and `glm-5.3` exist there;
+`glm-5.3-flash` and `mimo-v2.6-pro` do not. The request has `system` as a block with
+`cache_control`, the game as a message list with one `cache_control` on the last block,
+`thinking: {type: enabled, budget_tokens: 16000}` and `max_tokens: 32000`, so the answer always has
+at least 16,000 tokens of room after the longest thinking. The stream is Anthropic SSE
+(`thinking_delta`, `text_delta`, `message_delta` with `stop_reason`; `max_tokens` counts as a
+truncated answer and goes to the answer-from-thinking step). Errors: `AccessDenied.Unpurchased`
+(403) = no plan, `Throttling.AllocationQuota` = the 5-hour allowance is used up; both are limit
+waits during a game and benching at the roster check.
+
+What the endpoint returns (measured 2026-10-08): `usage` has `input_tokens` (the uncached part
+only), `cache_read_input_tokens`, `cache_creation_input_tokens` (always 0) and
+`prompt_tokens_details.cached_tokens`. Caching is automatic prefix caching in steps of 128 to 512
+tokens; the cache_control markers are accepted. The engine counts input = uncached + cache reads.
+The endpoint sometimes takes 3 to 20 s before its first byte; the move cap still applies (the
+answer then comes from the answer-from-thinking step).
 
 ## Tournament loop and pointer
 
@@ -57,6 +94,26 @@ move after 3 tries is a forfeit, as before.
 - The tournament number comes from `tournaments/index.json` in the memory repo (and is never lower
   than the pointer's number + 1).
 
+## Viewer follow, RAM and stream layout
+
+- `--one-engine` (env `AICHESS_ONE_ENGINE=1`): one Stockfish process serves the eval bar and the
+  move marks, one search at a time. `--engine-hash MB` (env `AICHESS_ENGINE_HASH_MB`) and
+  `--engine-threads N` (env `AICHESS_ENGINE_THREADS`) size it. The launcher defaults to one
+  engine, 64 MB, 1 thread. Measured on the VPS: the old default (two engines, 512 + 128 MB, 4 + 2
+  threads) used 1,176 MB of engine RSS; one engine with 64 MB uses 275 MB (most of it is the NNUE
+  network), plus about 32 MB for the viewer itself. Eval bar and move marks still work.
+- Stream layout: `http://127.0.0.1:8770/?stream=1` (or start the viewer with `--stream-layout`,
+  env `AI_CHESS_STREAM_LAYOUT=1` in the launcher). Exactly one 1920x1080 screen: the boards of the
+  round side by side (two at most), the round robin table with the Stockfish depth, the notes and
+  cache card (with benched players), the bracket during knockouts, the commentary caption under the
+  board. Rounds and rules are left out; when the column is taller than the screen it is zoomed to
+  fit instead of being cut. Auto-focus is off in stream mode.
+- The champion pop-up closes by itself after 20 s in stream mode and whenever the viewer runs with
+  `--follow`. A new tournament id (the pointer moved) closes it, drops the old boards and shows the
+  new tournament without a reload. Verified on the VPS with headless Chrome at 1920x1080: champion
+  shown at load, closed after about 20 s, title switched from #2 to #3 live, no element outside
+  1920x1080 in 36 checks over 3 minutes.
+
 ## Viewer follow
 
 `python3 tools/llm_tournament_viewer.py --port 8770 --follow out/live/current.json` reads the pointer
@@ -65,9 +122,13 @@ switch to the new tournament as soon as the pointer changes. With `--commentary`
 stops the old commentator and starts one for the new state. `tools/aichess_push.py` already resets
 its bookkeeping when the tournament id changes (state fingerprint, thinking offsets, clip sequence).
 
-Known gap for the stream/relay owner: the relay (`tools/aichess_relay.py`) stores clips by `seq`
-only. A new tournament's commentator starts at seq 1 again, so the relay drops the new clips as
-duplicates until its stored seqs are passed. It needs a tournament-aware clip store or a reset on id change.
+Commentary (merged from feat/commentary-subs): one Commentator for the life of the viewer. It
+follows the newest tournament file in the live dir (the one the runner writes, which is the one the
+pointer names), resets its memory with a fresh intro on a new tournament, and keeps clip numbers
+rising across tournaments (`commentary-last-seq.txt` in the live dir), so the relay, which stores
+clips by `seq`, never drops a new clip. When the viewer starts before the runner wrote any state,
+the commentary starts as soon as the first state appears. The launcher turns commentary on by
+default with `COMMENTARY_ROUTE=codex` (codex subscription text, free edge-tts voice, no metered API).
 
 ## Stockfish ladder
 

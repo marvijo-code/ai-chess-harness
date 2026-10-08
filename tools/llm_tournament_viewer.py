@@ -701,7 +701,7 @@ function renderAgents() {
   card.style.display = names.length || benched.length ? "" : "none";
   if (!names.length && !benched.length) return;
   const pctTxt = v => (v === null || v === undefined) ? "" : `${(v * 100).toFixed(1)}%`;
-  const when = iso => { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); };
+  const when = iso => { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }); };
   const benchRows = benched.map(b => `<div class="ag"><span class="ag-n">${esc(b.name)}</span><span class="ag-c">sits out</span>`
     + `<span class="ag-note" title="${esc(b.reason || "")}">benched: ${esc(b.kind || "preflight failed")}${b.resets_at ? ", resets " + esc(when(b.resets_at)) : ""}</span></div>`).join("");
   setHTML(document.getElementById("agents"), benchRows + names.map(n => {
