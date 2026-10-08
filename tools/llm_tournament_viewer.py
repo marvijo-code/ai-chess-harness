@@ -86,6 +86,8 @@ body.stream #agentsCard { flex: 0 1 auto; min-height: 0; overflow: hidden; }
 body.stream #agents .ag-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 body.stream .ticker { display: none !important; }
 body.stream .champ-btn { display: none; }
+body.stream td .route { display: none; }
+body.stream .side > .card, body.stream .boards { transform-origin: top left; }
 .game-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 6px 8px; cursor: pointer; min-width: 0; flex-wrap: wrap; }
 .card.focused .game-head { cursor: default; }
 .game-head .tag { font-size: 12px; color: var(--muted); min-width: 0; flex: 1 1 140px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
@@ -999,7 +1001,18 @@ function renderBoards() {
   for (const g of shown) updateCard(cardFor(g.id), g, now);
 }
 
+// Stream mode: if the side column or the boards grow taller than the screen (bracket, long notes), shrink
+// them to fit instead of cutting anything off (Chrome's zoom keeps layout and hit boxes consistent).
+function fitStream() {
+  for (const el of [document.getElementById("side"), document.getElementById("boards")]) {
+    if (!el) continue;
+    el.style.zoom = "";
+    const room = el.clientHeight, need = el.scrollHeight;
+    if (room > 0 && need > room + 1) el.style.zoom = Math.max(0.5, Math.floor(room / need * 1000) / 1000);
+  }
+}
 function render() {
+  if (STREAM) requestAnimationFrame(fitStream);
   if (!data || !data.id) return;
   document.getElementById("title").textContent = data.title || "AI Chess Swiss";
   document.title = (focusId && data.games && data.games[focusId] ? `${data.games[focusId].white} vs ${data.games[focusId].black} - ` : "") + (data.title || "AI Chess Swiss");
