@@ -207,6 +207,20 @@ class CommentaryOffTest(unittest.TestCase):
         self.assertGreater(state["state_age_s"], 1e6, "no updated_epoch_ms = very old")
         self.assertIsInstance(state["server_now_ms"], int)
 
+    def test_title_gets_the_byline_once(self):
+        self.assertEqual(viewer.with_byline("Chess Tournament but with AI Players #1", "By Marvijo"),
+                         "Chess Tournament but with AI Players #1 - By Marvijo")
+        self.assertEqual(viewer.with_byline("X #2 - By Marvijo", "By Marvijo"), "X #2 - By Marvijo")
+        self.assertEqual(viewer.with_byline("X #3", ""), "X #3")
+        self.assertEqual(viewer.with_byline("", "By Marvijo"), "")
+        state = Path(self.tmp.name) / "t-tournament.json"
+        saved = json.loads(state.read_text(encoding="utf-8"))
+        state.write_text(json.dumps({**saved, "title": "Chess Tournament but with AI Players #7"}), encoding="utf-8")
+        try:
+            self.assertEqual(self.get("/api/tournament")[1]["title"], "Chess Tournament but with AI Players #7 - By Marvijo")
+        finally:
+            state.write_text(json.dumps(saved), encoding="utf-8")
+
     def test_page_has_round_cards_and_a_standings_strip(self):
         page = viewer.PAGE
         for needle in ('id="ticker"', "function showRoundCard", "function renderTicker", "Match of the round",

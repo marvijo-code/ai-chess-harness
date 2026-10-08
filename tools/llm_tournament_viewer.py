@@ -2758,10 +2758,21 @@ def pointer_state(pointer: Path, cache: dict | None = None) -> Path | None:
     return path
 
 
+DEFAULT_BYLINE = "By Marvijo"   # owner 2026-10-08: write "- By Marvijo" after "Chess Tournament but with ..."
+
+
+def with_byline(title: str, byline: str) -> str:
+    """The tournament title with the byline after it, once (the state file itself is not changed)."""
+    if not byline or not title or title.endswith(f" - {byline}"):
+        return title
+    return f"{title} - {byline}"
+
+
 class Handler(BaseHTTPRequestHandler):
     state_path: Path | None = None
     follow: Path | None = None
     stream_layout = False
+    byline = DEFAULT_BYLINE
     _follow_cache: dict = {}
     live_dir: Path = LIVE_DIR
     analyzer: Analyzer | None = None
@@ -2871,6 +2882,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(503, b'{"error":"state file busy"}', "application/json")
                 return
             state = json.loads(body)
+            state["title"] = with_byline(state.get("title") or "", self.byline)
             now = time.time()
             state["state_age_s"] = round(now - (state.get("updated_epoch_ms") or 0) / 1000, 1)   # paused = old
             state["server_now_ms"] = int(now * 1000)
@@ -2975,7 +2987,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--commentary", action="store_true", help="serve tools/llm_commentary.py clips")
     parser.add_argument("--follow", type=Path, help="pointer JSON {state_path, id, number}: always serve the tournament it names")
     parser.add_argument("--stream-layout", action="store_true", help="serve the 1920x1080 stream layout at / (same as ?stream=1)")
+    parser.add_argument("--byline", default=os.environ.get("AICHESS_BYLINE", DEFAULT_BYLINE),
+                        help=f'shown after the tournament title, e.g. "... #1 - {DEFAULT_BYLINE}" ("" = none; env AICHESS_BYLINE)')
     args = parser.parse_args(argv)
+    Handler.byline = args.byline.strip()
     Handler.state_path = args.state.resolve() if args.state else None
     Handler.follow = args.follow.resolve() if args.follow else None
     Handler.stream_layout = bool(args.stream_layout)
