@@ -174,7 +174,7 @@ class StreamAutoFocusE2E(unittest.TestCase):
         switches = [e["t"] for e in log if e["id"]]
         dwells = [b - a for a, b in zip(switches, switches[1:])]
         self.assertGreaterEqual(len(dwells), 2, log)
-        self.assertLessEqual(max(dwells), DWELL_MS + 1200, dwells)
+        self.assertLessEqual(max(dwells), DWELL_MS + 700, dwells)
         self.assertGreaterEqual(min(dwells), MIN_DWELL_MS, dwells)
         # the strip shows the other live board and the countdown
         self.assertIn("Also live", page.text_content(".card.focused .lstrip"))

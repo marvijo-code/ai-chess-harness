@@ -2207,6 +2207,7 @@ async function poll() {
 poll();
 setInterval(poll, HOSTED ? 2000 : 1000);
 setInterval(render, 500);   // clocks tick between polls; unchanged parts are not touched
+setInterval(autoTick, 500);   // the dwell limits hold to half a second, also when a poll is slow
 if (HOSTED) setInterval(renderBanner, 1000);   // the age grows between answers, also with no data at all
 </script>
 </body>
