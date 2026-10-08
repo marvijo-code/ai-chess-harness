@@ -95,7 +95,7 @@ class LadderTest(unittest.TestCase):
 class MemoryEditTest(unittest.TestCase):
     def test_allowlist_caps_and_traversal(self):
         edits = [
-            {"path": "MEMORY.md", "content": "# Index\n- lesson — with a dash\n"},
+            {"path": "MEMORY.md", "content": "# Index\n- lesson " + EM + " with a dash\n"},
             {"path": "notes/openings.md", "content": "Sicilian: fine."},
             {"path": "../escape.md", "content": "x"},
             {"path": "notes/../../x.md", "content": "x"},
