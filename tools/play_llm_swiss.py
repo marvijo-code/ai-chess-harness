@@ -37,7 +37,8 @@ import chess
 import chess.pgn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from play_llm_series import LlmEngine, iso_now, move_comment, parse_info, write_text_retry  # noqa: E402
+from play_llm_series import (LlmEngine, iso_now, move_comment, parse_info, parse_note, parse_usage,  # noqa: E402
+                             write_text_retry)
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE_DIR = ROOT / "out" / "live"
@@ -72,6 +73,27 @@ DEFAULTS = {
     "players": [],
 }
 KO_STAGES = ("semifinals", "final")
+# Moves of a game that count as "warm-up" for the cache hit rate (the first request of a session is all new).
+CACHE_WARMUP_MOVES = 3
+
+
+class GameHooks:
+    """Extension points for a runner that wraps the tournament (tools/ai_chess_forever.py).
+
+    before_game(ts, game_id, white, black): after both engines got `ucinewgame`, before the first move.
+    after_game(ts, game_id): after the game record is final (result, PGN), before the round moves on.
+    Both run on the game's own thread; an exception is logged and never stops the game or the round."""
+
+    def before_game(self, ts: "TournamentState", game_id: str, white: LlmEngine, black: LlmEngine) -> None:
+        pass
+
+    def after_game(self, ts: "TournamentState", game_id: str) -> None:
+        pass
+
+
+HOOKS: GameHooks | None = None
+# At most this many games at the same time (config maxConcurrentGames; None = every board of the round).
+GAME_SLOTS: threading.Semaphore | None = None
 
 
 def load_config(path: Path) -> dict:
@@ -266,9 +288,38 @@ class TournamentState:
     def save(self) -> None:
         with self.lock:
             self.state["standings"] = compute_standings(self.state)
+            self.state["cache_stats"] = compute_cache_stats(self.state)
             self.state["updated_at"] = iso_now()
             self.state["updated_epoch_ms"] = int(time.time() * 1000)
             write_text_retry(self.status_path, json.dumps(self.state, indent=1))
+
+
+def compute_cache_stats(state: dict) -> dict:
+    """Per player: input tokens, cached input tokens and the hit rate (cached / input) over every move request
+    in this tournament, plus the warm rate that leaves out each game's first CACHE_WARMUP_MOVES moves of the
+    player (a session's first request has nothing cached yet)."""
+    stats: dict[str, dict] = {}
+    for game in (state.get("games") or {}).values():
+        seen = {"white": 0, "black": 0}
+        for move in game.get("moves") or []:
+            usage = move.get("usage")
+            side = move.get("side")
+            if not usage or side not in seen:
+                continue
+            name = game.get(side)
+            row = stats.setdefault(name, {"calls": 0, "input": 0, "cached": 0, "output": 0, "warm_input": 0, "warm_cached": 0})
+            seen[side] += 1
+            row["calls"] += int(usage.get("calls") or 0)
+            row["input"] += int(usage.get("input") or 0)
+            row["cached"] += int(usage.get("cached") or 0)
+            row["output"] += int(usage.get("output") or 0)
+            if seen[side] > CACHE_WARMUP_MOVES:
+                row["warm_input"] += int(usage.get("input") or 0)
+                row["warm_cached"] += int(usage.get("cached") or 0)
+    for row in stats.values():
+        row["hit_rate"] = round(row["cached"] / row["input"], 4) if row["input"] else None
+        row["warm_hit_rate"] = round(row["warm_cached"] / row["warm_input"], 4) if row["warm_input"] else None
+    return stats
 
 
 def parse_hurried(lines: list[str]) -> int:
@@ -291,8 +342,11 @@ def parse_think_ms(lines: list[str]) -> int | None:
     return None
 
 
-def wait_bestmove(engine: LlmEngine, timeout: float, on_clockstart) -> list[str]:
-    """Like LlmEngine.wait_for('bestmove') but reacts to `info string clockstart <used_ms>` lines as they arrive."""
+def wait_bestmove(engine: LlmEngine, timeout: float, on_clockstart, on_limitwait=None) -> list[str]:
+    """Like LlmEngine.wait_for('bestmove') but reacts to `info string clockstart <used_ms>` lines as they arrive.
+
+    `info string limitwait <seconds> <reason>`: the engine waits out a usage limit and then asks the same
+    move again. The deadline moves out by that wait (it is not thinking time), so a limit is never a flag."""
     deadline = time.monotonic() + timeout
     seen: list[str] = []
     with engine.cond:
@@ -307,6 +361,18 @@ def wait_bestmove(engine: LlmEngine, timeout: float, on_clockstart) -> list[str]
                         on_clockstart(int(line.split()[3]))
                     except (IndexError, ValueError):
                         pass
+                if line.startswith("info string limitwait "):
+                    parts = line.split(maxsplit=4)
+                    try:
+                        wait_s = int(parts[3])
+                    except (IndexError, ValueError):
+                        wait_s = 60
+                    deadline += wait_s + 60
+                    if on_limitwait is not None:
+                        try:
+                            on_limitwait(wait_s, parts[4] if len(parts) > 4 else "")
+                        except Exception:
+                            pass
                 if line.startswith("bestmove"):
                     return seen
             left = deadline - time.monotonic()
@@ -341,6 +407,16 @@ def kill_engine_tree(engine: LlmEngine) -> None:
 
 def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: TournamentState,
               live_pgn: Path, log, replace_engine, start_ms: dict | None = None) -> None:
+    """One game. With GAME_SLOTS set, the game waits (status pending) until a board is free."""
+    slots = GAME_SLOTS
+    if slots is None:
+        return _play_game(game_id, white, black, cfg, ts, live_pgn, log, replace_engine, start_ms)
+    with slots:
+        return _play_game(game_id, white, black, cfg, ts, live_pgn, log, replace_engine, start_ms)
+
+
+def _play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: TournamentState,
+               live_pgn: Path, log, replace_engine, start_ms: dict | None = None) -> None:
     state = ts.state
     record = state["games"][game_id]
     board = chess.Board()
@@ -395,6 +471,11 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
 
     for engine in (white, black):
         engine.new_game()
+    if HOOKS is not None:
+        try:
+            HOOKS.before_game(ts, game_id, white, black)
+        except Exception as exc:  # a hook never stops a game
+            log(f"{game_id}: before_game hook failed: {type(exc).__name__}: {exc}")
     result, termination, end_kind = "*", "", ""
     while True:
         if board.is_game_over(claim_draw=True):
@@ -419,6 +500,20 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
             with ts.lock:
                 record["thinking"] = {"side": "white" if side == chess.WHITE else "black",
                                       "since_epoch_ms": int(time.time() * 1000) - used_ms}
+                record.pop("waiting", None)
+            ts.save()
+
+        def limitwait(wait_s: int, reason: str, side=side, engine=engine) -> None:
+            # A usage limit: the clock is stopped (no thinking shown) until the engine asks again.
+            log(f"{game_id}: {engine.name} waits {wait_s}s for a usage limit ({reason[:120]}); clock stopped")
+            with ts.lock:
+                record["thinking"] = None
+                record["waiting"] = {"side": "white" if side == chess.WHITE else "black", "reason": reason[:200],
+                                     "until_epoch_ms": int((time.time() + wait_s) * 1000)}
+                waits = record.setdefault("limit_waits", [])
+                waits.append({"ply": len(history) + 1, "player": engine.name, "seconds": wait_s, "at": iso_now(),
+                              "reason": reason[:200]})
+                del waits[:-50]
             ts.save()
 
         thinking_file = live_pgn.parent / f"{state['id']}-{game_id}-ply{len(history) + 1}.thinking.txt"
@@ -427,7 +522,7 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
                 engine.send(f"setoption name ThinkingFile value {thinking_file}")
             engine.send(position)
             engine.send(go_line)
-            lines = wait_bestmove(engine, wait, clockstart)
+            lines = wait_bestmove(engine, wait, clockstart, limitwait)
             uci = lines[-1].split()[1]
         except TimeoutError:
             uci, lines = "flag", []
@@ -480,11 +575,24 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
         history.append(uci)
         node = node.add_variation(move)
         node.comment = move_comment(clocks[side], elapsed_ms, tries, illegal, comment)
+        note = parse_note(lines)
+        usage = parse_usage(lines)
+        side_name = "white" if side == chess.WHITE else "black"
         with ts.lock:
-            record["moves"].append({"ply": len(history), "side": "white" if side == chess.WHITE else "black",
-                                    "san": san, "uci": uci, "elapsed_ms": elapsed_ms, "wall_ms": wall_ms, "tries": tries,
-                                    "hurried": parse_hurried(lines),
-                                    "illegal": illegal, "comment": comment[:400], "clock_ms": clocks[side]})
+            entry = {"ply": len(history), "side": side_name,
+                     "san": san, "uci": uci, "elapsed_ms": elapsed_ms, "wall_ms": wall_ms, "tries": tries,
+                     "hurried": parse_hurried(lines),
+                     "illegal": illegal, "comment": comment[:400], "clock_ms": clocks[side]}
+            if usage:
+                entry["usage"] = usage
+            if note:
+                entry["note"] = note[:200]
+                record.setdefault("notes", []).append({"ply": len(history), "side": side_name, "player": engine.name,
+                                                       "san": san, "note": note[:200]})
+                state.setdefault("latest_notes", {})[engine.name] = {"note": note[:200], "game": game_id,
+                                                                      "ply": len(history), "san": san, "at": iso_now()}
+            record["moves"].append(entry)
+            record.pop("waiting", None)
         log(f"{game_id} ply {len(history)}: {engine.name} {san} ({elapsed_ms / 1000:.1f}s, tries={tries})")
     headers["Result"] = result
     headers["Termination"] = termination
@@ -492,8 +600,14 @@ def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: T
     with ts.lock:
         record.update({"status": "void" if end_kind == "void" else "finished", "result": result,
                        "termination": termination, "end_kind": end_kind, "end": iso_now(), "pgn": str(game)})
+        record.pop("waiting", None)
     publish(None)
     log(f"{game_id} finished: {white.name} {result} {black.name} ({termination})")
+    if HOOKS is not None and end_kind != "void":
+        try:
+            HOOKS.after_game(ts, game_id)
+        except Exception as exc:  # memory, ladder and git never stop the tournament
+            log(f"{game_id}: after_game hook failed: {type(exc).__name__}: {exc}")
 
 
 # ---------------------------------------------------------------- knockouts
@@ -590,17 +704,37 @@ def run_knockout_stage(state: dict, ts: "TournamentState", cfg: dict, stage: str
 def run_knockouts(state: dict, ts: "TournamentState", cfg: dict, engine_for, replace_engine, log) -> bool:
     ko = state.setdefault("knockout", {})
     if not ko.get("seeds"):
-        seeds = knockout_seeds(state, int(cfg.get("knockoutSize", 4)))
+        # Fewer than 4 players (benched players sit out): the top two meet in the final, no semifinals.
+        size = 4 if min(int(cfg.get("knockoutSize", 4)), len(state["players"])) >= 4 else 2
+        seeds = knockout_seeds(state, size)
         names = [s["name"] for s in seeds]
-        with ts.lock:
-            ko.update(seeds=seeds, champion=None, runner_up=None, third=None, matches=[
+        if size >= 4:
+            matches = [
                 {"id": "sf1", "stage": "semifinals", "label": "Semifinal 1", "a": names[0], "b": names[3], "games": [],
                  "winner": None, "decided_by": None},
                 {"id": "sf2", "stage": "semifinals", "label": "Semifinal 2", "a": names[1], "b": names[2], "games": [],
-                 "winner": None, "decided_by": None}])
+                 "winner": None, "decided_by": None}]
+        else:
+            matches = [{"id": "final", "stage": "final", "label": "Final", "a": names[0], "b": names[1], "games": [],
+                        "winner": None, "decided_by": None}]
+        with ts.lock:
+            ko.update(seeds=seeds, champion=None, runner_up=None, third=None, matches=matches)
         log("knockout seeds: " + ", ".join(f"{s['seed']}. {s['name']} ({s['points']:g})" for s in seeds))
     rr = int(cfg["rounds"])
     semis = [m for m in ko["matches"] if m["stage"] == "semifinals"]
+    if not semis:
+        finals = [m for m in ko["matches"] if m["stage"] == "final"]
+        if not run_knockout_stage(state, ts, cfg, "final", rr + 1, "Final", finals, engine_for, replace_engine, log):
+            return False
+        final = finals[0]
+        with ts.lock:
+            ko["champion"] = final["winner"]
+            ko["runner_up"] = final["b"] if final["winner"] == final["a"] else final["a"]
+            ko["third"] = None
+            state["stage"] = "finished"
+        ts.save()
+        log(f"CHAMPION: {ko['champion']} (runner-up {ko['runner_up']})")
+        return True
     if not run_knockout_stage(state, ts, cfg, "semifinals", rr + 1, "Semifinals", semis, engine_for, replace_engine, log):
         return False
     if not any(m["stage"] == "final" for m in ko["matches"]):
@@ -676,16 +810,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
 
     if args.resume:
-        state = json.loads(args.resume.read_text(encoding="utf-8"))
+        state = prepare_resume(json.loads(args.resume.read_text(encoding="utf-8")))
         cfg = state["config"]
         status_path = args.resume
-        for rnd in state["rounds"]:
-            for pairing in rnd["pairings"]:
-                game = state["games"][pairing["game_id"]]
-                if game.get("result", "*") == "*":
-                    game.update({"status": "pending", "moves": [], "result": "*", "termination": "", "end_kind": ""})
-        state["finished"] = False
-        state.pop("paused", None)
     else:
         cfg = load_config(args.config)
         if args.rounds:
@@ -697,16 +824,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg["rounds"] = max(1, min(cfg["rounds"], max_rounds(len(cfg["players"]))))
         stamp = time.strftime("%Y%m%d-%H%M%S")
         slug = args.slug or f"llm-swiss-{stamp}"
-        seed = cfg.get("seed")
-        if seed is None:
-            seed = int(time.time())
-        seed_order = [p["name"] for p in cfg["players"]]
-        random.Random(seed).shuffle(seed_order)
-        state = {
-            "id": slug, "title": cfg["title"], "created_at": iso_now(), "config": {k: v for k, v in cfg.items() if k != "players"},
-            "players": cfg["players"], "seed": seed, "seed_order": seed_order, "rounds": [], "games": {},
-            "current_round": 0, "finished": False, "winner": None,
-        }
+        state = new_state(cfg, slug)
         status_path = LIVE_DIR / f"{slug}-tournament.json"
 
     players = {p["name"]: p for p in state["players"]}
@@ -720,6 +838,45 @@ def main(argv: list[str] | None = None) -> int:
         if args.preflight_only:
             return 0
 
+    return run_tournament(state, cfg, status_path, log)
+
+
+def prepare_resume(state: dict) -> dict:
+    """Unfinished games of a saved state start again from move 1 (the --resume rule)."""
+    for rnd in state["rounds"]:
+        for pairing in rnd["pairings"]:
+            game = state["games"][pairing["game_id"]]
+            if game.get("result", "*") == "*":
+                game.update({"status": "pending", "moves": [], "result": "*", "termination": "", "end_kind": "",
+                             "notes": [], "thinking": None})
+                game.pop("waiting", None)
+    state["finished"] = False
+    state.pop("paused", None)
+    return state
+
+
+def new_state(cfg: dict, slug: str, title: str | None = None, seed: int | None = None) -> dict:
+    """A fresh tournament state (Elo starts at startElo for everyone)."""
+    if seed is None:
+        seed = cfg.get("seed")
+    if seed is None:
+        seed = int(time.time())
+    seed_order = [p["name"] for p in cfg["players"]]
+    random.Random(seed).shuffle(seed_order)
+    return {
+        "id": slug, "title": title or cfg["title"], "created_at": iso_now(),
+        "config": {k: v for k, v in cfg.items() if k != "players"},
+        "players": cfg["players"], "seed": seed, "seed_order": seed_order, "rounds": [], "games": {},
+        "current_round": 0, "finished": False, "winner": None,
+    }
+
+
+def run_tournament(state: dict, cfg: dict, status_path: Path, log) -> int:
+    """Play a (new or resumed) tournament to the end. 0 = finished, 3 = paused by a void game."""
+    global GAME_SLOTS
+    players = {p["name"]: p for p in state["players"]}
+    cap = cfg.get("maxConcurrentGames")
+    GAME_SLOTS = threading.Semaphore(int(cap)) if cap else None
     LIVE_DIR.mkdir(parents=True, exist_ok=True)
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     ts = TournamentState(state, status_path)

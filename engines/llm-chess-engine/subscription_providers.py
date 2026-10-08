@@ -42,10 +42,19 @@ HTTP_ROUTES = {
     "opencode-go": {"url": "https://opencode.ai/zen/go/v1/chat/completions", "key": "OPENCODE_GO_API_KEY", "style": "effort"},
     # Z.ai GLM Coding Plan subscription endpoint (the generic /api/paas/v4 bills pay-as-you-go).
     "zai": {"url": "https://api.z.ai/api/coding/paas/v4/chat/completions", "key": "ZAI_API_KEY", "style": "thinking"},
+    # Alibaba (Bailian) Token Plan subscription: Anthropic Messages wire only (the OpenAI path is 404).
+    # Measured 2026-10-08: deepseek-v4.1-flash and glm-5.3 answer; prefix caching is automatic and reported as
+    # cache_read_input_tokens (input_tokens is then only the uncached part).
+    "alibaba": {"url": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/v1/messages",
+                "key": "ALIBABA_TOKEN_PLAN_API_KEY", "style": "anthropic"},
 }
+# Anthropic-wire thinking budget per effort; max_tokens stays HTTP_MAX_TOKENS, so at least half of the output
+# room is left for the answer after the longest thinking (DeepSeek can otherwise spend it all on reasoning).
+ANTHROPIC_THINKING_BUDGET = {"low": 4000, "medium": 8000, "high": 16000, "xhigh": 16000, "max": 16000}
+ANTHROPIC_VERSION = "2023-06-01"
 PROVIDERS = CLI_PROVIDERS + tuple(HTTP_ROUTES)
 DEFAULT_MODELS = {"codex": "gpt-6-sol", "claude": "claude-sonnet-5-5", "openrouter-chat": "x-ai/grok-4.7",
-                  "opencode-go": "deepseek-v4.1-flash", "zai": "glm-5.3"}
+                  "opencode-go": "deepseek-v4.1-flash", "zai": "glm-5.3", "alibaba": "deepseek-v4.1-flash"}
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
 HTTP_MAX_TOKENS = 32000
 # A streaming reply that sends no bytes for this long is a gateway stall, not thinking
@@ -103,9 +112,35 @@ MARKER_UNSAFE = re.compile(r"[\s\[\]{};]+")
 # the game is voided and replayed later, never forfeited (2026-10-06: OpenCode Go hit its monthly limit).
 OPENROUTER_QUANTIZATIONS = ("fp8", "fp16", "bf16", "fp32", "unknown")
 UNAVAILABLE_MARKERS = ("usagelimit", "usage limit", "usage_limit", "insufficient balance", "insufficient_quota",
+                       "accessdenied.unpurchased", "throttling.allocationquota",
                        "exceeded your current quota", "credit balance", "payment required", "not logged in",
                        "please run /login", "invalid api key", "unauthorized", "http 401", "http 402", "http 403",
                        "no allowed providers")
+# A subscription usage or rate limit (forever tournament, LLM_LIMIT_WAIT=1): the engine waits and asks the
+# SAME move again once the limit resets. Never a forfeit, never a fallback move, never charged to the clock.
+LIMIT_MARKERS = ("usagelimit", "usage limit", "usage_limit", "rate limit", "rate_limit", "ratelimit", "too many requests",
+                 "throttling", "allocationquota", "unpurchased",
+                 "hit your limit", "limit reached", "limit exceeded", "quota", "try again at", "try again in",
+                 "overloaded", "capacity")
+LIMIT_429 = re.compile(r"(?:http|status|code)[^0-9]{0,4}429\b|\b429 too many", re.I)
+LIMIT_WAIT_FIRST_SECONDS = 60.0
+LIMIT_WAIT_MAX_SECONDS = 900.0
+CLAUDE_RESET = re.compile(r"usage limit reached\|(\d{9,11})", re.I)
+ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
+NOTE_MAX_CHARS = 200
+# Static rules for the cache-friendly prompt (forever tournament). Byte-identical for every player, game and
+# move: nothing in it may depend on the player, the game, the clock or the time of day.
+RULES_TEXT = """AI CHESS TOURNAMENT RULES (the same text for every player, every game and every move)
+1. You play one game of chess against another AI player or against the Stockfish engine.
+2. On every turn you get the moves played since your last turn, then the current position: the FEN, a board diagram (White pieces uppercase, Black lowercase, White plays up the board), the legal moves in SAN and in UCI, and both clocks.
+3. Reply with ONLY one JSON object: {"move": "<one legal move, SAN or UCI>", "comment": "<one or two short sentences about your idea>", "note": "<optional private note to yourself, at most 200 characters>"}
+4. The note is optional. Use it to remember a plan, a threat or a lesson from this game. Your notes are saved with the game, you see them again after the game when you update your memory, and they are public after the game.
+5. Choose the move with your own reasoning. Do not run code, call tools, or use a chess engine.
+6. A reply that is not the JSON object, or that names an illegal move, is rejected and you get another try with the reason. After the last allowed try (see the game header) you forfeit the game.
+7. Your clock runs only while you think. If it reaches 0:00 you lose on time. You get the increment after every move you make.
+8. A game is drawn by stalemate, insufficient material, threefold repetition, the 50-move rule, or at the game's ply cap.
+9. Before you move, look at every check, capture and threat for both sides, and do not leave a piece undefended by accident.
+10. Your memory below holds what you wrote after your earlier games. It does not change during a game; you update it after the game."""
 
 
 class ProviderError(RuntimeError):
@@ -121,13 +156,26 @@ class CliCut(Exception):
 
 
 def resolve_binary(provider: str) -> str:
+    """The CLI executable. Windows: the native npm exe first (a .cmd shim breaks argument quoting).
+    Linux and macOS: PATH first, then the usual install places (~/.local/bin/claude, /usr/bin/codex),
+    because a service or a non-login ssh shell often has a short PATH."""
     override = os.environ.get(f"LLM_{provider.upper()}_BIN")
     if override:
         return override
-    native = CODEX_EXE if provider == "codex" else CLAUDE_EXE
-    if native.exists():
-        return str(native)
-    found = shutil.which(provider)
+    if os.name == "nt":
+        native = CODEX_EXE if provider == "codex" else CLAUDE_EXE
+        if native.exists():
+            return str(native)
+        found = shutil.which(provider)
+    else:
+        found = shutil.which(provider)
+        if not found:
+            for folder in (Path.home() / ".local" / "bin", Path("/usr/local/bin"), Path("/usr/bin"),
+                           Path.home() / ".npm-global" / "bin"):
+                candidate = folder / provider
+                if candidate.is_file() and os.access(candidate, os.X_OK):
+                    found = str(candidate)
+                    break
     if not found:
         raise ProviderError(f"{provider} CLI not found; install it or set LLM_{provider.upper()}_BIN")
     return found
@@ -139,15 +187,24 @@ def isolated_workdir() -> Path:
     return path
 
 
-def build_command(provider: str, model: str, effort: str, binary: str, workdir: Path) -> tuple[list[str], Path | None]:
-    """Return argv plus the file the final message is written to (codex only)."""
+def build_command(provider: str, model: str, effort: str, binary: str, workdir: Path,
+                  system_prompt: str = SYSTEM_PROMPT, session: dict | None = None) -> tuple[list[str], Path | None]:
+    """Return argv plus the file the final message is written to (codex only).
+
+    `session` turns on session continuation (one provider session per game, so each move sends only what
+    changed and the rest is a cached prefix): {"mode": "new", "id": uuid} starts it (claude needs the id,
+    codex reports its own thread id), {"mode": "resume", "id": id} continues it."""
     if provider == "codex":
         last_message = workdir / f"codex-last-{os.getpid()}-{time.time_ns()}.txt"
-        argv = [
-            binary, "exec",
-            "--skip-git-repo-check", "--ignore-user-config", "--ephemeral",
-            "--sandbox", "read-only",
-            "-m", model,
+        if session and session.get("mode") == "resume":
+            argv = [binary, "exec", "resume", "--skip-git-repo-check", "--ignore-user-config",
+                    "-c", 'sandbox_mode="read-only"', "-m", model]
+        else:
+            argv = [binary, "exec", "--skip-git-repo-check", "--ignore-user-config"]
+            if not session:
+                argv.append("--ephemeral")
+            argv += ["--sandbox", "read-only", "-m", model]
+        argv += [
             "-c", f"model_reasoning_effort={effort}",
             # Reasoning summaries in the JSON stream, for the viewer's live Thinking panel.
             "-c", "model_reasoning_summary=detailed",
@@ -156,7 +213,10 @@ def build_command(provider: str, model: str, effort: str, binary: str, workdir: 
         ]
         for feature in CODEX_DISABLED_FEATURES:
             argv += ["--disable", feature]
-        argv += ["--json", "--color", "never", "-o", str(last_message), "-"]
+        if session and session.get("mode") == "resume":
+            argv += ["--json", "-o", str(last_message), str(session["id"]), "-"]
+        else:
+            argv += ["--json", "--color", "never", "-o", str(last_message), "-"]
         return argv, last_message
     if provider == "claude":
         settings = workdir / "claude-settings.json"
@@ -171,9 +231,12 @@ def build_command(provider: str, model: str, effort: str, binary: str, workdir: 
             "--no-session-persistence",
             "--setting-sources", "",
             "--settings", str(settings),
-            "--system-prompt", SYSTEM_PROMPT,
+            "--system-prompt", system_prompt,
             "--output-format", "stream-json", "--verbose",
         ]
+        if session:
+            argv.remove("--no-session-persistence")
+            argv += ["--resume" if session.get("mode") == "resume" else "--session-id", str(session["id"])]
         return argv, None
     raise ProviderError(f"unknown provider {provider!r}; expected one of {PROVIDERS}")
 
@@ -269,6 +332,16 @@ def board_diagram(board: chess.Board) -> str:
 
 
 BOARD_FONT = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "seguisym.ttf"
+# Linux has no Segoe UI Symbol: DejaVu Sans carries the chess glyphs (U+265A to U+265F).
+BOARD_FONTS = (BOARD_FONT, Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+               Path("/usr/share/fonts/dejavu/DejaVuSans.ttf"), Path("/usr/share/fonts/TTF/DejaVuSans.ttf"))
+
+
+def board_font_path() -> Path:
+    for path in BOARD_FONTS:
+        if path.is_file():
+            return path
+    raise ProviderError("no font with chess glyphs for the board image; set \"image\": false for this player")
 GLYPHS = {chess.KING: "\u265a", chess.QUEEN: "\u265b", chess.ROOK: "\u265c", chess.BISHOP: "\u265d",
           chess.KNIGHT: "\u265e", chess.PAWN: "\u265f"}
 
@@ -281,8 +354,9 @@ def board_png(board: chess.Board) -> bytes:
     size = sq * 8 + margin * 2
     image = Image.new("RGB", (size, size), (40, 40, 40))
     draw = ImageDraw.Draw(image)
-    piece_font = ImageFont.truetype(str(BOARD_FONT), 52)
-    label_font = ImageFont.truetype(str(BOARD_FONT), 16)
+    font = str(board_font_path())
+    piece_font = ImageFont.truetype(font, 52)
+    label_font = ImageFont.truetype(font, 16)
     last = board.peek() if board.move_stack else None
     for rank in range(8):
         for file in range(8):
@@ -351,6 +425,206 @@ def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejectio
         'Reply with ONLY one JSON object: {"move": "<SAN or UCI>", "comment": "<one or two short sentences>"}'
     )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- cache-friendly prompts (forever tournament)
+#
+# Order of every request: [RULES_TEXT: static] + [memory: frozen for the game] + [game header + moves so far:
+# append-only] + [position block: FEN, board, legal moves, clocks, at the very END]. Nothing that changes
+# from move to move (clocks, budget, legal moves) may appear before the position block.
+
+
+def san_moves_since(history: list[str], start: int) -> str:
+    """SAN with move numbers for plies `start`.. of `history` (a black first move gets 'N...')."""
+    board = chess.Board()
+    parts = []
+    for index, uci in enumerate(history):
+        move = chess.Move.from_uci(uci)
+        if index >= start:
+            if board.turn == chess.WHITE:
+                parts.append(f"{board.fullmove_number}.")
+            elif index == start:
+                parts.append(f"{board.fullmove_number}...")
+            parts.append(board.san(move))
+        board.push(move)
+    return " ".join(parts)
+
+
+def memory_section(context: dict) -> str:
+    memory = (context.get("memory") or "").strip()
+    return ("YOUR MEMORY (your own MEMORY.md from earlier games; frozen for this game)\n"
+            + (memory if memory else "(empty: you have not written any memory yet)"))
+
+
+def game_header_section(context: dict) -> str:
+    return "GAME\n" + (context.get("header") or "").strip()
+
+
+def position_block(board: chess.Board, go_args: dict, show_legal: bool, cap_seconds: float | None = None,
+                   nudge: str | None = None, image: bool = False) -> str:
+    """The only part of a turn that changes on every move. Always the last part of a request."""
+    side = "White" if board.turn == chess.WHITE else "Black"
+    own, opp = ("wtime", "btime") if board.turn == chess.WHITE else ("btime", "wtime")
+    lines = [f"POSITION (move {board.fullmove_number}, {side} to move, you play {side})",
+             f"FEN: {board.fen()}",
+             "Board:",
+             board_diagram(board)]
+    if image:
+        lines.append("An image of the same position is attached: White at the bottom, the last move highlighted.")
+    if board.is_check():
+        lines.append("You are in check.")
+    if show_legal:
+        legal = list(board.legal_moves)
+        lines.append("Legal moves (SAN): " + " ".join(board.san(move) for move in legal))
+        lines.append("Legal moves (UCI): " + " ".join(move.uci() for move in legal))
+    if go_args.get(own) is not None:
+        inc = go_args.get("winc" if side == "White" else "binc", 0) or 0
+        lines.append(f"Clocks: you {fmt_clock(go_args.get(own))}, opponent {fmt_clock(go_args.get(opp))}, +{int(inc) // 1000}s per move.")
+        budget = move_budget_seconds(board, go_args.get(own), inc)
+        lines.append(f"Time budget for this move: about {budget:.0f} seconds of thinking.")
+        if cap_seconds is not None:
+            lines.append(f"If you are still thinking after about {cap_seconds:.0f} seconds, your thinking is stopped, "
+                         "you are shown all of it, and you must give your move at once.")
+    if nudge:
+        lines.append(nudge)
+    lines.append("Reply with ONLY the JSON object.")
+    return "\n".join(lines)
+
+
+def history_section(history: list[str], notes: list[dict] | None = None) -> str:
+    text = "MOVES SO FAR\n" + (san_moves_since(history, 0) or "(none, the game starts now)")
+    own = [n for n in (notes or []) if n.get("note")]
+    if own:
+        text += "\nYOUR NOTES IN THIS GAME\n" + "\n".join(f"after ply {n.get('ply')}: {n['note']}" for n in own)
+    return text
+
+
+def build_full_turn(context: dict, board: chess.Board, go_args: dict, history: list[str], show_legal: bool = True,
+                    cap_seconds: float | None = None, nudge: str | None = None, image: bool = False,
+                    notes: list[dict] | None = None) -> str:
+    """The whole request text for a fresh session: rules, memory, game header, moves so far, position."""
+    return "\n\n".join([RULES_TEXT, memory_section(context), game_header_section(context),
+                        history_section(history, notes),
+                        position_block(board, go_args, show_legal, cap_seconds, nudge, image)])
+
+
+def build_delta_turn(board: chess.Board, go_args: dict, history: list[str], seen_plies: int, show_legal: bool = True,
+                     cap_seconds: float | None = None, nudge: str | None = None, image: bool = False) -> str:
+    """A later turn of the same session: only the moves since the last turn, then the position."""
+    since = san_moves_since(history, seen_plies)
+    head = f"MOVES SINCE YOUR LAST TURN\n{since}" if since else "MOVES SINCE YOUR LAST TURN\n(none)"
+    return head + "\n\n" + position_block(board, go_args, show_legal, cap_seconds, nudge, image)
+
+
+def parse_note(text: str) -> str:
+    """The optional "note" of a move reply, whitespace folded, at most NOTE_MAX_CHARS characters."""
+    match = re.search(r"\{.*\}", text or "", flags=re.S)
+    if not match:
+        return ""
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return ""
+    note = data.get("note") if isinstance(data, dict) else None
+    if not isinstance(note, str):
+        return ""
+    return " ".join(note.split())[:NOTE_MAX_CHARS]
+
+
+def limit_error(text: str) -> bool:
+    """A usage or rate limit (wait and ask again), as opposed to a bad answer or a lost login."""
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in LIMIT_MARKERS) or bool(LIMIT_429.search(text or ""))
+
+
+def limit_reset_epoch(text: str) -> float | None:
+    """A reset time named in a limit error: Claude's `usage limit reached|<epoch>` or an ISO timestamp
+    (Alibaba Throttling.AllocationQuota, OpenCode Go resetsAt)."""
+    match = CLAUDE_RESET.search(text or "")
+    if match:
+        return float(match.group(1))
+    iso = ISO_TIME.search(text or "")
+    if iso:
+        import datetime as _dt
+        try:
+            stamp = _dt.datetime.fromisoformat(iso.group(0).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=_dt.timezone.utc)
+            return stamp.timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def limit_wait_seconds(text: str, attempt: int, now: float | None = None) -> float:
+    """Seconds to wait before asking again: the reset time when the error states it, else 60 s doubling to 15 min."""
+    until = limit_reset_epoch(text)
+    if until is not None:
+        left = until - (time.time() if now is None else now)
+        if 0 < left < 7 * 24 * 3600:
+            return min(max(left + 5, LIMIT_WAIT_FIRST_SECONDS), 6 * 3600)
+    return min(LIMIT_WAIT_MAX_SECONDS, LIMIT_WAIT_FIRST_SECONDS * (2 ** max(0, attempt)))
+
+
+def http_usage(usage: dict) -> dict:
+    """OpenAI-compatible usage -> {input, cached, output}. DeepSeek reports prompt_cache_hit_tokens.
+    Anthropic wire (no prompt_tokens): input_tokens is only the uncached part, so the total adds the cache
+    reads and writes."""
+    usage = usage or {}
+    if "prompt_tokens" not in usage and ("cache_read_input_tokens" in usage or "cache_creation_input_tokens" in usage):
+        read = int(usage.get("cache_read_input_tokens") or 0)
+        write = int(usage.get("cache_creation_input_tokens") or 0)
+        return {"input": int(usage.get("input_tokens") or 0) + read + write, "cached": read,
+                "output": int(usage.get("output_tokens") or 0)}
+    total = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+    details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
+    cached = details.get("cached_tokens") if isinstance(details, dict) else None
+    if cached is None:
+        cached = usage.get("prompt_cache_hit_tokens")
+    if cached is None:
+        cached = usage.get("cached_tokens") or usage.get("cache_read_input_tokens") or 0
+    return {"input": total, "cached": int(cached or 0), "output": int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)}
+
+
+def claude_usage(output: str) -> dict | None:
+    """Claude result usage -> {input, cached, output}: input counts uncached + cache writes + cache reads."""
+    data = claude_result_event(output) or {}
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else None
+    if not usage:
+        return None
+    read = int(usage.get("cache_read_input_tokens") or 0)
+    write = int(usage.get("cache_creation_input_tokens") or 0)
+    plain = int(usage.get("input_tokens") or 0)
+    return {"input": plain + write + read, "cached": read, "output": int(usage.get("output_tokens") or 0),
+            "cache_write": write}
+
+
+def codex_usage(output: str) -> dict | None:
+    """The last turn.completed usage of `codex exec --json` (cumulative for a resumed session)."""
+    found = None
+    for line in (output or "").splitlines():
+        line = line.strip()
+        if '"turn.completed"' not in line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        usage = event.get("usage") if isinstance(event, dict) else None
+        if isinstance(usage, dict):
+            found = {"input": int(usage.get("input_tokens") or 0), "cached": int(usage.get("cached_input_tokens") or 0),
+                     "output": int(usage.get("output_tokens") or 0)}
+    return found
+
+
+def codex_thread_id(output: str) -> str | None:
+    for line in (output or "").splitlines():
+        if '"thread.started"' in line:
+            try:
+                return json.loads(line.strip()).get("thread_id")
+            except (json.JSONDecodeError, AttributeError):
+                continue
+    return None
 
 
 def parse_reply(text: str, board: chess.Board) -> tuple[chess.Move, str, str]:
@@ -441,6 +715,17 @@ class SubscriptionChessClient:
         self.usage_log: list[dict] = []
         self._line_times: list[tuple[float, str]] = []
         self._attempt_think_ms: int | None = None
+        # Forever tournament: the game context (frozen memory + game header) turns on the cache-friendly
+        # prompt; conversation mode keeps one provider session per game; limit wait never forfeits a limit.
+        self.context: dict | None = None
+        self.conversation = _flag_env("LLM_CONVERSATION", False)
+        self.limit_wait = _flag_env("LLM_LIMIT_WAIT", False)
+        self.on_limit_wait: Callable[[int, str], None] | None = None
+        self._conv: dict | None = None
+        self._notes: list[dict] = []
+        self._move_usage: list[dict] = []
+        self._oneshot = False
+        self._system_prompt = SYSTEM_PROMPT
 
     def set_option(self, name: str, value: str) -> None:
         lowered = name.lower()
@@ -463,13 +748,106 @@ class SubscriptionChessClient:
             self.thinking_file = Path(value.strip()) if value.strip() else None
         elif lowered in {"showlegalmoves", "show_legal_moves"}:
             self.show_legal = value.strip().lower() in {"1", "true", "yes", "on"}
+        elif lowered == "gamecontextfile":
+            self.load_context(value.strip())
+        elif lowered == "conversation":
+            self.conversation = value.strip().lower() in {"1", "true", "yes", "on"}
+        elif lowered == "limitwait":
+            self.limit_wait = value.strip().lower() in {"1", "true", "yes", "on"}
+
+    def load_context(self, path: str) -> None:
+        """Read the game context once (frozen for the whole game): {"memory": str, "header": str}."""
+        if not path:
+            self.context = None
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            self.log(f"game context {path!r} unreadable: {exc}")
+            return
+        self.context = {"memory": str(data.get("memory") or ""), "header": str(data.get("header") or "")}
+        self.log(f"game context loaded: memory {len(self.context['memory'])} chars, header {len(self.context['header'])} chars")
 
     def new_game(self) -> None:
         self.invalid_model_moves = 0
         self._nudge = None
+        self.end_session()
+        self.context = None
+        self._notes = []
+
+    def new_conversation(self) -> dict:
+        self._conv = {"id": None, "started": False, "seen": 0, "messages": [], "committed": 0, "codex_total": None}
+        return self._conv
+
+    def end_session(self) -> None:
+        """Forget this game's provider session and delete its session file (CLI routes)."""
+        conv, self._conv = self._conv, None
+        if conv and self.provider in CLI_PROVIDERS:
+            for sid in set(conv.get("ids") or []) | ({str(conv["id"])} if conv.get("id") else set()):
+                for path in session_files(self.provider, sid):
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+            cleanup_stale_sessions(self.provider)
 
     def choose_move(self, board: chess.Board, go_args: dict, history: list[str]) -> tuple[str, str]:
         self.last_report = {"tries": 0, "illegal": []}
+        self._move_usage = []
+        try:
+            return self._choose_move(board, go_args, history)
+        finally:
+            if self._move_usage:
+                self.last_report["usage"] = sum_usage(self._move_usage)
+
+    def _turn_text(self, board: chess.Board, go_args: dict, history: list[str], rejections: list[str],
+                   cap: float | None) -> str:
+        """The request text for this attempt. The old single-prompt layout when no game context is set."""
+        image = self.board_image and self._image is not None
+        if self.context is None:
+            return build_prompt(board, go_args, history, rejections, self.show_legal, cap, self._nudge, self.board_image)
+        conv = self._conv if self.conversation else None
+        if conv and conv.get("started"):
+            if rejections and conv.get("turn_plies") == len(history):
+                # Same move, previous reply rejected: the position is already in the session.
+                return (f"Your last reply was rejected: {rejections[-1]}. Choose again from the legal moves above. "
+                        "Reply with ONLY the JSON object.")
+            return build_delta_turn(board, go_args, history, conv.get("seen", 0), self.show_legal, cap, self._nudge, image)
+        text = build_full_turn(self.context, board, go_args, history, self.show_legal, cap, self._nudge, image, self._notes)
+        for index, reason in enumerate(rejections, start=1):
+            text += f"\nAttempt {index} was rejected: {reason}. Choose again."
+        return text
+
+    def _ask_waiting(self, prompt: str, timeout: int) -> str:
+        """_ask_with_crash_retries, but a usage or rate limit waits and asks the same request again
+        (LLM_LIMIT_WAIT=1). The wait is infrastructure time: never charged to the chess clock."""
+        waits = 0
+        while True:
+            try:
+                return self._ask_with_crash_retries(prompt, timeout)
+            except ProviderError as exc:
+                text = str(exc)
+                if not self.limit_wait or not (limit_error(text) or provider_unavailable(text)):
+                    raise
+                seconds = limit_wait_seconds(text, waits)
+                waits += 1
+                reason = " ".join(text.split())[:160]
+                self.log(f"{self.provider} {self.model} LIMIT WAIT {waits}: sleeping {seconds:.0f}s, then the same "
+                         f"request again ({reason})")
+                if self.on_limit_wait is not None:
+                    try:
+                        self.on_limit_wait(int(seconds), reason)
+                    except Exception:
+                        pass
+                self._think(f"\n[waiting {seconds:.0f}s for the {self.provider} usage limit to reset; the clock is stopped]\n")
+                slept = time.monotonic()
+                self.sleep(seconds)
+                self._infra_ms += int((time.monotonic() - slept) * 1000)
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+    def _choose_move(self, board: chess.Board, go_args: dict, history: list[str]) -> tuple[str, str]:
         if not any(board.legal_moves):
             return "0000", "no legal moves"
         remaining = go_args.get("wtime") if board.turn == chess.WHITE else go_args.get("btime")
@@ -498,14 +876,23 @@ class SubscriptionChessClient:
                 self._image_board = board.fen()
             # Only streaming routes show their thinking live, so only they get the BEST SO FAR cap.
             cap = self._cutoff_s if self.provider in HTTP_ROUTES else None
-            prompt = build_prompt(board, go_args, history, rejections, self.show_legal, cap, self._nudge, self.board_image)
+            if self.conversation and self.context is not None and self._conv is None:
+                self.new_conversation()
+            prompt = self._turn_text(board, go_args, history, rejections, cap)
             started = time.monotonic()
             self._attempt_think_ms = None
             self._infra_ms = 0
             try:
-                text = self._ask_with_crash_retries(prompt, timeout)
+                text = self._ask_waiting(prompt, timeout)
                 self._add_think(started)
+                if self._conv is not None:
+                    self._conv["turn_plies"] = len(history)
+                    self._conv["seen"] = len(history)
                 move, comment, _raw = parse_reply(text, board)
+                note = parse_note(text)
+                if note:
+                    self.last_report["note"] = note
+                    self._notes.append({"ply": len(history) + 1, "note": note})
                 self.invalid_model_moves = 0
                 usage = ""
                 if self.provider in HTTP_ROUTES and self.usage_log:
@@ -525,6 +912,11 @@ class SubscriptionChessClient:
                 bad = re.search(r"'([^']{1,24})' is not a legal move", last_error)
                 self.last_report["illegal"].append(marker_text(bad.group(1)) if bad else "invalid")
             except Exception as exc:  # timeouts and CLI failures spend an attempt too
+                if self._conv is not None:
+                    # The session may hold a half-written turn: the next attempt starts a fresh session with
+                    # the whole game in its prompt (one cache miss, never a confused conversation).
+                    self.end_session()
+                    self.new_conversation()
                 if isinstance(exc, ProviderError) and provider_unavailable(str(exc)):
                     self.log(f"{self.provider} {self.model} provider unavailable: {str(exc)[:300]}")
                     return "0000", f"provider unavailable: {str(exc)[:200]}"
@@ -611,50 +1003,150 @@ class SubscriptionChessClient:
             self._think(f"\n[thinking stopped at the move cap - answering at low effort from its revealed thinking]\n")
             self.log(f"{self.provider} {self.model} stopped at the {self._cli_cut_s:.0f}s cap; "
                      f"asking at low effort with {len(thoughts)} chars of revealed thinking")
-            follow = (prompt + "\n\nYour thinking on this move so far (stopped at the move cap):\n"
-                      + (thoughts or "(none visible)")
-                      + "\nYour time for this move is up. Reply now with only the JSON object for your move.")
+            if self._conv is not None and self._conv.get("started"):
+                # The killed turn may or may not be in the session: repeat the position, then the thinking.
+                board = self._board or chess.Board()
+                follow = ("Your thinking on the move below was stopped at the move cap.\n\n"
+                          + position_block(board, {}, self.show_legal) + "\n\nYour thinking on this move so far:\n"
+                          + (thoughts or "(none visible)")
+                          + "\nYour time for this move is up. Reply now with only the JSON object for your move.")
+            else:
+                follow = (prompt + "\n\nYour thinking on this move so far (stopped at the move cap):\n"
+                          + (thoughts or "(none visible)")
+                          + "\nYour time for this move is up. Reply now with only the JSON object for your move.")
             self._cli_cut_s = None
             left = timeout - (time.monotonic() - started)
             answer = self._ask_cli(follow, max(10, int(left)), "low")
             self._attempt_think_ms = None  # two calls: charge the wall time (infrastructure crashes still excluded)
             return answer
 
+    def _cli_session(self) -> dict | None:
+        conv = self._conv
+        if self._oneshot or conv is None or self.provider == "claude":
+            # Claude keeps its game as content blocks in one fresh request (see _claude_flat_prompt):
+            # measured 2026-10-08, `claude -p --resume` gave no cache reads for chess turns.
+            return None
+        if conv.get("started") and conv.get("id"):
+            return {"mode": "resume", "id": conv["id"]}
+        if self.provider == "claude":
+            conv["id"] = str(uuid.uuid4())
+            conv.setdefault("ids", []).append(conv["id"])
+        return {"mode": "new", "id": conv.get("id")}
+
     def _ask_cli(self, prompt: str, timeout: int, effort: str) -> str:
         workdir = isolated_workdir()
         self._cli_thoughts = []
-        argv, last_message = build_command(self.provider, self.model, effort, resolve_binary(self.provider), workdir)
+        session = self._cli_session()
+        argv, last_message = build_command(self.provider, self.model, effort, resolve_binary(self.provider), workdir,
+                                           self._system_prompt, session)
         image_file = None
         if self.provider == "codex":
-            prompt = SYSTEM_PROMPT + "\n\n" + prompt
+            if not (session and session.get("mode") == "resume"):
+                prompt = self._system_prompt + "\n\n" + prompt
             if self._image:
                 image_file = workdir / f"board-{os.getpid()}-{time.time_ns()}.png"
                 image_file.write_bytes(self._image)
                 argv = argv[:-1] + ["-i", str(image_file), "--", "-"]
+        elif self.provider == "claude" and self._conv is not None and not self._oneshot:
+            argv = argv + ["--input-format", "stream-json"]
+            prompt = self._claude_flat_prompt(prompt)
         elif self.provider == "claude" and self._image:
             argv = argv + ["--input-format", "stream-json"]
-            prompt = json.dumps({"type": "user", "message": {"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/png",
-                                             "data": base64.b64encode(self._image).decode("ascii")}},
-                {"type": "text", "text": prompt}]}}) + "\n"
+            image = {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                 "data": base64.b64encode(self._image).decode("ascii")}}
+            text = {"type": "text", "text": prompt}
+            # With a game context the image belongs to the position block: after the text, never before it.
+            content = [text, image] if self.context is not None else [image, text]
+            prompt = json.dumps({"type": "user", "message": {"role": "user", "content": content}}) + "\n"
         try:
             self._line_times = []
             output = self.runner(argv, prompt, timeout, workdir)
             self._attempt_think_ms = cli_think_ms(self.provider, output, self._line_times)
+            self._record_cli_usage(output, session)
             if self.provider == "codex":
                 used = codex_tool_items(output)
                 if used:
                     # A tool call is the model not playing the move itself: it spends an attempt.
                     raise ValueError(f"you used a tool ({', '.join(sorted(used))}); choose the move by reasoning only, with no code or tools")
                 if last_message and last_message.exists():
-                    return last_message.read_text(encoding="utf-8", errors="replace")
+                    answer = last_message.read_text(encoding="utf-8", errors="replace")
+                    self._session_started(session, output)
+                    return answer
                 raise ProviderError(f"codex wrote no final message; output tail: {output[-300:]!r}")
-            return claude_result_text(output)
+            answer = claude_result_text(output)
+            self._session_started(session, output)
+            if self._conv is not None and not self._oneshot and self._flat_turn is not None:
+                # The turn and the reply become fixed blocks of the next request (never the thinking).
+                self._conv.setdefault("blocks", []).extend([self._flat_turn, "YOUR REPLY\n" + answer.strip()])
+                self._conv["started"] = True
+                self._conv["id"] = self._conv.get("id") or self.session_id
+            return answer
         finally:
             if last_message and last_message.exists():
                 last_message.unlink(missing_ok=True)
             if image_file is not None:
                 image_file.unlink(missing_ok=True)
+
+    _flat_turn: str | None = None
+
+    def _claude_flat_prompt(self, turn: str) -> str:
+        """One fresh `claude -p` request that carries the whole game as content blocks: the first turn,
+        then each later turn and reply as its own block, then this turn. The cache breakpoint sits on the
+        last block, so the next request (same blocks plus two) reads everything up to this turn from cache.
+        Four breakpoints at most: the CLI puts two on its system prompt and one on its closing system note."""
+        self._flat_turn = turn
+        blocks = [{"type": "text", "text": text} for text in (self._conv or {}).get("blocks", [])]
+        blocks.append({"type": "text", "text": turn, "cache_control": {"type": "ephemeral", "ttl": "1h"}})
+        if self._image:
+            blocks.append({"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                       "data": base64.b64encode(self._image).decode("ascii")}})
+        return json.dumps({"type": "user", "message": {"role": "user", "content": blocks}}) + "\n"
+
+    def _session_started(self, session: dict | None, output: str) -> None:
+        if session is None or self._conv is None:
+            return
+        if self.provider == "codex" and session.get("mode") == "new":
+            self._conv["id"] = codex_thread_id(output) or self._conv.get("id")
+        if self._conv.get("id"):
+            self._conv["started"] = True
+
+    def _record_cli_usage(self, output: str, session: dict | None) -> None:
+        usage = claude_usage(output) if self.provider == "claude" else codex_usage(output)
+        if not usage:
+            return
+        if self.provider == "codex" and session is not None and self._conv is not None:
+            # A resumed codex session reports the session total: this call is the difference.
+            total = dict(usage)
+            before = self._conv.get("codex_total") if session.get("mode") == "resume" else None
+            if before:
+                usage = {key: max(0, total[key] - before.get(key, 0)) for key in ("input", "cached", "output")}
+            self._conv["codex_total"] = total
+        self._add_usage(usage)
+
+    def _add_usage(self, usage: dict) -> None:
+        entry = {"input": int(usage.get("input") or 0), "cached": int(usage.get("cached") or 0),
+                 "output": int(usage.get("output") or 0), "oneshot": self._oneshot}
+        self._move_usage.append(entry)
+        self.log(f"{self.provider} {self.model} usage input={entry['input']} cached={entry['cached']} output={entry['output']}"
+                 + (f" hit={entry['cached'] / entry['input']:.1%}" if entry["input"] else ""))
+
+    def ask_text(self, system_prompt: str, prompt: str, timeout: int = 600, effort: str | None = None) -> str:
+        """One fresh request on this route for a non-move task (the post-game memory reflection).
+        Limit waits apply; no session, no image, no move cap. Usage goes to last_report["usage"]."""
+        saved = (self._system_prompt, self._oneshot, self._image, self._cutoff_s, self._cli_cut_s, self.effort, self._board)
+        self._system_prompt, self._oneshot, self._image, self._cutoff_s, self._cli_cut_s = system_prompt, True, None, None, None
+        if effort:
+            self.effort = effort
+        self._move_usage = []
+        self.last_report = {"tries": 1, "illegal": []}
+        self._infra_ms = 0
+        try:
+            return self._ask_waiting(prompt, timeout)
+        finally:
+            if self._move_usage:
+                self.last_report["usage"] = sum_usage(self._move_usage)
+            (self._system_prompt, self._oneshot, self._image, self._cutoff_s, self._cli_cut_s, self.effort,
+             self._board) = saved
 
     def _ask_http(self, prompt: str, timeout: int) -> str:
         route = HTTP_ROUTES[self.provider]
@@ -662,12 +1154,22 @@ class SubscriptionChessClient:
         if not api_key:
             raise ProviderError(f"{route['key']} is not set")
         user: object = prompt
-        if self._image:
+        if self._image and route["style"] == "anthropic":
+            user = [{"type": "text", "text": prompt},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                 "data": base64.b64encode(self._image).decode("ascii")}}]
+        elif self._image:
             user = [{"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(self._image).decode("ascii")}}]
+        conv = None if self._oneshot else self._conv
+        if conv is not None and conv.get("started"):
+            # Client-side session: the earlier turns are a byte-identical prefix the provider caches.
+            messages = list(conv["messages"]) + [{"role": "user", "content": user}]
+        else:
+            messages = [{"role": "system", "content": self._system_prompt}, {"role": "user", "content": user}]
         payload: dict = {
             "model": self.model,
-            "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}],
+            "messages": messages,
             "max_tokens": HTTP_MAX_TOKENS,
         }
         effort = (self.effort or "").strip().lower()
@@ -693,7 +1195,11 @@ class SubscriptionChessClient:
             payload["reasoning_effort"] = effort or "high"
         elif style == "thinking":
             payload["thinking"] = {"type": "enabled"}
+        elif style == "anthropic":
+            payload = anthropic_payload(self.model, messages, effort)
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": BROWSER_UA}
+        if style == "anthropic":
+            headers["anthropic-version"] = ANTHROPIC_VERSION
         if self.provider == "opencode-go":
             headers["x-opencode-session"] = self.session_id
         if self.provider == "openrouter-chat":
@@ -702,16 +1208,23 @@ class SubscriptionChessClient:
         started = time.monotonic()
         self._clock_start()
         think_cap = None if self._cutoff_s is None else THINK_SHARE * self._cutoff_s
-        streamed = self.http_stream(route["url"], {**payload, "stream": True, "stream_options": {"include_usage": True}},
-                                    headers, timeout, think_cap)
+        streamed = self.http_stream(route["url"], stream_payload(payload, style), headers, timeout, think_cap)
         self.usage_log.append(streamed.get("usage") or {})
+        if streamed.get("usage"):
+            self._add_usage(http_usage(streamed["usage"]))
         content = streamed.get("content") or ""
         # Still thinking at the cap, or out of output tokens before any answer (DeepSeek, run 4).
         if not content.strip() and (streamed.get("cut") or streamed.get("finish") == "length"):
-            return self._answer_with_thoughts(route["url"], payload, headers, style, streamed, started)
-        if not content.strip():
+            content = self._answer_with_thoughts(route["url"], payload, headers, style, streamed, started)
+        elif not content.strip():
             raise ValueError(f"the reply was empty (finish_reason={streamed.get('finish')}, "
                              f"reasoning_chars={len(streamed.get('reasoning') or '')})")
+        if conv is not None:
+            # Keep the turn and the final answer (never the reasoning) for the next request of this game.
+            conv["messages"] = messages + [{"role": "assistant", "content": content}]
+            conv["committed"] = len(conv["messages"])
+            conv["started"] = True
+            conv["id"] = conv.get("id") or self.session_id
         return content
 
     def _answer_with_thoughts(self, url: str, payload: dict, headers: dict, style: str, streamed: dict,
@@ -728,7 +1241,7 @@ class SubscriptionChessClient:
                  f"returning its {len(thoughts)} chars of thinking and asking for the move")
         self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
         self._think(f"\n[thinking stopped: {why} - answering from its own thoughts]\n")
-        messages = payload["messages"] + [
+        messages = plain_messages(payload["messages"]) + [
             {"role": "assistant", "content": "My thinking on this move so far:\n" + (thoughts or "(no visible thinking)")},
             {"role": "user", "content": "Your time for this move is up. Your full thinking so far is above. "
                                         "Reply now with only the JSON object for your move."}]
@@ -736,9 +1249,14 @@ class SubscriptionChessClient:
                   "lowest": min(ANSWER_WITH_THOUGHTS_SECONDS, max(LOWEST_MIN_SECONDS, LOWEST_SHARE * total))}
         clock_left = None if self._left_ms is None else self._left_ms / 1000 - (time.monotonic() - started)
         for level in ("same", "lowest"):
-            follow = {**payload, "messages": messages, "max_tokens": ANSWER_MAX_TOKENS, "stream": True,
-                      "stream_options": {"include_usage": True}}
-            if level == "lowest":
+            if style == "anthropic":
+                follow = stream_payload({**payload, "messages": anthropic_messages(messages)}, style)
+                if level == "lowest":
+                    follow["thinking"] = {"type": "disabled"}
+            else:
+                follow = {**payload, "messages": messages, "max_tokens": ANSWER_MAX_TOKENS, "stream": True,
+                          "stream_options": {"include_usage": True}}
+            if level == "lowest" and style != "anthropic":
                 if style == "openrouter":
                     follow["reasoning"] = {"effort": "low"}  # Grok and GLM refuse reasoning off on OpenRouter
                 elif style == "effort":
@@ -751,6 +1269,8 @@ class SubscriptionChessClient:
                 left = 600.0 if clock_left is None else max(5.0, clock_left - (time.monotonic() - started))
                 answer = self.http_stream(url, follow, headers, int(left) + 5, None)
             self.usage_log.append(answer.get("usage") or {})
+            if answer.get("usage"):
+                self._add_usage(http_usage(answer["usage"]))
             if (answer.get("content") or "").strip():
                 if level == "lowest":
                     self.log(f"{self.provider} {self.model} answered at the lowest effort after a "
@@ -785,8 +1305,28 @@ class SubscriptionChessClient:
                             data = json.loads(chunk)
                         except json.JSONDecodeError:
                             continue
-                        if data.get("usage"):
+                        kind = data.get("type") if isinstance(data, dict) else None
+                        if data.get("usage") and not kind:
                             state["usage"] = data["usage"]
+                        if kind:  # Anthropic Messages events
+                            if kind == "message_start":
+                                state["usage"] = dict((data.get("message") or {}).get("usage") or {})
+                            elif kind == "message_delta":
+                                state["usage"] = {**state["usage"], **{k: v for k, v in (data.get("usage") or {}).items() if v is not None}}
+                                stop = (data.get("delta") or {}).get("stop_reason")
+                                if stop:
+                                    state["finish"] = "length" if stop == "max_tokens" else stop
+                            elif kind == "content_block_delta":
+                                delta = data.get("delta") or {}
+                                piece = str(delta.get("thinking") or "")
+                                state["reasoning"] += piece
+                                self._think(piece)
+                                state["content"] += str(delta.get("text") or "")
+                            elif kind == "error":
+                                err = data.get("error") or {}
+                                state["error"] = ("http", 529 if "overloaded" in str(err).lower() else 400,
+                                                  json.dumps(err)[:400])
+                            continue
                         for choice in data.get("choices") or []:
                             delta = choice.get("delta") or {}
                             piece = str(delta.get("reasoning_content") or delta.get("reasoning") or "")
@@ -879,6 +1419,7 @@ class SubscriptionChessClient:
             encoding="utf-8",
             errors="replace",
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            start_new_session=os.name != "nt",
         )
         # Stream stdout with arrival times so codex turn events can bracket the thinking time.
         lines: list[str] = []
@@ -927,7 +1468,7 @@ class SubscriptionChessClient:
         if proc.returncode != 0:
             if not output.strip():
                 raise CliCrash(f"{self.provider} exited {proc.returncode} with no output")
-            raise ProviderError(f"{self.provider} exited {proc.returncode}: {output[-400:]!r}")
+            raise ProviderError(f"{self.provider} exited {proc.returncode}: {cli_error_text(output)!r}")
         return output
 
 
@@ -1029,10 +1570,30 @@ def codex_tool_items(jsonl: str) -> set[str]:
     return used
 
 
-def _user_env(name: str) -> str | None:
-    """Read a User/Machine scope variable a long-running shell may not have inherited."""
-    if os.name != "nt":
+ENV_FILE = Path(os.environ.get("AI_CHESS_ENV_FILE") or Path.home() / ".config" / "ai-chess" / "env")
+
+
+def _env_file_value(name: str, path: Path = ENV_FILE) -> str | None:
+    """KEY=VALUE lines of the private env file (Linux VPS: ~/.config/ai-chess/env, mode 600)."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
         return None
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip().removeprefix("export ").strip() == name:
+            return value.strip().strip('"').strip("'") or None
+    return None
+
+
+def _user_env(name: str) -> str | None:
+    """Read a User/Machine scope variable a long-running shell may not have inherited
+    (Windows registry), or the private env file on Linux."""
+    if os.name != "nt":
+        return _env_file_value(name)
     import winreg
 
     for hive, path in ((winreg.HKEY_CURRENT_USER, "Environment"),
@@ -1049,11 +1610,146 @@ def kill_tree(proc: subprocess.Popen) -> None:
     if os.name == "nt":
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
     else:
-        proc.kill()
+        try:  # the CLI runs in its own process group (start_new_session): stop the whole group
+            os.killpg(proc.pid, 9)
+        except OSError:
+            proc.kill()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         pass
+
+
+def _flag_env(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def plain_messages(messages: list[dict]) -> list[dict]:
+    """Messages without cache markers (what is kept between turns)."""
+    out = []
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list):
+            content = [{k: v for k, v in block.items() if k != "cache_control"} if isinstance(block, dict) else block
+                       for block in content]
+            if len(content) == 1 and isinstance(content[0], dict) and content[0].get("type") == "text":
+                content = content[0]["text"]
+        out.append({**message, "content": content})
+    return out
+
+
+def anthropic_messages(messages: list[dict]) -> list[dict]:
+    """Anthropic wire: no system role in the list, and one cache breakpoint on the last block of the last
+    message, so the next request (same messages plus two) reads all of this one from cache."""
+    msgs = [dict(m) for m in plain_messages(messages) if m.get("role") != "system"]
+    if msgs:
+        last = msgs[-1]
+        content = last["content"]
+        blocks = [{"type": "text", "text": content}] if isinstance(content, str) else [dict(b) for b in content]
+        blocks[-1 if blocks[-1].get("type") == "text" else 0]["cache_control"] = {"type": "ephemeral"}
+        last["content"] = blocks
+    return msgs
+
+
+def anthropic_payload(model: str, messages: list[dict], effort: str) -> dict:
+    system = next((m["content"] for m in messages if m.get("role") == "system"), SYSTEM_PROMPT)
+    budget = ANTHROPIC_THINKING_BUDGET.get(effort or "high", ANTHROPIC_THINKING_BUDGET["high"])
+    payload = {"model": model, "max_tokens": HTTP_MAX_TOKENS,
+               "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+               "messages": anthropic_messages(messages)}
+    if effort not in ("none", "off", "minimal"):
+        payload["thinking"] = {"type": "enabled", "budget_tokens": min(budget, HTTP_MAX_TOKENS // 2)}
+    return payload
+
+
+def stream_payload(payload: dict, style: str) -> dict:
+    if style == "anthropic":
+        return {**payload, "stream": True}
+    return {**payload, "stream": True, "stream_options": {"include_usage": True}}
+
+
+def sum_usage(entries: list[dict]) -> dict:
+    """Totals for one move (or one reflection): calls, input, cached, output."""
+    return {"calls": len(entries), "input": sum(e.get("input", 0) for e in entries),
+            "cached": sum(e.get("cached", 0) for e in entries), "output": sum(e.get("output", 0) for e in entries)}
+
+
+def cli_error_text(output: str) -> str:
+    """The useful part of a failed CLI run: error events and result text first (they name a usage limit),
+    then the output tail."""
+    picked = []
+    for line in (output or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") in {"error", "turn.failed"} or event.get("is_error"):
+            detail = event.get("message") or event.get("error") or event.get("result") or ""
+            picked.append(json.dumps(detail)[:300] if not isinstance(detail, str) else detail[:300])
+    tail = (output or "")[-400:]
+    return (" | ".join(picked) + " | " if picked else "") + tail
+
+
+def session_files(provider: str, session_id: str) -> list[Path]:
+    """Session files a CLI wrote for one of our game sessions (deleted when the game ends)."""
+    if not session_id or not re.fullmatch(r"[A-Za-z0-9-]{8,80}", session_id):
+        return []
+    if provider == "claude":
+        root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+        return list(root.glob(f"*/{session_id}.jsonl")) if root.is_dir() else []
+    if provider == "codex":
+        root = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "sessions"
+        return list(root.glob(f"*/*/*/rollout-*{session_id}.jsonl")) if root.is_dir() else []
+    return []
+
+
+STALE_SESSION_SECONDS = 3600
+
+
+def cleanup_stale_sessions(provider: str, now: float | None = None) -> int:
+    """Delete session files our isolated working directory left behind (a CLI killed mid-turn), older than
+    an hour. Only files whose recorded working directory is ours are touched, never other codex or claude work."""
+    now = time.time() if now is None else now
+    ours = str(isolated_workdir())
+    removed = 0
+    if provider == "claude":
+        root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+        folder_tag = re.sub(r"[^A-Za-z0-9]", "-", ours)
+        candidates = list((root / folder_tag).glob("*.jsonl")) if (root / folder_tag).is_dir() else []
+        check_cwd = False
+    elif provider == "codex":
+        root = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "sessions"
+        candidates = []
+        for days in range(3):
+            day = time.strftime("%Y/%m/%d", time.localtime(now - days * 86400))
+            folder = root / day
+            if folder.is_dir():
+                candidates += list(folder.glob("rollout-*.jsonl"))
+        check_cwd = True
+    else:
+        return 0
+    for path in candidates:
+        try:
+            if now - path.stat().st_mtime < STALE_SESSION_SECONDS:
+                continue
+            if check_cwd:
+                with open(path, encoding="utf-8", errors="replace") as handle:
+                    first = handle.readline(20000)
+                if json.dumps(ours)[1:-1] not in first:
+                    continue
+            path.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def _int_env(name: str, default: int, low: int, high: int) -> int:

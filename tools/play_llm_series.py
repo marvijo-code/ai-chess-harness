@@ -120,6 +120,11 @@ def engine_env(player: dict, cfg: dict) -> dict[str, str]:
     }
     if player.get("maxPrice"):
         env["LLM_MAX_PRICE"] = json.dumps(player["maxPrice"])
+    # Forever tournament: one provider session per game (cache) and waiting out usage limits.
+    for key, var in (("conversation", "LLM_CONVERSATION"), ("limitWait", "LLM_LIMIT_WAIT")):
+        value = player.get(key, cfg.get(key))
+        if value is not None:
+            env[var] = "true" if value else "false"
     if player["provider"] == "openrouter":
         env.update({
             "OPENROUTER_MODEL": player["model"],
@@ -233,6 +238,26 @@ class LlmEngine:
                 self.proc.kill()
 
 
+def parse_note(lines: list[str]) -> str:
+    """The model's optional note for this move (`info string note <text>`)."""
+    for line in reversed(lines):
+        if line.startswith("info string note "):
+            return line[len("info string note "):].strip()
+    return ""
+
+
+def parse_usage(lines: list[str]) -> dict | None:
+    """Token usage of this move (`info string usage {json}`): calls, input, cached, output."""
+    for line in reversed(lines):
+        if line.startswith("info string usage "):
+            try:
+                data = json.loads(line[len("info string usage "):])
+            except ValueError:
+                return None
+            return data if isinstance(data, dict) else None
+    return None
+
+
 def parse_info(lines: list[str]) -> tuple[str, int, list[str]]:
     comment, tries, illegal = "", 1, []
     for line in lines:
@@ -240,7 +265,7 @@ def parse_info(lines: list[str]) -> tuple[str, int, list[str]]:
             continue
         text = line[len("info string "):]
         match = re.match(r"attempts tries=(\d+) illegal=(\S+)", text)
-        if text.startswith(("thinkms ", "hurried ", "clockstart ")):
+        if text.startswith(("thinkms ", "hurried ", "clockstart ", "usage ", "note ", "limitwait ")):
             continue
         if match:
             tries = int(match.group(1))

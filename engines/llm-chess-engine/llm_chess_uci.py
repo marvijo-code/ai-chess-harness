@@ -490,8 +490,16 @@ class LlmChessUci:
         if hasattr(self.client, "on_clock_start"):
             # Live-clock signal for viewers: the model started thinking, `used` ms already spent this move.
             self.client.on_clock_start = lambda used: print(f"info string clockstart {used}", flush=True)
+        if hasattr(self.client, "on_limit_wait"):
+            # A usage-limit wait: the runner extends its own deadline and stops the displayed clock.
+            self.client.on_limit_wait = lambda secs, why: print(
+                f"info string limitwait {int(secs)} {' '.join(str(why).split())[:160]}", flush=True)
         move, comment = self.client.choose_move(self.board.copy(), go_args, list(self.history))
         report = getattr(self.client, "last_report", None) or {}
+        if report.get("usage"):
+            print(f"info string usage {json.dumps(report['usage'], separators=(',', ':'))}", flush=True)
+        if report.get("note"):
+            print(f"info string note {' '.join(str(report['note']).split())[:240]}", flush=True)
         if report.get("tries", 0) > 1 or report.get("illegal"):
             illegal = ";".join(report.get("illegal") or [])
             print(f"info string attempts tries={report.get('tries', 0)} illegal={illegal or '-'}", flush=True)
@@ -551,7 +559,7 @@ def main() -> None:
             if command == "uci":
                 print("id name llm-chess-engine", flush=True)
                 print("id author marvijo/OpenRouter", flush=True)
-                print("option name Provider type combo default openrouter var openrouter var codex var claude var openrouter-chat var opencode-go var zai", flush=True)
+                print("option name Provider type combo default openrouter var openrouter var codex var claude var openrouter-chat var opencode-go var zai var alibaba", flush=True)
                 print(f"option name Model type string default {DEFAULT_MODEL}", flush=True)
                 print("option name Temperature type spin default 20 min 0 max 100", flush=True)
                 print("option name MaxAttempts type spin default 3 min 1 max 9", flush=True)

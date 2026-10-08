@@ -1,0 +1,23 @@
+[Unit]
+Description=AI chess tournament viewer on 127.0.0.1:8770 (live boards, commentary clips, Stockfish analysis)
+Documentation=file://__HOME__/ai-chess/docs/aichess-stream.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=__HOME__/ai-chess
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=__HOME__/.local/bin:__HOME__/bin:/opt/node-v24.18.0-linux-x64/bin:/usr/local/bin:/usr/bin:/bin
+UnsetEnvironment=ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY OPENAI_BASE_URL OPENROUTER_API_KEY
+EnvironmentFile=-__HOME__/.config/ai-chess/services.env
+ExecStart=/bin/bash __HOME__/ai-chess/run-ai-chess-forever.sh run-viewer
+Restart=always
+RestartSec=5
+OOMScoreAdjust=-100
+
+[Install]
+WantedBy=multi-user.target

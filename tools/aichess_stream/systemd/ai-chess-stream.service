@@ -1,0 +1,27 @@
+[Unit]
+Description=AI chess 24/7 YouTube stream (Xvfb + Chrome kiosk on the viewer + ffmpeg RTMP)
+Documentation=file://__HOME__/ai-chess/docs/aichess-stream.md
+After=network-online.target ai-chess-viewer.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=__HOME__
+RuntimeDirectory=ai-chess-stream
+RuntimeDirectoryMode=0700
+EnvironmentFile=-__HOME__/.config/ai-chess/stream.env
+ExecStart=/bin/bash __HOME__/.local/lib/ai-chess-stream/stream.sh
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=20
+# The stream is what viewers see: keep it alive first when memory runs out.
+OOMScoreAdjust=-300
+CPUWeight=200
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target
