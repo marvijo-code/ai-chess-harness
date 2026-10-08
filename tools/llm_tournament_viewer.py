@@ -71,6 +71,21 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 18px; pa
 #agents .ag-n { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 #agents .ag-c { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 #agents .ag-note { grid-column: 1 / -1; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+/* Stream mode (?stream=1 or --stream-layout): exactly one 1920x1080 screen, nothing below the fold.
+   The boards of the round side by side (two at most), the side column keeps the standings (with the
+   Stockfish depth), the notes and cache card and the bracket; rounds and rules are left out. */
+body.stream { height: 100vh; overflow: hidden; }
+body.stream main { height: calc(100vh - var(--chrome-h, 62px)); grid-template-columns: minmax(0, 1fr) 440px; padding: 14px 22px; overflow: hidden; }
+body.stream .boards { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); height: 100%; align-content: start; overflow: hidden; }
+body.stream .boards > .card[data-game] { max-width: max(360px, calc(100vh - 600px)); }
+body.stream .boards > .card[data-game]:nth-child(n+3) { display: none; }
+body.stream .side { position: static; max-height: none; height: 100%; overflow: hidden; display: flex; flex-direction: column; gap: 14px; }
+body.stream .side > .card { flex: 0 0 auto; }
+body.stream .side > .card:not(#standingsCard):not(#agentsCard):not(#bracketCard) { display: none; }
+body.stream #agentsCard { flex: 0 1 auto; min-height: 0; overflow: hidden; }
+body.stream #agents .ag-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+body.stream .ticker { display: none !important; }
+body.stream .champ-btn { display: none; }
 .game-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 6px 8px; cursor: pointer; min-width: 0; flex-wrap: wrap; }
 .card.focused .game-head { cursor: default; }
 .game-head .tag { font-size: 12px; color: var(--muted); min-width: 0; flex: 1 1 140px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
@@ -492,6 +507,9 @@ a.chip.pub { text-decoration: none; }
 <div class="lapse" id="lapse" hidden role="status" aria-live="off"></div>
 <div class="champ-overlay" id="champOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="champName"><canvas id="confetti"></canvas><div class="champ-card" id="champCard"></div></div>
 <script>
+// Stream mode: ?stream=1, or the server's --stream-layout (it sets window.AICHESS_STREAM before this script).
+const STREAM = new URLSearchParams(location.search).get("stream") === "1" || !!window.AICHESS_STREAM;
+if (STREAM) document.body.classList.add("stream");
 // Hosted mode (marvijo.com/ai-chess): the exporter sets these before this script. The local viewer leaves
 // them unset, so every request stays on this server's own /api/... paths.
 const API_BASE = window.AICHESS_API_BASE || "";
@@ -522,7 +540,7 @@ const cards = new Map();      // game id -> persistent card DOM + render keys
 
 // Auto-focus: the page follows the board being commentated (or, without commentary, the most
 // interesting live board). A board the viewer picks by hand pins the commentator and turns it off.
-let autoFocus = store("swissAutoFocus") !== "off";
+let autoFocus = !STREAM && store("swissAutoFocus") !== "off";
 let focusPinned = false;      // true = the viewer chose this board (pins the commentator); false = auto-focus put it there
 let autoReason = "";          // why auto-focus shows the current board (chip text)
 let lastAutoSwitch = 0;       // last self-driven switch (never more often than AUTO_GAP_MS)
@@ -1233,7 +1251,7 @@ function leaderboardHtml(game) {
     const seed = seeds[r.name] ? `<span class="sd" title="Knockout seed ${seeds[r.name]}">S${seeds[r.name]}</span>` : "";
     const crown = k && k.champion === r.name ? crownSvg("cr", "lb" + i) : "";
     html += `<div class="lb-r ${side ? "me" : ""} ${size && i < size ? "zone" : ""}"${side ? ` title="Playing ${side === "w" ? "White" : "Black"} in this game"` : ""}>`
-      + `<span class="lb-k">${r.rank || i + 1}</span><span class="lb-n">${side ? `<span class="dot ${side}"></span>` : ""}${esc(r.name)}${seed}${crown}</span>`
+      + `<span class="lb-k">${r.rank || i + 1}</span><span class="lb-n">${side ? `<span class="dot ${side}"></span>` : ""}${esc(r.name)}${ladderTag(r.name)}${seed}${crown}</span>`
       + `<span class="lb-p">${esc(r.points ?? 0)}</span><span class="lb-e">${r.elo ? Math.round(r.elo) : ""}<i class="${d > 0 ? "up" : d < 0 ? "down" : ""}">${d ? (d > 0 ? "+" : "") + d : ""}</i></span></div>`;
     if (size && i === size - 1 && rows.length > size) html += `<div class="lb-cut">&uarr; knockout zone</div>`;
   });
@@ -1650,6 +1668,8 @@ function hideRoundCard() {
 
 // ---- champion moment ------------------------------------------------------------------------
 let champSeen = null;
+let champTimer = 0;
+const CHAMP_AUTOCLOSE_MS = 20000;
 function checkChampion() {
   const k = ko();
   const name = k && k.champion;
@@ -1684,12 +1704,16 @@ function showChampion(animate) {
   ov.classList.toggle("play", !!animate);
   ov.hidden = false;
   director({ k: "champion", a: "show" });
+  clearTimeout(champTimer);
+  // Unattended screens (the stream, a viewer following the forever runner) close it by themselves.
+  if (STREAM || (data && data.viewer_follow)) champTimer = setTimeout(hideChampion, CHAMP_AUTOCLOSE_MS);
   stopConfetti();
   let still = false;
   try { still = matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { /* old browser */ }
   if (animate && !still) startConfetti();
 }
 function hideChampion() {
+  clearTimeout(champTimer);
   if (!document.getElementById("champOverlay").hidden) director({ k: "champion", a: "hide" });
   document.getElementById("champOverlay").hidden = true;
   stopConfetti();
@@ -2007,6 +2031,17 @@ document.addEventListener("keydown", ev => {
   if (ev.key === "ArrowRight") { ev.preventDefault(); replayPly = Math.min(total, cur + 1); render(); }
 });
 
+// The pointer moved to the next tournament (forever runner): close the champion, drop the old boards
+// (game ids like r1b1 repeat in every tournament) and start the new one from a clean page.
+function newTournament() {
+  hideChampion();
+  champSeen = null;
+  cards.forEach(c => c.el.remove());
+  cards.clear();
+  selected = null;
+  replayPly = null;
+  if (focusId) { focusId = null; document.body.classList.remove("focus-mode"); }
+}
 async function poll() {
   try {
     let q = params.get("id") ? `?id=${encodeURIComponent(params.get("id"))}` : "";
@@ -2023,7 +2058,10 @@ async function poll() {
         // Same state: only its age fields move on.
         if (typeof got.state_age_s === "number") data.state_age_s = got.state_age_s;
         if (got.server_now_ms) data.server_now_ms = got.server_now_ms;
-      } else data = got;
+      } else {
+        if (data && got && got.id && data.id && got.id !== data.id) newTournament();
+        data = got;
+      }
       stateAt = Date.now();
       feedFailed = false;
       if (data.server_now_ms) serverSkewMs = data.server_now_ms - Math.round((sentAt + Date.now()) / 2);
@@ -2047,7 +2085,10 @@ async function poll() {
 (function watchHeader() {
   const hdr = document.querySelector("header"), tick = document.getElementById("ticker");
   const ban = document.getElementById("hostedBanner");   // hosted page only
-  const set = () => document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight + tick.offsetHeight + (ban ? ban.offsetHeight : 0) - 60) + "px");
+  const set = () => {
+    document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight + tick.offsetHeight + (ban ? ban.offsetHeight : 0) - 60) + "px");
+    document.documentElement.style.setProperty("--chrome-h", (hdr.offsetHeight + tick.offsetHeight + (ban ? ban.offsetHeight : 0)) + "px");
+  };
   try { const ro = new ResizeObserver(set); ro.observe(hdr); ro.observe(tick); if (ban) ro.observe(ban); } catch (e) { window.addEventListener("resize", set); }
   set();
 })();
@@ -2064,6 +2105,26 @@ if (HOSTED) setInterval(renderBanner, 1000);   // the age grows between answers,
 DEFAULT_ENGINE = ROOT / "out" / "engines" / "stockfish-19" / "stockfish" / "stockfish-windows-x86-64-universal.exe"
 
 
+class SharedEngine:
+    """One Stockfish process for both the eval bar (Analyzer) and the move marks (Annotator), one search at a
+    time (--one-engine, the VPS default: two processes with large hashes cost about 930 MB of RAM)."""
+
+    def __init__(self, path: Path, threads: int = 1, hash_mb: int = 64) -> None:
+        import chess.engine
+
+        self.engine = chess.engine.SimpleEngine.popen_uci(str(path))
+        self.engine.configure({"Threads": threads, "Hash": hash_mb})
+        self.id = self.engine.id
+        self.lock = threading.Lock()
+
+    def analyse(self, *args, **kwargs):
+        with self.lock:
+            return self.engine.analyse(*args, **kwargs)
+
+    def configure(self, options: dict) -> None:
+        pass   # set once at start for both users
+
+
 class Analyzer:
     """Viewer-only Stockfish analysis (never sent to the players).
 
@@ -2072,11 +2133,15 @@ class Analyzer:
     the page join the queue behind the live ones.
     """
 
-    def __init__(self, path: Path, slice_s: float = 0.8, target_depth: int = 26, threads: int = 4, hash_mb: int = 512) -> None:
+    def __init__(self, path: Path, slice_s: float = 0.8, target_depth: int = 26, threads: int = 4, hash_mb: int = 512,
+                 shared: "SharedEngine | None" = None) -> None:
         import chess.engine
 
-        self.engine = chess.engine.SimpleEngine.popen_uci(str(path))
-        self.engine.configure({"Threads": threads, "Hash": hash_mb})
+        if shared is not None:
+            self.engine = shared
+        else:
+            self.engine = chess.engine.SimpleEngine.popen_uci(str(path))
+            self.engine.configure({"Threads": threads, "Hash": hash_mb})
         self.name = self.engine.id.get("name", "Stockfish")
         self.slice_s = slice_s
         self.target_depth = target_depth
@@ -2238,7 +2303,9 @@ class Annotator:
     analyses positions it has not seen.
     """
 
-    def __init__(self, path: Path, depth: int = NAG_DEPTH, threads: int = 2, hash_mb: int = 128) -> None:
+    def __init__(self, path: Path, depth: int = NAG_DEPTH, threads: int = 2, hash_mb: int = 128,
+                 shared: "SharedEngine | None" = None) -> None:
+        self.shared = shared
         self.engine_path = Path(path)
         self.depth = depth
         self.threads = threads
@@ -2356,8 +2423,11 @@ class Annotator:
         import chess.engine
 
         try:
-            engine = chess.engine.SimpleEngine.popen_uci(str(self.engine_path))
-            engine.configure({"Threads": self.threads, "Hash": self.hash_mb})
+            if self.shared is not None:
+                engine = self.shared
+            else:
+                engine = chess.engine.SimpleEngine.popen_uci(str(self.engine_path))
+                engine.configure({"Threads": self.threads, "Hash": self.hash_mb})
             self.name = engine.id.get("name", "Stockfish")
         except Exception as exc:
             self.error = f"annotator engine failed: {exc}"
@@ -2578,6 +2648,7 @@ def pointer_state(pointer: Path, cache: dict | None = None) -> Path | None:
 class Handler(BaseHTTPRequestHandler):
     state_path: Path | None = None
     follow: Path | None = None
+    stream_layout = False
     _follow_cache: dict = {}
     live_dir: Path = LIVE_DIR
     analyzer: Analyzer | None = None
@@ -2668,7 +2739,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         url = urlparse(self.path)
         if url.path in {"/", "/index.html"}:
-            self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            page = PAGE.replace("<script>", "<script>window.AICHESS_STREAM = true;</script>\n<script>", 1) if self.stream_layout else PAGE
+            self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
         elif url.path == "/api/tournament":
             wanted = (parse_qs(url.query).get("id") or [""])[0]
             path = self.live_dir / f"{wanted}-tournament.json" if wanted else self.current_state()
@@ -2703,6 +2775,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 state["annotations"] = {}
             state["commentary"] = self.commentator is not None
+            if self.follow is not None:
+                state["viewer_follow"] = True
             publish = publish_status(self.live_dir, path, now)
             if publish is not None:
                 state["publish"] = publish
@@ -2778,20 +2852,34 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-analysis", action="store_true", help="no Stockfish eval bar and no move marks")
     parser.add_argument("--no-annotations", action="store_true", help="no ?? ? ?! ! move marks")
     parser.add_argument("--annotation-depth", type=int, default=NAG_DEPTH)
+    # RAM on a small server (env defaults so a service file can set them): one shared Stockfish, small hash.
+    parser.add_argument("--one-engine", action="store_true", default=os.environ.get("AICHESS_ONE_ENGINE", "") == "1",
+                        help="one Stockfish process for the eval bar and the move marks (env AICHESS_ONE_ENGINE=1)")
+    parser.add_argument("--engine-hash", type=int, default=int(os.environ.get("AICHESS_ENGINE_HASH_MB") or 0) or None,
+                        help="Stockfish hash in MB for the viewer's analysis (env AICHESS_ENGINE_HASH_MB; default 512 eval + 128 marks)")
+    parser.add_argument("--engine-threads", type=int, default=int(os.environ.get("AICHESS_ENGINE_THREADS") or 0) or None,
+                        help="Stockfish threads for the viewer's analysis (env AICHESS_ENGINE_THREADS; default 4 eval + 2 marks)")
     parser.add_argument("--commentary", action="store_true", help="serve tools/llm_commentary.py clips")
     parser.add_argument("--follow", type=Path, help="pointer JSON {state_path, id, number}: always serve the tournament it names")
+    parser.add_argument("--stream-layout", action="store_true", help="serve the 1920x1080 stream layout at / (same as ?stream=1)")
     args = parser.parse_args(argv)
     Handler.state_path = args.state.resolve() if args.state else None
     Handler.follow = args.follow.resolve() if args.follow else None
+    Handler.stream_layout = bool(args.stream_layout)
     Handler.live_dir = args.live_dir.resolve()
     if Handler.follow is not None and "--live-dir" not in (argv if argv is not None else sys.argv[1:]):
         Handler.live_dir = Handler.follow.parent   # the pointer sits in the live dir next to the state files
     if not args.no_analysis:
         if args.engine.exists():
-            Handler.analyzer = Analyzer(args.engine)
+            shared = None
+            if args.one_engine:
+                shared = SharedEngine(args.engine, threads=args.engine_threads or 1, hash_mb=args.engine_hash or 64)
+                print(f"analysis: one shared engine, Threads {args.engine_threads or 1}, Hash {args.engine_hash or 64} MB", flush=True)
+            Handler.analyzer = Analyzer(args.engine, threads=args.engine_threads or 4, hash_mb=args.engine_hash or 512, shared=shared)
             print(f"analysis: {Handler.analyzer.name} ({args.engine})", flush=True)
             if not args.no_annotations:
-                Handler.annotator = Annotator(args.engine, depth=args.annotation_depth).start()
+                Handler.annotator = Annotator(args.engine, depth=args.annotation_depth, threads=args.engine_threads or 2,
+                                              hash_mb=args.engine_hash or 128, shared=shared).start()
                 print(f"move marks: depth {args.annotation_depth}, MultiPV {NAG_MULTIPV}", flush=True)
         else:
             print(f"analysis off: engine not found at {args.engine}", flush=True)

@@ -12,7 +12,9 @@
 # Settings (environment): AI_CHESS_CONFIG, AI_CHESS_ENV_FILE (default ~/.config/ai-chess/env, KEY=VALUE,
 # mode 600), AI_CHESS_VIEWER_HOST (127.0.0.1), AI_CHESS_VIEWER_PORT (8770), AI_CHESS_ENGINE (Stockfish for the
 # viewer's eval bar and move marks), AI_CHESS_COMMENTARY (1 = on, the default: spoken commentary on the codex
-# subscription with the free edge-tts voice; 0 = off), COMMENTARY_ROUTE (codex), PYTHON (python3).
+# subscription with the free edge-tts voice; 0 = off), COMMENTARY_ROUTE (codex), AICHESS_ONE_ENGINE (1),
+# AICHESS_ENGINE_HASH_MB (64), AICHESS_ENGINE_THREADS (1), AI_CHESS_STREAM_LAYOUT (0; the stream can use ?stream=1),
+# PYTHON (python3).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -111,7 +113,11 @@ case "${1:-}" in
     ;;
   run-viewer)
     cd "$ROOT"
+    # Small RAM footprint by default: one Stockfish for eval bar and move marks, Hash 64 MB, 1 thread.
+    export AICHESS_ONE_ENGINE="${AICHESS_ONE_ENGINE:-1}" AICHESS_ENGINE_HASH_MB="${AICHESS_ENGINE_HASH_MB:-64}"
+    export AICHESS_ENGINE_THREADS="${AICHESS_ENGINE_THREADS:-1}"
     args=(tools/llm_tournament_viewer.py --host "$VIEWER_HOST" --port "$VIEWER_PORT" --follow "$LIVE/current.json")
+    if [[ "${AI_CHESS_STREAM_LAYOUT:-0}" == "1" ]]; then args+=(--stream-layout); fi
     if [[ -x "$ENGINE" ]]; then args+=(--engine "$ENGINE"); else args+=(--no-analysis); fi
     if [[ "${AI_CHESS_COMMENTARY:-1}" == "1" ]]; then
       load_env

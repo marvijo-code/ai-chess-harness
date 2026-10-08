@@ -652,10 +652,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--preflight", action="store_true", help="one real move per AI player, then exit")
     parser.add_argument("--segment", help="'White name,Black name': a short real game, then exit")
     parser.add_argument("--plies", type=int, default=10)
+    # Test overrides (a short scratch tournament): never needed by the service.
+    parser.add_argument("--max-plies", type=int, help="override maxPlies (games are adjudicated drawn at this ply)")
+    parser.add_argument("--pause-seconds", type=float, help="override forever.pauseSeconds")
+    parser.add_argument("--no-reflection", action="store_true", help="skip the post-game memory reflection calls")
     args = parser.parse_args(argv)
 
     cfg = load_forever_config(args.config)
     fv = cfg["forever"]
+    if args.max_plies:
+        cfg["maxPlies"] = args.max_plies
+    if args.pause_seconds is not None:
+        fv["pauseSeconds"] = args.pause_seconds
+    if args.no_reflection:
+        fv["reflection"] = False
     live_dir = args.live_dir.resolve()
     repo_root = (args.memory_repo or Path(fv["memoryRepo"])).resolve()
     ensure_repo(repo_root, None if args.memory_repo else fv.get("memoryRemote"), log)
