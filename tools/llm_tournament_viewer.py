@@ -2406,8 +2406,11 @@ def analyse_position(engine, board, depth: int = NAG_DEPTH) -> dict:
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg"}
 
 
-def start_commentator(state_path: Path | None, log=print):
-    """Commentator for the state file, or None when the module or the state is missing."""
+def start_commentator(state_path: Path | None, log=print, follow_dir: Path | None = None):
+    """Commentator for the state file, or None when the module or the state is missing.
+
+    follow_dir (the viewer runs without --state): the commentator follows the newest tournament file there,
+    so a new tournament the runner starts gets its own commentary (memory reset and a fresh intro)."""
     if state_path is None:
         log("commentary off: no tournament state file to follow")
         return None
@@ -2420,8 +2423,10 @@ def start_commentator(state_path: Path | None, log=print):
         return None
     state_path = Path(state_path)
     try:
-        commentator = Commentator(state_path=state_path, out_dir=state_path.parent / f"{state_slug(state_path)}-commentary", log=log)
-        commentator.start()
+        commentator = Commentator(state_path=state_path, out_dir=state_path.parent / f"{state_slug(state_path)}-commentary",
+                                  log=log, follow_dir=follow_dir)
+        if commentator.start() is False:
+            return None
     except Exception as exc:
         log(f"commentary off: Commentator failed to start ({exc})")
         return None
@@ -2787,34 +2792,17 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"analysis off: engine not found at {args.engine}", flush=True)
     if args.commentary:
-        def attach(sp: Path | None):
-            commentator = start_commentator(sp)
-            if commentator is not None and Handler.annotator is not None:
-                commentator.marks_provider = lambda: Handler.annotator.annotations(sp)
-                commentator.positions_provider = lambda: Handler.annotator.known(sp)
-            return commentator
-
-        current = Handler.current_state()
-        Handler.commentator = attach(current)
-        if Handler.follow is not None:
-            def follow_commentary(current=current) -> None:
-                # A new tournament: the old commentator stops, a new one follows the new state file.
-                while True:
-                    time.sleep(5)
-                    latest = Handler.current_state()
-                    if latest is None or latest == current or not latest.exists():
-                        continue
-                    print(f"follow: tournament changed to {latest.name}; restarting commentary", flush=True)
-                    old = Handler.commentator
-                    if old is not None:
-                        try:
-                            old.stop()
-                        except Exception:
-                            pass
-                    Handler.commentator = attach(latest)
-                    current = latest
-
-            threading.Thread(target=follow_commentary, daemon=True).start()
+        # One commentator for the life of the viewer. Without --state (and with --follow) it follows the newest
+        # tournament file in the live dir: the runner writes the pointer's state every few seconds, so that is
+        # the tournament the pointer names. It switches itself (memory reset, fresh intro) and keeps counting
+        # clip numbers across tournaments, so the relay never sees a clip number twice.
+        start_path = Handler.current_state()
+        Handler.commentator = start_commentator(start_path,
+                                                follow_dir=None if Handler.state_path else Handler.live_dir)
+        if Handler.commentator is not None and Handler.annotator is not None:
+            # The commentator's own state_path: it moves to the next tournament file when the runner starts one.
+            Handler.commentator.marks_provider = lambda: Handler.annotator.annotations(Handler.commentator.state_path)
+            Handler.commentator.positions_provider = lambda: Handler.annotator.known(Handler.commentator.state_path)
     if Handler.follow is not None:
         print(f"follow: {Handler.follow} -> {Handler.current_state()}", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
