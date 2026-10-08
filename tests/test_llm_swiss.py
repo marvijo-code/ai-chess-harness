@@ -69,6 +69,36 @@ class SwissPairingTest(unittest.TestCase):
         self.assertEqual(rows["Grok"]["invalid_attempts"], 3)
 
 
+class DeadDrawOnFlagTest(unittest.TestCase):
+    """FIDE 6.9 / 7.5.5: a flag or forfeit is a draw when the opponent cannot checkmate."""
+
+    def result(self, fen, loser):
+        import chess
+
+        return swiss.loss_or_dead_draw(chess.Board(fen), loser)
+
+    def test_bare_king_cannot_win_on_time(self):
+        import chess
+
+        # Tournament #1 r4b2: GPT-6.1 Sol (White, K+Q) flagged against Sonnet 5.5's bare king.
+        self.assertEqual(self.result("8/8/8/8/1QK5/8/8/k7 w - - 1 68", chess.WHITE), "1/2-1/2")
+        self.assertEqual(self.result("8/8/8/8/1QK5/8/8/k7 b - - 1 68", chess.BLACK), "1-0")
+
+    def test_lone_minor_piece_cannot_win_on_time(self):
+        import chess
+
+        self.assertEqual(self.result("8/8/4k3/8/8/2B5/8/4K3 b - - 0 50", chess.BLACK), "1/2-1/2")
+        self.assertEqual(self.result("8/8/4k3/8/8/2n5/8/4K3 w - - 0 50", chess.WHITE), "1/2-1/2")
+
+    def test_mating_material_still_wins_on_time(self):
+        import chess
+
+        self.assertEqual(self.result("8/8/4k3/8/8/2R5/8/4K3 b - - 0 50", chess.BLACK), "1-0")
+        # A knight can still mate a king whose own rook blocks an escape square, so the flag loses.
+        self.assertEqual(self.result("8/8/4k3/4r3/8/2N5/8/4K3 b - - 0 50", chess.BLACK), "1-0")
+        self.assertEqual(self.result("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", chess.WHITE), "0-1")
+
+
 class ThinkTimeTest(unittest.TestCase):
     def test_codex_turn_events_bracket_think_time(self):
         lines = [(10.0, '{"type":"thread.started"}\n'), (12.0, '{"type":"turn.started"}\n'),
