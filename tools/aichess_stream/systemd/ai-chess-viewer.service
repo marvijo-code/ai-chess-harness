@@ -11,9 +11,10 @@ User=__USER__
 Group=__USER__
 WorkingDirectory=__HOME__/ai-chess
 Environment=PYTHONUNBUFFERED=1
-Environment="AICHESS_VIEWER_ARGS=--port 8770 --follow out/live/current.json --engine __HOME__/sf19/stockfish/stockfish-linux-x86-64-universal --commentary"
+Environment=PATH=__HOME__/.local/bin:__HOME__/bin:/opt/node-v24.18.0-linux-x64/bin:/usr/local/bin:/usr/bin:/bin
+UnsetEnvironment=ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY OPENAI_BASE_URL OPENROUTER_API_KEY
 EnvironmentFile=-__HOME__/.config/ai-chess/services.env
-ExecStart=/usr/bin/python3 tools/llm_tournament_viewer.py $AICHESS_VIEWER_ARGS
+ExecStart=/bin/bash __HOME__/ai-chess/run-ai-chess-forever.sh run-viewer
 Restart=always
 RestartSec=5
 OOMScoreAdjust=-100
