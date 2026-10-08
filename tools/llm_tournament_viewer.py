@@ -82,7 +82,7 @@ body.stream .boards > .card[data-game]:nth-child(n+3) { display: none; }
 body.stream .side { position: static; max-height: none; height: 100%; overflow: hidden; display: flex; flex-direction: column; gap: 14px; }
 body.stream .side > .card { flex: 0 0 auto; }
 body.stream .side > .card:not(#standingsCard):not(#agentsCard):not(#bracketCard) { display: none; }
-body.stream #agentsCard { flex: 0 1 auto; min-height: 0; overflow: hidden; }
+body.stream #agentsCard { flex: 0 0 auto; }   /* never clipped: fitStream() shrinks the whole column instead */
 body.stream #agents .ag-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 body.stream .ticker { display: none !important; }
 body.stream .champ-btn { display: none; }
