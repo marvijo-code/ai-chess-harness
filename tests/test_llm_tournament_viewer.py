@@ -1,5 +1,7 @@
 import json
 import math
+import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -465,7 +467,8 @@ class PageTest(unittest.TestCase):
 
     def test_auto_focus_present(self):
         for needle in ("data-toggle-autofocus", "Auto-focus: <b>", 'store("swissAutoFocus"', "following the commentary",
-                       "AUTO_GAP_MS = 20000", "history.replaceState", "focusPinned"):
+                       "function chooseFocus(s)", "history.replaceState", "focusPinned", 'params.get("dwell")', 'params.get("minDwell")',
+                       'data-part="strip"', "function liveStripGrid(curId)", "the only game still playing"):
             self.assertIn(needle, viewer.PAGE, needle)
         # auto switches never pin the commentator: only a focus the viewer chose is sent as a pin
         self.assertIn("const want = focusId && focusPinned && data.games && data.games[focusId] ? focusId : null;", viewer.PAGE)
@@ -502,9 +505,136 @@ class PageTest(unittest.TestCase):
         # the grid view keeps the full standings panel
         self.assertIn('id="standingsCard"', page)
 
+    def test_stream_starts_with_auto_focus_on(self):
+        # the stream's Chrome profile may hold an old "off": stream mode never reads it
+        self.assertIn('let autoFocus = STREAM || store("swissAutoFocus") !== "off";', viewer.PAGE)
+        # the live stream never runs the recorder's time-lapse tour
+        self.assertIn("if (HOSTED || STREAM) { tourPending = false; return; }", viewer.PAGE)
+        # stream focus keeps the side column (standings, notes and cache) and drops the in-card copies
+        self.assertIn("body.stream.focus-mode .side { display: flex; }", viewer.PAGE)
+        self.assertIn("body.stream .card.focused .lb-side, body.stream .card.focused .lb-under, body.stream .card.focused .mini-bk { display: none; }", viewer.PAGE)
+
     def test_no_external_assets(self):
         self.assertNotIn("http://", viewer.PAGE.replace("http://www.w3.org", ""))
         self.assertNotIn("https://", viewer.PAGE)
+
+
+def chooser_source() -> str:
+    page = viewer.PAGE
+    return page[page.index("// FOCUS-CHOOSER-START"):page.index("// FOCUS-CHOOSER-END")]
+
+
+NODE = shutil.which("node")
+MIN, MAX, LINGER, FRESH = 15000, 45000, 8000, 20000
+SIMULATION_JS = """
+let seed = 7; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+const ids = ["a", "b", "c", "d"], shown = {}, moved = {}, ev = {};
+let current = null, since = 0, liveAt = 0, clip = null, clipEnd = 0;
+const dwells = [];
+for (let t = 0; t < 3600 * 1000; t += 1000) {
+  const n = t < 1200000 ? 2 : t < 2400000 ? 3 : 4;
+  const live = ids.slice(0, n).map((id, i) => {
+    if (rnd() < 0.05) { moved[id] = t; ev[id] = rnd() < 0.3 ? "check" : ""; }
+    return { id, board: i + 1, movedAt: moved[id] || 0, event: ev[id] || "", shownAt: shown[id] || 0 };
+  });
+  if (t >= clipEnd) { clip = rnd() < 0.5 ? ids[Math.floor(rnd() * n)] : null; clipEnd = t + 8000 + Math.floor(rnd() * 12000); }
+  if (current) { shown[current] = t; liveAt = t; }
+  const p = chooseFocus({ now: t, current, since, currentLiveAt: liveAt, live, clip, minMs: 15000, maxMs: 45000, lingerMs: 8000, freshMs: 20000 });
+  if (p.id !== current) { if (current) dwells.push(t - since); current = p.id; since = t; shown[current] = t; }
+}
+const seen = {}; for (const id of ids) seen[id] = !!shown[id];
+console.log(JSON.stringify({ dwells, seen }));
+"""
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class FocusChooserTest(unittest.TestCase):
+    """chooseFocus() from the page, run in node: which board the stream camera shows."""
+
+    def run_js(self, body: str):
+        script = chooser_source() + "\n" + body
+        out = subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60, check=True).stdout
+        return json.loads(out)
+
+    def choose(self, **s):
+        s.setdefault("now", 1_000_000)
+        s.setdefault("current", None)
+        s.setdefault("since", 0)
+        s.setdefault("currentLiveAt", 0)
+        s.setdefault("clip", None)
+        s.setdefault("live", [])
+        s.update(minMs=MIN, maxMs=MAX, lingerMs=LINGER, freshMs=FRESH)
+        return self.run_js(f"console.log(JSON.stringify(chooseFocus({json.dumps(s)})));")
+
+    @staticmethod
+    def g(gid, board, moved_at=0, event="", shown_at=0):
+        return {"id": gid, "board": board, "movedAt": moved_at, "event": event, "shownAt": shown_at}
+
+    def test_no_game_live_shows_all_boards(self):
+        self.assertIsNone(self.choose()["id"])
+        # a focused game that just ended keeps its result up for a moment, then the overview
+        now = 1_000_000
+        self.assertEqual(self.choose(current="r1b1", currentLiveAt=now - 3000)["id"], "r1b1")
+        self.assertIsNone(self.choose(current="r1b1", currentLiveAt=now - LINGER - 1)["id"])
+
+    def test_one_live_game_is_focused_and_kept(self):
+        now = 1_000_000
+        live = [self.g("r1b2", 2)]
+        self.assertEqual(self.choose(live=live), {"id": "r1b2", "why": "the only game still playing"})
+        # no dwell limit when it is the only one: it stays for as long as it plays
+        self.assertEqual(self.choose(live=live, current="r1b2", since=now - 30 * 60000)["id"], "r1b2")
+        # the board that just ended shows its result first, then the last live game
+        self.assertEqual(self.choose(live=live, current="r1b1", currentLiveAt=now - 2000)["id"], "r1b1")
+        self.assertEqual(self.choose(live=live, current="r1b1", currentLiveAt=now - LINGER - 1)["id"], "r1b2")
+
+    def test_minimum_dwell_beats_the_commentary(self):
+        now = 1_000_000
+        live = [self.g("a", 1), self.g("b", 2)]
+        self.assertEqual(self.choose(live=live, current="a", since=now - 10000, clip="b")["id"], "a")
+        self.assertEqual(self.choose(live=live, current="a", since=now - MIN, clip="b"), {"id": "b", "why": "following the commentary"})
+
+    def test_maximum_dwell_is_a_hard_cap(self):
+        now = 1_000_000
+        live = [self.g("a", 1), self.g("b", 2)]
+        self.assertEqual(self.choose(live=live, current="a", since=now - 30000)["id"], "a")
+        self.assertEqual(self.choose(live=live, current="a", since=now - MAX)["id"], "b")
+        # even while the commentary talks about the board on screen
+        self.assertEqual(self.choose(live=live, current="a", since=now - MAX, clip="a")["id"], "b")
+        # the commentary's board stays inside the limits
+        self.assertEqual(self.choose(live=live, current="a", since=now - 30000, clip="a"), {"id": "a", "why": "following the commentary"})
+
+    def test_fresh_event_switches_early(self):
+        now = 1_000_000
+        quiet_a = self.g("a", 1, moved_at=now - 60000)
+        hot_b = self.g("b", 2, moved_at=now - 3000, event="capture")
+        self.assertEqual(self.choose(live=[quiet_a, hot_b], current="a", since=now - 20000), {"id": "b", "why": "a fresh capture"})
+        # not before the minimum dwell
+        self.assertEqual(self.choose(live=[quiet_a, hot_b], current="a", since=now - 5000)["id"], "a")
+        # a fresh event on the board on screen keeps it
+        hot_a = self.g("a", 1, moved_at=now - 2000, event="check")
+        self.assertEqual(self.choose(live=[hot_a, hot_b], current="a", since=now - 20000)["id"], "a")
+        # a plain new move elsewhere does not pull the camera before the cap
+        moved_b = self.g("b", 2, moved_at=now - 3000)
+        self.assertEqual(self.choose(live=[quiet_a, moved_b], current="a", since=now - 20000)["id"], "a")
+
+    def test_rotation_visits_the_longest_unseen_board(self):
+        now = 1_000_000
+        live = [self.g("a", 1, shown_at=now), self.g("b", 2, shown_at=now - 10000), self.g("c", 3, shown_at=now - 100000)]
+        self.assertEqual(self.choose(live=live, current="a", since=now - MAX)["id"], "c")
+        # a fresh event wins unless a board has waited a whole rotation (boards x max dwell)
+        live[1] = self.g("b", 2, moved_at=now - 1000, event="check", shown_at=now - 10000)
+        self.assertEqual(self.choose(live=live, current="a", since=now - MAX)["id"], "b")
+        live[2] = self.g("c", 3, shown_at=now - 3 * MAX)
+        self.assertEqual(self.choose(live=live, current="a", since=now - MAX)["id"], "c")
+
+    def test_simulated_hour_never_breaks_the_dwell_limits(self):
+        # Two to four live boards, random moves, checks and commentary clips, 1 s ticks for an hour.
+        out = self.run_js(SIMULATION_JS)
+        dwells = out["dwells"]
+        self.assertGreater(len(dwells), 60)
+        self.assertLessEqual(max(dwells), MAX)
+        self.assertGreaterEqual(min(dwells), MIN)
+        self.assertTrue(all(out["seen"].values()), out["seen"])
 
 
 KNOCKOUT_STATE = {

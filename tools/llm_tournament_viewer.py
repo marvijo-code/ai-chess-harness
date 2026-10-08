@@ -210,6 +210,31 @@ body.focus-mode .boards { display: block; }
 }
 .card.switch-in { animation: switch-in .45s ease both; }
 @keyframes switch-in { from { opacity: .2; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* Auto-focus strip: the other live boards beside the focused one (the camera moves between them). */
+.lstrip { display: none; }
+.card.focused .lstrip.on { display: block; flex: none; margin-bottom: 6px; padding: 7px 9px; border-radius: 10px; background: #12161c; border: 1px solid var(--line); min-width: 0; }
+.ls-title { display: flex; justify-content: space-between; align-items: baseline; gap: 2px 10px; flex-wrap: wrap; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.ls-title .n { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.ls-bar { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, .1); overflow: hidden; margin-top: 5px; }
+.ls-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #f5b942); transition: width .5s linear; }
+.ls-grid:not(:empty) { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; margin-top: 7px; }
+.ls-g { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 8px; align-items: center; padding: 4px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); cursor: pointer; min-width: 0; }
+.ls-g:hover { border-color: var(--accent); }
+.ls-g.air { border-color: rgba(91, 157, 255, .65); }
+.board.ls-b { width: 80px; border-radius: 4px; }
+.ls-b .coord { display: none; }
+.ls-t { min-width: 0; display: flex; flex-direction: column; font-size: 12px; line-height: 1.2; }
+.ls-n { font-weight: 600; overflow-wrap: anywhere; }
+.ls-v { color: var(--muted); font-size: 10.5px; }
+.ls-m { color: var(--ok); font-size: 11px; margin-top: 2px; }
+.ls-g.air .ls-m { color: var(--accent); }
+/* Stream + auto-focus: the big board, its info column with the strip, and the side column (standings with
+   the Stockfish depth, notes and cache, bracket) together on one 1920x1080 screen. */
+body.stream.focus-mode main { grid-template-columns: minmax(0, 1fr) 440px; }
+body.stream.focus-mode .side { display: flex; }
+body.stream .boards > .card.focused { max-width: none; --fboard: max(340px, min(calc(100vh - var(--chrome-h, 62px) - 262px), calc(100vw - 934px)));
+  grid-template-columns: var(--fboard) minmax(0, 1fr); grid-template-areas: "head head" "boardcol infocol"; }
+body.stream .card.focused .lb-side, body.stream .card.focused .lb-under, body.stream .card.focused .mini-bk { display: none; }
 /* ---- round robin + knockouts ---------------------------------------------------------------- */
 .chip.stage { color: var(--ok); border-color: rgba(52, 199, 123, .45); }
 .chip.stage.ko { color: #ffd479; border-color: rgba(245, 185, 66, .6); background: rgba(245, 185, 66, .09); font-weight: 600; }
@@ -540,15 +565,23 @@ const replayEval = {};        // "game|ply" -> Stockfish result for replay posit
 let replayFetchAt = 0;
 const cards = new Map();      // game id -> persistent card DOM + render keys
 
-// Auto-focus: the page follows the board being commentated (or, without commentary, the most
-// interesting live board). A board the viewer picks by hand pins the commentator and turns it off.
-let autoFocus = !STREAM && store("swissAutoFocus") !== "off";
+// Auto-focus: one live game = that board, large, until it ends; two or more = the camera rotates between
+// them (at most FOCUS_MAX_MS per board, at least FOCUS_MIN_MS so it never flickers), switching early to
+// the board the commentary talks about or to a fresh check, capture or mistake; no game live = all boards.
+// The stream always starts with it on (its Chrome profile may hold an old "off"). A board the viewer picks
+// by hand pins the commentator and turns it off. ?dwell=<s>&minDwell=<s> change the limits.
+let autoFocus = STREAM || store("swissAutoFocus") !== "off";
 let focusPinned = false;      // true = the viewer chose this board (pins the commentator); false = auto-focus put it there
 let autoReason = "";          // why auto-focus shows the current board (chip text)
-let lastAutoSwitch = 0;       // last self-driven switch (never more often than AUTO_GAP_MS)
-let lastClipAt = 0;           // last commentary clip start or end: the commentary drives auto-focus while recent
-const AUTO_GAP_MS = 20000;
-const CLIP_DRIVE_MS = 60000;
+const FOCUS_MAX_MS = Math.max(5, Number(params.get("dwell")) || 45) * 1000;
+const FOCUS_MIN_MS = Math.min(FOCUS_MAX_MS, Math.max(1, Number(params.get("minDwell")) || 15) * 1000);
+const FOCUS_LINGER_MS = 8000;  // a focused game that just ended stays up this long so its result can be read
+const FOCUS_FRESH_MS = 20000;  // a move this recent counts as fresh
+let focusSince = 0;           // when auto-focus put the current board up
+let focusLiveAt = 0;          // last time the focused game was seen live
+let shownAt = {};             // game id -> last time it was the focused board (the rotation visits the longest unseen first)
+let moveSeen = {};            // game id -> {n, at}: when this page saw its move count change
+const focusLog = window.AICHESS_FOCUS_LOG = [];   // [{t, id, why, live}] every auto switch, for tests and stream checks
 const introForced = /(^#|[#&])intro\b/.test(location.hash);
 const champForced = /(^#|[#&])champion\b/.test(location.hash);
 
@@ -561,7 +594,7 @@ if (focusId) { focusPinned = true; autoFocus = false; }   // a #focus link is th
 function setAutoFocus(on) {
   autoFocus = on;
   store("swissAutoFocus", on ? "on" : "off");
-  if (on) { focusPinned = false; lastAutoSwitch = 0; autoTick(true); }
+  if (on) { focusPinned = false; focusSince = Date.now() - FOCUS_MIN_MS; autoTick(); }
   else if (focusId) focusPinned = true;   // stay on this board, now as the viewer's own choice
   render();
 }
@@ -724,7 +757,7 @@ function cardFor(id) {
     <div class="boardcol"><div class="pbar" data-part="black"></div>
       <div class="board-wrap" data-part="wrap"><div class="evalbar" data-part="evalbar" title="Stockfish evaluation, White at the bottom"><div class="white" data-part="evalwhite"></div><div class="mid"></div></div><div class="board" data-part="board"></div></div>
       <div class="pbar" data-part="white"></div><div class="caption" data-part="caption" style="display:none"></div><div class="lb lb-under" data-part="lbunder"></div></div>
-    <div class="infocol"><div class="mini-bk" data-part="minibk"></div><div class="evalline" data-part="evalline"></div><div class="comment" data-part="comment"></div>
+    <div class="infocol"><div class="lstrip" data-part="strip"><div data-part="striphead"></div><div class="ls-grid" data-part="stripgrid"></div></div><div class="mini-bk" data-part="minibk"></div><div class="evalline" data-part="evalline"></div><div class="comment" data-part="comment"></div>
       <div class="comment" data-part="result" style="display:none"></div><div class="moves" data-part="moves"></div><div class="nav" data-part="nav"></div>
       <div class="thinking" data-part="thinking"><button type="button" class="think-head" data-part="thinkhead" data-think-toggle aria-expanded="false"></button><div class="think-body" data-part="thinkbody" hidden></div></div></div>
     <div class="lb lb-side" data-part="lbside"></div>`;
@@ -933,6 +966,10 @@ function updateCard(c, game, now) {
   updateBar(p.black, game, "black", now);
   updateBar(p.white, game, "white", now);
   setHTML(p.minibk, focused ? miniBracketHtml(game.id) : "");
+  const strip = focused && autoFocus && !focusPinned;   // only when the camera moves by itself
+  p.strip.classList.toggle("on", strip);
+  setHTML(p.striphead, strip ? liveStripHead(game.id, Date.now()) : "");
+  setHTML(p.stripgrid, strip ? liveStripGrid(game.id) : "");
   const lb = focused ? leaderboardHtml(game) : "";   // CSS shows it beside the board (wide) or under it
   setHTML(p.lbside, lb);
   setHTML(p.lbunder, lb);
@@ -1027,7 +1064,7 @@ function render() {
     `<span class="chip"><b>${cfg.maxAttempts}</b> tries per move, then forfeit</span>`,
     fmt ? `<span class="chip">Round robin, top <b>${koSize}</b> to the knockouts, Elo start <b>${cfg.startElo}</b></span>`
       : `<span class="chip">Swiss, Elo start <b>${cfg.startElo}</b>, K=${cfg.eloK}</span>`,
-    `<span class="chip btn ${autoFocus ? "on" : ""}" data-toggle-autofocus title="${autoFocus ? "The page follows the commentary, or the most interesting live board. Click a board yourself to stay on it." : "Click to follow the commentary, or the most interesting live board, automatically"}">Auto-focus: <b>${autoFocus ? "on" : "off"}</b>${autoFocus && focusId && autoReason ? ` - ${esc(autoReason)}` : ""}</span>`,
+    `<span class="chip btn ${autoFocus ? "on" : ""}" data-toggle-autofocus title="${autoFocus ? `One live game: the camera stays on it. Several: it moves between them, ${Math.round(FOCUS_MIN_MS / 1000)} to ${Math.round(FOCUS_MAX_MS / 1000)} s each, following the commentary. Click a board yourself to stay on it.` : "Click to let the camera follow the live games and the commentary automatically"}">Auto-focus: <b>${autoFocus ? "on" : "off"}</b>${autoFocus && focusId && autoReason ? ` - ${esc(autoReason)}` : ""}</span>`,
     data.analysis_engine ? `<span class="chip btn ${analysisOn ? "on" : ""}" data-toggle-analysis title="Viewer-only engine analysis; the AI players never see it">${esc(data.analysis_engine)} analysis: <b>${analysisOn ? "on" : "off"}</b></span>` : "",
     `<span class="chip btn ${soundOn ? "on" : ""}" data-toggle-sound title="A short click whenever a new move appears on a visible board">Move sound: <b>${soundOn ? "on" : "off"}</b></span>`,
     data.commentary ? `<span class="chip btn ${commentaryOn ? (needGesture ? "wait" : "on") : ""}" data-toggle-commentary title="Spoken commentary: it moves between the leaders and the most interesting games; in focus mode it stays on the focused board">Commentary: <b>${commentaryOn ? (needGesture ? "click to start" : "on") : "muted"}</b></span>` : "",
@@ -1271,47 +1308,103 @@ function leaderboardHtml(game) {
   return html + `</div>`;
 }
 
-// ---- auto-focus without commentary: the most interesting live board -----------------------------
-function liveClockMs(game, side, now) {
-  let clk = game.clocks ? game.clocks[side] : ((data.config || {}).timeControlMs || 0);
-  if (game.thinking && game.thinking.side === side && game.thinking.since_epoch_ms) clk -= Math.max(0, now - game.thinking.since_epoch_ms);
-  return clk;
+// ---- auto-focus: which board the camera shows ----------------------------------------------------
+// chooseFocus is pure (the tests run it in node). s = {now, current, since, currentLiveAt, clip, minMs, maxMs,
+// lingerMs, freshMs, live: [{id, board, movedAt, event, shownAt}]}. It returns {id, why}: id null = all
+// boards; why "" = keep the reason already shown. One live game: that board until it ends. Two or more:
+// at least minMs per board, never more than maxMs; inside that the commentary's board wins, then a fresh
+// check, capture or mistake; the next board is the one unseen longest (fresh events first).
+// FOCUS-CHOOSER-START
+function chooseFocus(s) {
+  const live = s.live || [];
+  const cur = s.current ? live.find(g => g.id === s.current) || null : null;
+  const fresh = g => s.now - (g.movedAt || 0) < s.freshMs;
+  const lingering = !!s.current && !cur && s.now - (s.currentLiveAt || 0) < s.lingerMs;
+  if (lingering) return { id: s.current, why: "the result" };   // a game that just ended: show its result first
+  if (!live.length) return { id: null, why: "" };
+  if (live.length === 1) return { id: live[0].id, why: "the only game still playing" };
+  const clip = s.clip ? live.find(g => g.id === s.clip) || null : null;
+  const pick = cands => {
+    const rank = g => (s.now - (g.shownAt || 0) >= live.length * s.maxMs ? 0 : fresh(g) && g.event ? 1 : fresh(g) ? 2 : 3);
+    const best = cands.slice().sort((a, b) => rank(a) - rank(b) || (a.shownAt || 0) - (b.shownAt || 0)
+      || (a.board || 0) - (b.board || 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0];
+    const why = fresh(best) && best.event ? `a fresh ${best.event}` : fresh(best) ? "a fresh move" : "rotating the live boards";
+    return { id: best.id, why };
+  };
+  if (!cur) return clip ? { id: clip.id, why: "following the commentary" } : pick(live);
+  const held = s.now - (s.since || 0);
+  const others = live.filter(g => g.id !== cur.id);
+  if (held >= s.maxMs) {                              // hard cap while another game is live
+    return clip && clip.id !== cur.id ? { id: clip.id, why: "following the commentary" } : pick(others);
+  }
+  if (held < s.minMs) return { id: cur.id, why: "" };   // no flicker
+  if (clip) return { id: clip.id, why: "following the commentary" };
+  const hot = others.filter(g => fresh(g) && g.event);
+  if (hot.length && !(fresh(cur) && cur.event)) return pick(hot);
+  return { id: cur.id, why: "" };
 }
-function boardInterest(game, now) {
-  const hit = pairingOf(game.id), pr = hit ? hit.pairing : null;
-  const moves = game.moves || [], total = moves.length;
-  const ann = (data.annotations || {})[game.id] || {};
-  const rank = Math.min(standingRow(game.white).rank || 99, standingRow(game.black).rank || 99);
-  const san = total ? String(moves[total - 1].san || "") : "";
-  const bad = m => m === "??" || m === "?";
-  let tier = 5, why = "the leaders";
-  if ((pr && pr.match === "final") || game.match === "final") { tier = 0; why = "the Final"; }
-  else if (isArmageddon(game, pr)) { tier = 1; why = "Armageddon"; }
-  else if (bad(ann[total]) || bad(ann[total - 1])) { tier = 2; why = "a fresh mistake"; }
-  else if (/[+#x]/.test(san)) { tier = 3; why = /[+#]/.test(san) ? "a check" : "a capture"; }
-  else if (Math.min(liveClockMs(game, "white", now), liveClockMs(game, "black", now)) < 60000) { tier = 4; why = "a clock under 1:00"; }
-  return { id: game.id, tier, rank, why };
+// FOCUS-CHOOSER-END
+function lastMoveAt(game, now) {
+  const n = (game.moves || []).length;
+  const seen = moveSeen[game.id];
+  if (!seen || seen.n !== n) moveSeen[game.id] = { n, at: seen ? now : 0 };   // first sight: age unknown, not fresh
+  if (!n) return 0;
+  const t = game.thinking && Number(game.thinking.since_epoch_ms);   // the side to move started thinking = the last move
+  return t ? t - serverSkewMs : moveSeen[game.id].at;
 }
-function clipDriven(now) {
-  return !!(data.commentary && commentaryOn && !needGesture && lastClipAt && (clipPlaying || now - lastClipAt < CLIP_DRIVE_MS));
+function boardEvent(game) {
+  const moves = game.moves || [], n = moves.length;
+  if (!n) return "";
+  const mark = ((data.annotations || {})[game.id] || {})[n];
+  if (mark === "??") return "blunder";
+  if (mark === "?") return "mistake";
+  const san = String(moves[n - 1].san || "");
+  return san.includes("#") ? "checkmate" : san.includes("+") ? "check" : san.includes("x") ? "capture" : "";
 }
-let focusLiveAt = 0;          // last time the auto-focused game was seen live (a finished game stays up a while)
-function autoTick(force) {
-  if (!autoFocus || !data || !data.games || tour) return;
-  const now = Date.now();
-  if (clipDriven(now)) { autoReason = "following the commentary"; return; }   // the commentary picks the board
-  const live = Object.values(data.games).filter(g => g.status === "live");
-  if (!live.length) return;                                     // nothing live: keep what is shown
-  const scored = live.map(g => boardInterest(g, now)).sort((a, b) => a.tier - b.tier || a.rank - b.rank || (a.id < b.id ? -1 : 1));
-  const best = scored[0];
-  const cur = focusId ? scored.find(x => x.id === focusId) : null;
-  if (cur) focusLiveAt = now;
-  if (cur && best.tier >= cur.tier) { autoReason = cur.why; return; }   // as interesting as any: stay
-  const since = cur ? lastAutoSwitch : Math.max(lastAutoSwitch, focusLiveAt);
-  if (!force && focusId && data.games[focusId] && now - since < AUTO_GAP_MS) return;
-  autoReason = best.why;
-  lastAutoSwitch = now;
-  setFocus(best.id, { auto: true });
+function autoTick() {
+  if (!autoFocus || !data || !data.games || tour || (focusId && focusPinned)) return;
+  const now = Date.now(), games = data.games;
+  const live = Object.values(games).filter(g => g.status === "live")
+    .map(g => ({ id: g.id, board: g.board || 0, movedAt: lastMoveAt(g, now), event: boardEvent(g), shownAt: shownAt[g.id] || 0 }));
+  const current = focusId && games[focusId] ? focusId : null;
+  if (current && games[current].status === "live") focusLiveAt = now;
+  if (current) shownAt[current] = now;
+  const clip = clipPlaying && caption && caption.game ? caption.game : null;
+  const pick = chooseFocus({ now, current, since: focusSince, currentLiveAt: focusLiveAt, live, clip,
+    minMs: FOCUS_MIN_MS, maxMs: FOCUS_MAX_MS, lingerMs: FOCUS_LINGER_MS, freshMs: FOCUS_FRESH_MS });
+  if (pick.why) autoReason = pick.why;
+  if (pick.id === focusId) return;
+  focusSince = now;
+  if (pick.id) { shownAt[pick.id] = now; focusLiveAt = now; }
+  focusLog.push({ t: now, id: pick.id, why: pick.why, live: live.map(g => g.id) });
+  if (focusLog.length > 300) focusLog.splice(0, focusLog.length - 300);
+  setFocus(pick.id, { auto: true });
+}
+// The other live boards beside the focused one: viewers see that the camera moves between them.
+// Two parts so the countdown can tick without redrawing the small boards.
+function liveOthers(curId) {
+  return Object.values(data.games || {}).filter(g => g.status === "live" && g.id !== curId).sort((a, b) => (a.board || 0) - (b.board || 0));
+}
+function liveStripHead(curId, now) {
+  const games = data.games || {};
+  if (!liveOthers(curId).length) {
+    const live = games[curId] && games[curId].status === "live";
+    return `<div class="ls-title"><span>Auto-focus</span><span class="n">${live ? "the only game still playing: the camera stays here until it ends" : "no other game is playing"}</span></div>`;
+  }
+  const held = Math.max(0, now - focusSince);
+  const left = Math.max(0, Math.ceil((FOCUS_MAX_MS - held) / 1000));
+  const pct = Math.min(100, held / FOCUS_MAX_MS * 100).toFixed(0);
+  return `<div class="ls-title"><span>Also live</span><span class="n">the camera moves on within ${left} s</span></div><div class="ls-bar"><i style="width:${pct}%"></i></div>`;
+}
+function liveStripGrid(curId) {
+  return liveOthers(curId).map(g => {
+    const moves = g.moves || [], n = moves.length;
+    const air = clipPlaying && caption && caption.game === g.id;
+    return `<div class="ls-g ${air ? "air" : ""}" data-focus="${esc(g.id)}" title="Show this board">`
+      + `<div class="board ls-b">${boardHtml(fenBoard(g.fen), n ? moves[n - 1].uci : null)}</div>`
+      + `<div class="ls-t"><span class="ls-n">${esc(g.white || "")}</span><span class="ls-v">vs</span><span class="ls-n">${esc(g.black || "")}</span>`
+      + `<span class="ls-m">${air ? "on commentary" : `move ${Math.floor(n / 2) + 1}`}</span></div></div>`;
+  }).join("");
 }
 
 // ---- opening hook: a 6 second title card --------------------------------------------------
@@ -1385,7 +1478,8 @@ function tourReady() {
 function directorTick() {
   if (!data || !data.id) return;
   if (data.current_round !== roundSeen) { roundSeen = data.current_round; roundSeenAt = Date.now(); }
-  if (HOSTED) { tourPending = false; return; }       // the public page never tours (the tour is a recorder feature)
+  // The public page and the live stream never tour: the time lapse is a recorder feature (sped up afterwards).
+  if (HOSTED || STREAM) { tourPending = false; return; }
   if (tour) { runTour(); return; }
   const ids = tourBoards();
   if (!tourReady() || ids.length < TOUR_MIN_BOARDS || !stateMoving()) { tourPending = false; return; }
@@ -1411,7 +1505,7 @@ function tourShow(i) {
   tour.dwellAt = Date.now();
   const id = tour.ids[i];
   autoReason = "time lapse tour";
-  lastAutoSwitch = Date.now();
+  focusSince = Date.now();
   setFocus(id, { auto: true });
   director({ k: "tour", a: "board", game: id, n: i + 1, of: tour.ids.length });
   renderRibbon();
@@ -1428,7 +1522,7 @@ function endTour(why) {
   if (!tour) return;
   tour = null;
   lastTourEnd = Date.now();
-  lastAutoSwitch = 0;
+  focusSince = Date.now() - FOCUS_MIN_MS;   // auto-focus may move on at once
   if (!HOSTED) fetch(`${API_BASE}/api/commentary/tour?on=0`, { method: "POST", cache: "no-store" }).catch(() => {});
   director({ k: "tour", a: "end", why });
   renderRibbon();
@@ -1899,7 +1993,6 @@ function showOnAir(gameId) {
 }
 function clipDone() {
   clearTimeout(clipTimer);
-  lastClipAt = Date.now();
   clipPlaying = false;
   caption = null;
   render();
@@ -1912,12 +2005,10 @@ function playNextClip() {
     const clip = commentaryQueue.shift();
     if (!clipWanted(clip)) continue;
     clipPlaying = true;
-    lastClipAt = Date.now();
     caption = { game: clip.game, text: clip.text || "", event: clip.event || "", tag: clipTag(clip) };
     if (clip.event) heardEvents.add(clip.event);
-    // Auto-focus follows the commentary: show the board this clip is about.
-    if (autoFocus && clip.game !== focusId) { autoReason = "following the commentary"; lastAutoSwitch = Date.now(); setFocus(clip.game, { auto: true }); }
-    else if (autoFocus) autoReason = "following the commentary";
+    // Auto-focus follows the commentary: it shows the board this clip is about as soon as the dwell limits allow.
+    autoTick();
     render();
     showOnAir(clip.game);
     if (clip.audio) {
@@ -2051,9 +2142,17 @@ function newTournament() {
   champSeen = null;
   cards.forEach(c => c.el.remove());
   cards.clear();
+  document.getElementById("boards")._sig = null;   // same game ids in the new tournament: attach the new cards
   selected = null;
   replayPly = null;
-  if (focusId) { focusId = null; document.body.classList.remove("focus-mode"); }
+  if (focusId) {
+    focusId = null;
+    document.body.classList.remove("focus-mode");
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* ignore */ }
+  }
+  focusPinned = false;
+  focusSince = 0; focusLiveAt = 0; shownAt = {}; moveSeen = {};
+  autoReason = "";
 }
 async function poll() {
   try {
@@ -2081,7 +2180,7 @@ async function poll() {
       polls++;
       soundForNewMoves();
       render();
-      autoTick(false);
+      autoTick();
       maybeIntro();
       maybeRoundCard();
       directorTick();
@@ -2108,6 +2207,7 @@ async function poll() {
 poll();
 setInterval(poll, HOSTED ? 2000 : 1000);
 setInterval(render, 500);   // clocks tick between polls; unchanged parts are not touched
+setInterval(autoTick, 500);   // the dwell limits hold to half a second, also when a poll is slow
 if (HOSTED) setInterval(renderBanner, 1000);   // the age grows between answers, also with no data at all
 </script>
 </body>
