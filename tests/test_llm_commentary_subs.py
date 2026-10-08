@@ -256,6 +256,31 @@ class WavTest(unittest.TestCase):
         self.assertEqual(c._done_ply.get("r1b1"), 1, "the moment is not retried (no second call for it)")
 
 
+class LineTest(unittest.TestCase):
+    def test_long_passages_end_on_a_whole_sentence(self):
+        text = ("Welcome to the arena. " * 40).strip()
+        got = lc.clean_line(text)
+        self.assertLessEqual(len(got), lc.MAX_LINE_CHARS)
+        self.assertTrue(got.endswith("arena."))
+        self.assertEqual(lc.clean_line('"Knight takes e5!"'), "Knight takes e5!")
+
+    def test_the_write_ahead_lead_follows_measured_latency(self):
+        c, _ = make(live_state(moves=1))
+        c.gating = False
+        c._events_done.add("opening")
+
+        def slow_voice(_text):
+            time.sleep(0.05)
+            return b"\x00\x00" * 24000 * 40   # a 40 s clip
+
+        c.tts_backend = slow_voice
+        c._prep_s = 20.0                       # writing plus voicing has been taking ~20 s
+        clip = c.tick()
+        wait = c._busy_until - clip["t"]
+        self.assertLess(wait, 40 - lc.CLI_LEAD_SECONDS - 4, "a slow route starts the next line earlier than the fixed lead")
+        self.assertGreater(wait, 20, "but not so early that lines pile up")
+
+
 class PlayersTest(unittest.TestCase):
     def test_stockfish_depth_is_named_and_each_rise_is_announced_once(self):
         state = live_state(moves=1)

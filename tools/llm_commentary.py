@@ -152,6 +152,7 @@ TTS_ROUTES = ("edge", "openrouter", "off")
 EDGE_VOICE = "en-US-AndrewMultilingualNeural"
 EDGE_RATE = "+8%"
 EDGE_TIMEOUT_SECONDS = 45
+MAX_LINE_CHARS = 700     # an intro naming ten players runs ~450 characters (2026-10-08 VPS run)
 MAX_CLIP_SECONDS = 80     # the relay takes at most 4 MB per clip: 80 s of 24 kHz mono 16-bit is 3.84 MB
 
 # Spoken names: say the version numbers the way a commentator would.
@@ -541,7 +542,11 @@ def clean_line(text: str) -> str:
     text = " ".join(text.split())
     if len(text) > 1 and text[0] == text[-1] and text[0] in "\"'":
         text = text[1:-1].strip()
-    return text[:400]
+    if len(text) <= MAX_LINE_CHARS:
+        return text
+    cut = text[:MAX_LINE_CHARS]
+    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    return cut[: end + 1] if end > MAX_LINE_CHARS // 3 else cut.rsplit(" ", 1)[0]   # whole sentences, never mid-word
 
 
 # ---- route selection ------------------------------------------------------------------------------
@@ -789,6 +794,8 @@ class Commentator:
         self._busy_until = 0.0
         self._backoff_until = 0.0
         self._capped_logged = False
+        self._last_text_s = 0.0
+        self._prep_s: float | None = None
         self.gating = True        # False = every new move may get a line (old behaviour, tests)
         self._pos_cache: tuple[float, dict] = (0.0, {})
         # The viewer hands over its live (in memory) Stockfish marks and scores; the sidecar file lags behind them.
@@ -1182,7 +1189,12 @@ class Commentator:
 
     def _publish(self, game_id: str, text: str, ply: int, extra: dict) -> dict | None:
         """Voice a line and hand it to the viewer at once; a failed voice keeps the host silent for this line."""
+        started = time.monotonic()
         voiced = self._speak(text)
+        # Writing plus voicing time (EMA): the next line starts this long before the current one ends.
+        # Measured 2026-10-08 on the VPS: codex luna 3.6-4.5 s, edge-tts 0.5-0.85x the clip length.
+        prep = self._last_text_s + (time.monotonic() - started)
+        self._prep_s = prep if self._prep_s is None else 0.7 * self._prep_s + 0.3 * prep
         if voiced is None:
             return None
         pcm, generation_id = voiced
@@ -1198,6 +1210,7 @@ class Commentator:
             self._last_said[game_id] = now
             # The next line is written while this one plays, so it is ready as this one ends.
             lead = LEAD_SECONDS if self.route in METERED_ROUTES else CLI_LEAD_SECONDS
+            lead = max(lead, min(30.0, (self._prep_s or 0.0) + 1.0))
             self._quiet_since = None
             self._busy_until = now + max(MIN_GAP_SECONDS, seconds - lead)
             self._quiet_from = now + seconds + 1.5
@@ -1403,6 +1416,7 @@ class Commentator:
             return None
         self._capped_logged = False
         self.calls_total += 1
+        asked = time.monotonic()
         user = mode + "\n\n" + facts
         try:
             if self.text_backend is not None:
@@ -1421,6 +1435,7 @@ class Commentator:
             self.log(f"commentary: {self.route} {self.model} failed ({type(exc).__name__}: {str(exc)[:300]}); "
                      f"pausing {wait}s")
             return None
+        self._last_text_s = time.monotonic() - asked
         return clean_line(raw)
 
     def _ask_codex(self, user: str) -> str:
