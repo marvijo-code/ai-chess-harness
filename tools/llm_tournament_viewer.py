@@ -2372,8 +2372,11 @@ def analyse_position(engine, board, depth: int = NAG_DEPTH) -> dict:
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg"}
 
 
-def start_commentator(state_path: Path | None, log=print):
-    """Commentator for the state file, or None when the module or the state is missing."""
+def start_commentator(state_path: Path | None, log=print, follow_dir: Path | None = None):
+    """Commentator for the state file, or None when the module or the state is missing.
+
+    follow_dir (the viewer runs without --state): the commentator follows the newest tournament file there,
+    so a new tournament the runner starts gets its own commentary (memory reset and a fresh intro)."""
     if state_path is None:
         log("commentary off: no tournament state file to follow")
         return None
@@ -2386,8 +2389,10 @@ def start_commentator(state_path: Path | None, log=print):
         return None
     state_path = Path(state_path)
     try:
-        commentator = Commentator(state_path=state_path, out_dir=state_path.parent / f"{state_slug(state_path)}-commentary", log=log)
-        commentator.start()
+        commentator = Commentator(state_path=state_path, out_dir=state_path.parent / f"{state_slug(state_path)}-commentary",
+                                  log=log, follow_dir=follow_dir)
+        if commentator.start() is False:
+            return None
     except Exception as exc:
         log(f"commentary off: Commentator failed to start ({exc})")
         return None
@@ -2719,11 +2724,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"analysis off: engine not found at {args.engine}", flush=True)
     if args.commentary:
-        Handler.commentator = start_commentator(Handler.state_path or newest_state(Handler.live_dir))
+        Handler.commentator = start_commentator(Handler.state_path or newest_state(Handler.live_dir),
+                                                follow_dir=None if Handler.state_path else Handler.live_dir)
         if Handler.commentator is not None and Handler.annotator is not None:
-            sp = Handler.state_path or newest_state(Handler.live_dir)
-            Handler.commentator.marks_provider = lambda: Handler.annotator.annotations(sp)
-            Handler.commentator.positions_provider = lambda: Handler.annotator.known(sp)
+            # The commentator's own state_path: it moves to the next tournament file when the runner starts one.
+            Handler.commentator.marks_provider = lambda: Handler.annotator.annotations(Handler.commentator.state_path)
+            Handler.commentator.positions_provider = lambda: Handler.annotator.known(Handler.commentator.state_path)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"tournament viewer on http://{args.host}:{args.port}/", flush=True)
     server.serve_forever()

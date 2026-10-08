@@ -15,18 +15,44 @@ def state_with(moves, status="live", result="*", termination=""):
                                            "result": result, "termination": termination, "moves": moves}}}
 
 
+LINE = "Grok **storms** in \u2014 Knight to f3!"   # markdown and a long dash that must be cleaned
+
+
 class FakeHttp:
+    """Records every text and voice call in the OpenRouter request shape (also the subscription fake)."""
+
     def __init__(self):
         self.calls = []
 
     def __call__(self, path, body):
         self.calls.append((path, body))
         if path == "/chat/completions":
-            return json.dumps({"choices": [{"message": {"content": "Grok **storms** in — Knight to f3!"}}],
-                               "usage": {"cost": 0.0001}}).encode(), {}
+            return json.dumps({"choices": [{"message": {"content": LINE}}], "usage": {"cost": 0.0001}}).encode(), {}
         if path == "/audio/speech":
             return b"\x00\x00" * 24000, {"X-Generation-Id": "gen-1"}
         return json.dumps({"data": {"total_cost": 0.0028}}).encode(), {}
+
+    def text(self, system, user, max_tokens, temperature):
+        self.calls.append(("/chat/completions", {"messages": [{"role": "system", "content": system},
+                                                              {"role": "user", "content": user}]}))
+        return LINE
+
+    def tts(self, text):
+        self.calls.append(("/audio/speech", {"input": text}))
+        return b"\x00\x00" * 24000
+
+
+def fake(c):
+    """No network: the subscription route and the voice are replaced by a recorder."""
+    c.http = FakeHttp()
+    c.text_backend = c.http.text
+    c.tts_backend = c.http.tts
+    c.runner = no_cli
+    return c.http
+
+
+def no_cli(*_args, **_kwargs):
+    raise AssertionError("a unit test reached a real CLI")
 
 
 class CommentaryTest(unittest.TestCase):
@@ -35,7 +61,7 @@ class CommentaryTest(unittest.TestCase):
         path = tmp / "t1-tournament.json"
         path.write_text(json.dumps(state), encoding="utf-8")
         c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=budget)
-        c.http = FakeHttp()
+        fake(c)
         c.cost_async = False
         c.gating = False
         c.always = True
@@ -47,15 +73,14 @@ class CommentaryTest(unittest.TestCase):
         clip = c.tick()
         self.assertEqual(clip["ply"], 1)
         self.assertNotIn("*", clip["text"])
-        self.assertNotIn("—", clip["text"], "no dashes in spoken lines")
+        self.assertNotIn("\u2014", clip["text"], "no dashes in spoken lines")
         self.assertAlmostEqual(clip["seconds"], 1.0)
         self.assertIsNotNone(c.audio_path(clip["audio"]))
         self.assertEqual(c.clips("r1b1", 0)[0]["seq"], clip["seq"])
-        self.assertAlmostEqual(c.spent_usd, 0.0029)
+        self.assertEqual(c.spent_usd, 0.0, "subscription route and free voice: no spend")
+        self.assertEqual(c.calls_total, 1)
         tts = [b for p, b in c.http.calls if p == "/audio/speech"][0]
-        self.assertEqual((tts["model"], tts["response_format"]), (lc.TTS_MODEL, "pcm"))
-        self.assertEqual(tts["input"], clip["text"], "only the commentary line is spoken, never the style prompt")
-        self.assertEqual(tts["instructions"], lc.TTS_STYLE)
+        self.assertEqual(tts["input"], clip["text"], "only the commentary line is spoken")
 
     def test_no_new_move_means_no_call_and_the_gap_is_respected(self):
         c, _ = self.make(state_with([{"ply": 1, "side": "white", "san": "e4"}]))
@@ -64,10 +89,18 @@ class CommentaryTest(unittest.TestCase):
         self.assertIsNone(c.tick(), "same position: nothing to say")
         self.assertEqual(len(c.http.calls), calls)
 
-    def test_budget_cap_stops_all_calls(self):
+    def test_budget_cap_stops_metered_calls_but_not_subscription_calls(self):
         c, _ = self.make(state_with([{"ply": 1, "side": "white", "san": "e4"}]), budget=0.0)
-        self.assertIsNone(c.tick())
-        self.assertEqual(c.http.calls, [])
+        self.assertIsNotNone(c.tick(), "spend is 0 on a subscription: the dollar budget does not block it")
+        tmp = Path(tempfile.mkdtemp())
+        path = tmp / "t1-tournament.json"
+        path.write_text(json.dumps(state_with([{"ply": 1, "side": "white", "san": "e4"}])), encoding="utf-8")
+        metered = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=0.0, route="openrouter",
+                                 tts="openrouter", allow_openrouter=True)
+        metered.http = FakeHttp()
+        metered.always, metered.gating = True, False
+        self.assertIsNone(metered.tick())
+        self.assertEqual(metered.http.calls, [])
 
     def test_audio_names_cannot_escape_the_folder(self):
         c, _ = self.make(state_with([]))
@@ -100,7 +133,7 @@ class RoamingTest(unittest.TestCase):
         path.write_text(json.dumps(state), encoding="utf-8")
         (tmp / "t1-annotations.json").write_text(json.dumps({"annotations": {"r1b2": {"2": "??"}}}), encoding="utf-8")
         c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=1.0)
-        c.http = FakeHttp()
+        fake(c)
         c.gating = False
         c.always = True
         lc.time.sleep = lambda _s: None
@@ -172,7 +205,7 @@ class ListenerTest(unittest.TestCase):
         path = tmp / "t1-tournament.json"
         path.write_text(json.dumps(state_with([{"ply": 1, "side": "white", "san": "e4"}])), encoding="utf-8")
         c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=1.0)
-        c.http = FakeHttp()
+        fake(c)
         c.cost_async = False
         c.gating = False
         c.always = False
@@ -247,7 +280,8 @@ class RoundShowTest(unittest.TestCase):
         self.assertTrue(clip and clip.get("thinking"))
         self.assertEqual(clip["ply"], 8)
         prompt = [b for p, b in c.http.calls if p == "/chat/completions"][-1]["messages"]
-        self.assertEqual(prompt[0]["content"], lc.THINKING_PROMPT)
+        self.assertEqual(prompt[0]["content"], lc.HOST_PROMPT, "one static prefix for every call (input cache)")
+        self.assertTrue(prompt[1]["content"].startswith(lc.THINKING_PROMPT))
         self.assertIn("the pin on e5", prompt[1]["content"])
         self.assertIn("Muse Spark one point three (white) is thinking", prompt[1]["content"])
         c._busy_until = c._quiet_from = 0
@@ -292,7 +326,7 @@ class DirectorTest(unittest.TestCase):
         (tmp / "t1-annotations.json").write_text(json.dumps({"annotations": {"r5b1": marks or {}},
                                                               "positions": positions or {}}), encoding="utf-8")
         c = lc.Commentator(path, tmp / "out", log=lambda _m: None, budget_usd=1.0)
-        c.http = FakeHttp()
+        fake(c)
         c.cost_async = False
         c.always = True
         c._events_done.update({"opening", "round-5"})
