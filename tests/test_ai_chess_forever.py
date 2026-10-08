@@ -443,7 +443,9 @@ class ForeverLoopTest(unittest.TestCase):
         repo = mem.MemoryRepo(root / "memory")
         cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
         self.assertNotIn("Gemini 3.8 Flash", [p["name"] for p in cfg["players"]], "disabled players stay out")
-        self.assertEqual(cfg["rounds"], 5)
+        self.assertNotIn("MiMo V2.6 Pro", [p["name"] for p in cfg["players"]])
+        self.assertEqual(cfg["rounds"], 5, "5 players: Sonnet, GPT, DeepSeek, GLM, Stockfish")
+        cfg["forever"]["rosterCheck"] = False
         hooks = forever.ForeverHooks(cfg, repo, None, live)
         played = []
         original = swiss.run_tournament
@@ -494,6 +496,212 @@ class BinaryResolutionTest(unittest.TestCase):
         os.environ["LLM_CODEX_BIN"] = "/opt/codex"
         self.addCleanup(lambda: os.environ.pop("LLM_CODEX_BIN") if old is None else os.environ.update(LLM_CODEX_BIN=old))
         self.assertEqual(sp.resolve_binary("codex"), "/opt/codex")
+
+
+class RosterTest(unittest.TestCase):
+    def cfg(self):
+        cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
+        cfg["forever"]["reflection"] = False
+        return cfg
+
+    def test_players_that_hit_a_limit_are_benched_and_the_rest_play(self):
+        root = tmpdir(self)
+        live = root / "live"
+        repo = mem.MemoryRepo(root / "memory")
+        cfg = self.cfg()
+        failing = {"GLM 5.3 Flash": 'HTTP 429: {"error":{"type":"GoUsageLimitError","message":"Go usage limit exceeded"}}',
+                   "DeepSeek V4.1 Flash": "HTTP 403: AccessDenied.Unpurchased"}
+
+        def prober(player, cfg_, live_dir, timeout):
+            if player["name"] in failing:
+                reason = failing[player["name"]]
+                return {"name": player["name"], "ok": False, "reason": reason, "kind": forever.bench_kind(reason),
+                        "resets_at": "2026-10-14T07:24:17.000Z" if "Go usage" in reason else None, "route": player["provider"]}
+            return {"name": player["name"], "ok": True, "move": "1...e5"}
+
+        seen = []
+        original_run, original_check = swiss.run_tournament, forever.check_roster
+        swiss.run_tournament = lambda state, c, path, log: (seen.append(state), state.update(finished=True), 0)[-1]
+        forever.check_roster = lambda c, d: original_check(c, d, 5, prober)
+        self.addCleanup(setattr, swiss, "run_tournament", original_run)
+        self.addCleanup(setattr, forever, "check_roster", original_check)
+        hooks = forever.ForeverHooks(cfg, repo, None, live)
+        forever.run_forever(cfg, live, repo, None, hooks, max_tournaments=1, sleep=lambda s: None)
+        state = seen[0]
+        self.assertEqual([p["name"] for p in state["players"]], ["Sonnet 5.5", "GPT-6.1 Sol", "Stockfish 19"])
+        self.assertEqual(state["config"]["rounds"], 3)
+        kinds = {b["name"]: (b["kind"], b["resets_at"]) for b in state["benched"]}
+        self.assertEqual(kinds["GLM 5.3 Flash"], ("subscription limit", "2026-10-14T07:24:17.000Z"))
+        self.assertEqual(kinds["DeepSeek V4.1 Flash"][0], "no subscription funds or plan")
+        md = (root / "memory" / "tournaments" / f"{state['id']}.md").read_text(encoding="utf-8")
+        self.assertIn("## Benched for this tournament", md)
+        self.assertIn("GLM 5.3 Flash", md)
+        self.assertEqual(forever.bench_label(state["benched"][0]).split(":")[0], "benched")
+
+    def test_too_few_players_waits_and_checks_again(self):
+        root = tmpdir(self)
+        live = root / "live"
+        repo = mem.MemoryRepo(root / "memory")
+        cfg = self.cfg()
+        calls = {"n": 0}
+
+        def prober(player, cfg_, live_dir, timeout):
+            ok = calls["n"] >= len(cfg["players"]) or player["provider"] == "uci"
+            calls["n"] += 1
+            return {"name": player["name"], "ok": ok, "reason": "" if ok else "usage limit", "kind": "subscription limit"}
+
+        slept, seen = [], []
+        original_run, original_check = swiss.run_tournament, forever.check_roster
+        swiss.run_tournament = lambda state, c, path, log: (seen.append(state), state.update(finished=True), 0)[-1]
+        forever.check_roster = lambda c, d: original_check(c, d, 5, prober)
+        self.addCleanup(setattr, swiss, "run_tournament", original_run)
+        self.addCleanup(setattr, forever, "check_roster", original_check)
+        forever.run_forever(cfg, live, repo, None, forever.ForeverHooks(cfg, repo, None, live), max_tournaments=1,
+                            sleep=slept.append)
+        self.assertEqual(slept[0], cfg["forever"]["rosterRetrySeconds"])
+        self.assertEqual(len(seen[0]["players"]), 5, "the second check found everyone")
+
+    def test_bench_kinds(self):
+        self.assertEqual(forever.bench_kind('HTTP 429: {"error":{"code":"1113","message":"Insufficient balance"}}'),
+                         "no subscription funds or plan")
+        self.assertEqual(forever.bench_kind("Throttling.AllocationQuota: 5-hour allowance used"), "subscription limit")
+        self.assertEqual(forever.bench_kind("claude error: Not logged in. Please run /login"), "login or key problem")
+        self.assertEqual(forever.bench_kind("illegal move after 3 attempts"), "preflight failed")
+
+
+class SmallTournamentTest(unittest.TestCase):
+    def test_three_players_play_a_final_only_and_games_respect_the_board_cap(self):
+        names = ["A", "B", "C"]
+        cfg = dict(swiss.DEFAULTS, format="round-robin+knockout", knockoutSize=4, rounds=3, players=[{"name": n} for n in names])
+        state = {"id": "t3", "title": "t3", "config": cfg, "players": cfg["players"], "seed_order": names, "rounds": [], "games": {}}
+        for number in range(1, 4):
+            pairings, bye = swiss.make_pairings(state, number)
+            rnd = {"round": number, "bye": bye, "pairings": []}
+            for board, (white, black) in enumerate(pairings, start=1):
+                gid = f"r{number}b{board}"
+                rnd["pairings"].append({"white": white, "black": black, "game_id": gid, "board": board})
+                state["games"][gid] = {"result": "1-0" if white < black else "0-1", "end_kind": "board", "white": white, "black": black}
+            state["rounds"].append(rnd)
+        running, peak = [0], [0]
+        lock = threading.Lock()
+
+        def fake_play(game_id, white, black, cfg_, ts, live_pgn, log, replace_engine, start_ms=None):
+            with lock:
+                running[0] += 1
+                peak[0] = max(peak[0], running[0])
+            import time as _t
+            _t.sleep(0.05)
+            ts.state["games"][game_id].update(result="1-0", status="finished", end_kind="board")
+            with lock:
+                running[0] -= 1
+
+        tmp = tmpdir(self)
+        old = swiss._play_game, swiss.write_archive, swiss.GAME_SLOTS
+        swiss._play_game, swiss.write_archive = fake_play, (lambda _s: None)
+        swiss.GAME_SLOTS = threading.Semaphore(1)
+        try:
+            ts = swiss.TournamentState(state, tmp / "t3-tournament.json")
+            ok = swiss.run_knockouts(state, ts, cfg, lambda n: n, lambda e: None, lambda _m: None)
+            threads = [threading.Thread(target=swiss.play_game, args=(gid, None, None, cfg, ts, None, None, None))
+                       for gid in list(state["games"])[:3]]
+            for th in threads:
+                th.start()
+            for th in threads:
+                th.join()
+        finally:
+            swiss._play_game, swiss.write_archive, swiss.GAME_SLOTS = old
+        self.assertTrue(ok)
+        ko = state["knockout"]
+        self.assertEqual([m["id"] for m in ko["matches"]], ["final"])
+        self.assertEqual(ko["champion"], ko["matches"][0]["a"])
+        self.assertIsNone(ko["third"])
+        self.assertEqual(peak[0], 1, "GAME_SLOTS caps the boards played at once")
+
+
+class AnthropicRouteTest(unittest.TestCase):
+    def client(self):
+        os.environ.setdefault("ALIBABA_TOKEN_PLAN_API_KEY", "test-key")
+        client = sp.SubscriptionChessClient("alibaba", lambda _m: None)
+        client.model, client.board_image, client.conversation = "deepseek-v4.1-flash", False, True
+        client.context = dict(CONTEXT)
+        return client
+
+    def test_payload_cache_breakpoints_thinking_and_session_prefix(self):
+        client = self.client()
+        seen = []
+        replies = iter(['{"move": "Nf3"}', '{"move": "Bb5"}'])
+
+        def stream(url, payload, headers, timeout, cutoff):
+            seen.append((url, json.loads(json.dumps(payload)), headers))
+            return {"content": next(replies), "reasoning": "x", "cut": False, "finish": "end_turn",
+                    "usage": {"input_tokens": 69, "cache_read_input_tokens": 1920, "cache_creation_input_tokens": 0, "output_tokens": 900}}
+
+        client.http_stream = stream
+        h1 = ["e2e4", "e7e5"]
+        board = chess.Board()
+        for m in h1:
+            board.push_uci(m)
+        client.choose_move(board, GO, h1)
+        h2 = h1 + ["g1f3", "b8c6"]
+        for m in h2[2:]:
+            board.push_uci(m)
+        client.choose_move(board, GO, h2)
+        (url, first, headers), (_u, second, _h) = seen
+        self.assertTrue(url.endswith("/apps/anthropic/v1/messages"))
+        self.assertEqual(headers["anthropic-version"], "2023-06-01")
+        self.assertTrue(headers["Authorization"].startswith("Bearer "))
+        self.assertEqual(first["system"][0]["text"], sp.SYSTEM_PROMPT)
+        self.assertIn("cache_control", first["system"][0])
+        self.assertEqual(first["thinking"], {"type": "enabled", "budget_tokens": 16000})
+        self.assertEqual(first["max_tokens"], sp.HTTP_MAX_TOKENS)
+        self.assertTrue(first["stream"])
+        self.assertNotIn("stream_options", first)
+        self.assertNotIn("system", [m["role"] for m in first["messages"]])
+        self.assertTrue(first["messages"][0]["content"][0]["text"].startswith(sp.RULES_TEXT))
+        self.assertIn("cache_control", first["messages"][-1]["content"][-1])
+        # The second request starts with the first one's text, then the reply, then the new turn (breakpoint last).
+        self.assertEqual(second["messages"][0]["content"], first["messages"][0]["content"][0]["text"])
+        self.assertEqual(second["messages"][1], {"role": "assistant", "content": '{"move": "Nf3"}'})
+        self.assertIn("cache_control", second["messages"][2]["content"][-1])
+        self.assertEqual(client.last_report["usage"], {"calls": 1, "input": 1989, "cached": 1920, "output": 900})
+
+    def test_sse_stream_parsing_and_max_tokens_as_length(self):
+        from http.server import BaseHTTPRequestHandler
+
+        events = [{"type": "message_start", "message": {"usage": {"input_tokens": 69, "cache_read_input_tokens": 1920}}},
+                  {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Hmm, c5."}},
+                  {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": '{"move": "c5"}'}},
+                  {"type": "message_delta", "delta": {"stop_reason": "max_tokens"}, "usage": {"output_tokens": 950}},
+                  {"type": "message_stop"}]
+
+        class SSE(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                for event in events:
+                    self.wfile.write(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode())
+
+            def log_message(self, *a):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), SSE)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        out = self.client()._http_stream(f"http://127.0.0.1:{server.server_address[1]}/", {"stream": True}, {}, 10, None)
+        self.assertEqual(out["content"], '{"move": "c5"}')
+        self.assertEqual(out["reasoning"], "Hmm, c5.")
+        self.assertEqual(out["finish"], "length")
+        self.assertEqual(sp.http_usage(out["usage"]), {"input": 1989, "cached": 1920, "output": 950})
+
+    def test_alibaba_errors(self):
+        self.assertTrue(sp.provider_unavailable("HTTP 403: AccessDenied.Unpurchased"))
+        self.assertTrue(sp.limit_error("HTTP 429: Throttling.AllocationQuota"))
+        epoch = sp.limit_reset_epoch('{"code":"Throttling.AllocationQuota","reset_at":"2026-10-08T15:00:00Z"}')
+        import datetime as dt
+        self.assertEqual(epoch, dt.datetime(2026, 10, 8, 15, 0, tzinfo=dt.timezone.utc).timestamp())
 
 
 if __name__ == "__main__":

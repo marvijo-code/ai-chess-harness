@@ -677,10 +677,14 @@ function renderAgents() {
   if (!card) return;
   const notes = data.latest_notes || {}, cache = data.cache_stats || {};
   const names = (data.players || []).map(p => p.name).filter(n => notes[n] || cache[n]);
-  card.style.display = names.length ? "" : "none";
-  if (!names.length) return;
+  const benched = data.benched || [];
+  card.style.display = names.length || benched.length ? "" : "none";
+  if (!names.length && !benched.length) return;
   const pctTxt = v => (v === null || v === undefined) ? "" : `${(v * 100).toFixed(1)}%`;
-  setHTML(document.getElementById("agents"), names.map(n => {
+  const when = iso => { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); };
+  const benchRows = benched.map(b => `<div class="ag"><span class="ag-n">${esc(b.name)}</span><span class="ag-c">sits out</span>`
+    + `<span class="ag-note" title="${esc(b.reason || "")}">benched: ${esc(b.kind || "preflight failed")}${b.resets_at ? ", resets " + esc(when(b.resets_at)) : ""}</span></div>`).join("");
+  setHTML(document.getElementById("agents"), benchRows + names.map(n => {
     const c = cache[n] || {}, note = notes[n];
     const hit = c.warm_hit_rate !== null && c.warm_hit_rate !== undefined ? c.warm_hit_rate : c.hit_rate;
     return `<div class="ag"><span class="ag-n">${esc(n)}</span><span class="ag-c" title="Cached input tokens / all input tokens (without each game's first 3 moves)">${hit !== undefined && hit !== null ? "cache " + pctTxt(hit) : ""}</span>`

@@ -559,7 +559,7 @@ def main() -> None:
             if command == "uci":
                 print("id name llm-chess-engine", flush=True)
                 print("id author marvijo/OpenRouter", flush=True)
-                print("option name Provider type combo default openrouter var openrouter var codex var claude var openrouter-chat var opencode-go var zai", flush=True)
+                print("option name Provider type combo default openrouter var openrouter var codex var claude var openrouter-chat var opencode-go var zai var alibaba", flush=True)
                 print(f"option name Model type string default {DEFAULT_MODEL}", flush=True)
                 print("option name Temperature type spin default 20 min 0 max 100", flush=True)
                 print("option name MaxAttempts type spin default 3 min 1 max 9", flush=True)

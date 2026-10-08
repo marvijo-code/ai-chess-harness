@@ -308,6 +308,12 @@ def tournament_markdown(state: dict) -> str:
         lines.append(f"Champion: **{ko['champion']}**, runner-up {ko.get('runner_up')}, third {ko.get('third')}.")
     if ladder:
         lines.append(f"Stockfish ladder: {ladder.get('player')} now plays at depth {ladder.get('depth')}.")
+    benched = state.get("benched") or []
+    if benched:
+        lines += ["", "## Benched for this tournament", "", "| Player | Route | Why | Resets (UTC) |", "| --- | --- | --- | --- |"]
+        for b in benched:
+            lines.append(f"| {b.get('name')} | {b.get('route') or ''} | {b.get('kind')}: {(b.get('reason') or '').replace('|', '/')[:160]} | "
+                         f"{b.get('resets_at') or 'not stated'} |")
     lines += ["", "## Round robin table", "", "| # | Player | Pts | Elo | W/D/L | Forfeits | Flags |",
               "| ---: | --- | ---: | ---: | --- | ---: | ---: |"]
     for r in state.get("standings") or []:

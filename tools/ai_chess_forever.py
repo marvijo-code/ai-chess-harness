@@ -40,8 +40,10 @@ DEFAULT_CONFIG = ROOT / "configs" / "ai-chess-vps.json"
 POINTER_NAME = "current.json"
 FOREVER_DEFAULTS = {"pauseSeconds": 120, "memoryRepo": str(ROOT / "out" / "ai-chess-agent-memory"), "memoryRemote": None,
                     "push": True, "ladderPlayer": "Stockfish 19", "ladderStartDepth": 4, "reflection": True,
-                    "reflectionTimeoutSeconds": 600, "marksWaitSeconds": 60}
+                    "reflectionTimeoutSeconds": 600, "marksWaitSeconds": 60, "rosterCheck": True,
+                    "rosterCheckTimeoutSeconds": 300, "minPlayers": 3, "rosterRetrySeconds": 900}
 PAUSED_RETRY_SECONDS = 300
+OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
 
 REFLECTION_SYSTEM = (
     "You are an AI chess player in a non-stop tournament against other AI players and a Stockfish ladder. "
@@ -353,6 +355,142 @@ class ForeverHooks(swiss.GameHooks):
 # ---------------------------------------------------------------- the loop
 
 
+# ---------------------------------------------------------------- roster check (benching)
+
+
+def bench_kind(reason: str) -> str:
+    import subscription_providers as sp
+
+    lowered = (reason or "").lower()
+    if any(m in lowered for m in ("insufficient balance", "1113", "unpurchased", "payment required", "credit balance",
+                                  "insufficient_quota", "http 402")):
+        return "no subscription funds or plan"
+    if any(m in lowered for m in ("not logged in", "/login", "unauthorized", "invalid api key", "http 401", "is not set")):
+        return "login or key problem"
+    if sp.limit_error(reason) or sp.provider_unavailable(reason):
+        return "subscription limit"
+    return "preflight failed"
+
+
+def opencode_go_reset(timeout: float = 15) -> str | None:
+    """The resetsAt of the OpenCode Go window that is rate limited (rolling, weekly or monthly), or None."""
+    import urllib.request
+
+    import subscription_providers as sp
+
+    key = os.environ.get("OPENCODE_GO_API_KEY") or sp._user_env("OPENCODE_GO_API_KEY")
+    if not key:
+        return None
+    request = urllib.request.Request(OPENCODE_GO_USAGE_URL, headers={"Authorization": f"Bearer {key}", "User-Agent": sp.BROWSER_UA})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            usage = (json.loads(response.read().decode("utf-8")) or {}).get("usage") or {}
+    except Exception:
+        return None
+    limited = [w.get("resetsAt") for w in usage.values() if isinstance(w, dict) and w.get("status") != "ok" and w.get("resetsAt")]
+    return max(limited) if limited else None
+
+
+def reset_time(player: dict, reason: str) -> str | None:
+    """ISO UTC reset time of a limit when the error or the provider states it."""
+    import datetime as dt
+
+    import subscription_providers as sp
+
+    if player.get("provider") == "opencode-go":
+        found = opencode_go_reset()
+        if found:
+            return found
+    epoch = sp.limit_reset_epoch(reason)
+    if epoch:
+        return dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return None
+
+
+def probe_player(player: dict, cfg: dict, live_dir: Path, timeout: float) -> dict:
+    """One real move (1.e4 ...?) on the player's route. A usage-limit wait ends the probe at once: the player is
+    benched, not waited for. Returns {"name", "ok", "move", "seconds", "reason", "kind", "resets_at"}."""
+    started = time.monotonic()
+    row = {"name": player["name"], "route": f"{player.get('provider')} {player.get('model')}", "ok": False}
+    engine = None
+    try:
+        engine = LlmEngine(player, cfg)
+        engine.new_game()
+        if not engine.is_uci:
+            path = live_dir / "contexts" / f"rostercheck-{slugify(player['name'])}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_text_retry(path, json.dumps({"memory": "", "header": "Roster check before the tournament. You play Black."}))
+            engine.send(f"setoption name GameContextFile value {path}")
+        engine.send("position startpos moves e2e4")
+        engine.send(engine.go_command(cfg["timeControlMs"], cfg["timeControlMs"], cfg["incrementMs"]))
+        deadline = time.monotonic() + timeout
+        seen: list[str] = []
+        outcome = None
+        with engine.cond:
+            while outcome is None:
+                while engine.lines and outcome is None:
+                    line = engine.lines.pop(0)
+                    seen.append(line)
+                    if line == "__EOF__":
+                        outcome = ("error", "engine exited")
+                    elif line.startswith("info string limitwait "):
+                        parts = line.split(maxsplit=4)
+                        outcome = ("limit", parts[4] if len(parts) > 4 else "usage limit")
+                    elif line.startswith("bestmove"):
+                        outcome = ("move", line.split()[1])
+                if outcome is None:
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        outcome = ("error", f"no answer within {timeout:.0f}s")
+                    else:
+                        engine.cond.wait(min(left, 1.0))
+        row["seconds"] = round(time.monotonic() - started, 1)
+        board = chess.Board()
+        board.push_uci("e2e4")
+        if outcome[0] == "move" and outcome[1] != "0000" and chess.Move.from_uci(outcome[1]) in board.legal_moves:
+            row.update(ok=True, move="1..." + board.san(chess.Move.from_uci(outcome[1])), usage=parse_usage(seen))
+            return row
+        reason = outcome[1] if outcome[0] != "move" else (parse_info(seen)[0] or "no legal move")
+        row["reason"] = " ".join(str(reason).split())[:240]
+    except Exception as exc:
+        row["reason"] = f"{type(exc).__name__}: {exc}"[:240]
+    finally:
+        if engine is not None:
+            try:
+                swiss.kill_engine_tree(engine) if not row.get("ok") else engine.close()
+            except Exception:
+                pass
+    row["kind"] = bench_kind(row.get("reason", ""))
+    row["resets_at"] = reset_time(player, row.get("reason", "")) if row["kind"] == "subscription limit" else None
+    return row
+
+
+def check_roster(cfg: dict, live_dir: Path, timeout: float | None = None, prober=None) -> tuple[list[dict], list[dict], list[dict]]:
+    """(playing players, benched entries, probe rows). Every enabled player gets one real move at the same time."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    timeout = float(timeout or cfg["forever"].get("rosterCheckTimeoutSeconds") or 300)
+    prober = prober or probe_player
+    players = list(cfg["players"])
+    with ThreadPoolExecutor(max_workers=max(1, len(players))) as pool:
+        rows = list(pool.map(lambda pl: prober(pl, cfg, live_dir, timeout), players))
+    playing, benched = [], []
+    for player, row in zip(players, rows):
+        if row.get("ok"):
+            playing.append(player)
+        else:
+            benched.append({"name": player["name"], "route": row.get("route"), "kind": row.get("kind") or "preflight failed",
+                            "reason": row.get("reason", ""), "resets_at": row.get("resets_at"), "checked_at": iso_now()})
+    return playing, benched, rows
+
+
+def bench_label(entry: dict) -> str:
+    text = f"benched: {entry.get('kind')}"
+    if entry.get("resets_at"):
+        text += f", resets {entry['resets_at']}"
+    return text
+
+
 def tournament_slug(number: int) -> str:
     return f"aichess-{number:04d}-{time.strftime('%Y%m%d-%H%M%S')}"
 
@@ -375,15 +513,33 @@ def run_forever(cfg: dict, live_dir: Path, repo: MemoryRepo, pusher: GitPusher |
                 status_path = Path(pointer["state_path"])
                 log(f"resuming Tournament #{state.get('number')} ({state['id']})")
         if state is None:
+            roster, benched = list(cfg["players"]), []
+            if cfg["forever"].get("rosterCheck", True):
+                log("roster check: one real move from every player")
+                roster, benched, rows = check_roster(cfg, live_dir)
+                for row in rows:
+                    log("ROSTER " + json.dumps({k: row.get(k) for k in ("name", "ok", "move", "seconds", "kind", "resets_at", "reason")}))
+            need = int(cfg["forever"].get("minPlayers") or 3)
+            if len(roster) < need:
+                wait = float(cfg["forever"].get("rosterRetrySeconds") or 900)
+                log(f"only {len(roster)} players can play (need {need}); checking again in {wait:.0f}s")
+                sleep(wait)
+                continue
             number = repo.next_tournament_number()
             if pointer and pointer.get("number"):
                 number = max(number, int(pointer["number"]) + 1)
             slug = tournament_slug(number)
-            state = swiss.new_state(cfg, slug, title=f"{cfg['title']} #{number}")
+            tcfg = dict(cfg, players=roster)
+            if tcfg.get("format") == "round-robin+knockout":
+                tcfg["rounds"] = swiss.max_rounds(len(roster))
+            state = swiss.new_state(tcfg, slug, title=f"{cfg['title']} #{number}")
             state["number"] = number
-            state["format"] = {"type": cfg.get("format"), "rr_rounds": cfg["rounds"], "ko_size": cfg.get("knockoutSize", 4)}
+            state["benched"] = benched
+            state["format"] = {"type": tcfg.get("format"), "rr_rounds": tcfg["rounds"],
+                               "ko_size": min(int(tcfg.get("knockoutSize", 4)), len(roster))}
             status_path = live_dir / f"{slug}-tournament.json"
-            log(f"starting Tournament #{number} ({slug}): " + ", ".join(p["name"] for p in cfg["players"]))
+            log(f"starting Tournament #{number} ({slug}): " + ", ".join(p["name"] for p in roster)
+                + ("; " + "; ".join(f"{b['name']} {bench_label(b)}" for b in benched) if benched else ""))
         state["ladder"] = hooks.ladder_view()
         swiss.TournamentState(state, status_path).save()
         write_pointer(live_dir, status_path, state)

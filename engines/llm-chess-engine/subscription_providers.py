@@ -42,10 +42,19 @@ HTTP_ROUTES = {
     "opencode-go": {"url": "https://opencode.ai/zen/go/v1/chat/completions", "key": "OPENCODE_GO_API_KEY", "style": "effort"},
     # Z.ai GLM Coding Plan subscription endpoint (the generic /api/paas/v4 bills pay-as-you-go).
     "zai": {"url": "https://api.z.ai/api/coding/paas/v4/chat/completions", "key": "ZAI_API_KEY", "style": "thinking"},
+    # Alibaba (Bailian) Token Plan subscription: Anthropic Messages wire only (the OpenAI path is 404).
+    # Measured 2026-10-08: deepseek-v4.1-flash and glm-5.3 answer; prefix caching is automatic and reported as
+    # cache_read_input_tokens (input_tokens is then only the uncached part).
+    "alibaba": {"url": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/v1/messages",
+                "key": "ALIBABA_TOKEN_PLAN_API_KEY", "style": "anthropic"},
 }
+# Anthropic-wire thinking budget per effort; max_tokens stays HTTP_MAX_TOKENS, so at least half of the output
+# room is left for the answer after the longest thinking (DeepSeek can otherwise spend it all on reasoning).
+ANTHROPIC_THINKING_BUDGET = {"low": 4000, "medium": 8000, "high": 16000, "xhigh": 16000, "max": 16000}
+ANTHROPIC_VERSION = "2023-06-01"
 PROVIDERS = CLI_PROVIDERS + tuple(HTTP_ROUTES)
 DEFAULT_MODELS = {"codex": "gpt-6-sol", "claude": "claude-sonnet-5-5", "openrouter-chat": "x-ai/grok-4.7",
-                  "opencode-go": "deepseek-v4.1-flash", "zai": "glm-5.3"}
+                  "opencode-go": "deepseek-v4.1-flash", "zai": "glm-5.3", "alibaba": "deepseek-v4.1-flash"}
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
 HTTP_MAX_TOKENS = 32000
 # A streaming reply that sends no bytes for this long is a gateway stall, not thinking
@@ -103,18 +112,21 @@ MARKER_UNSAFE = re.compile(r"[\s\[\]{};]+")
 # the game is voided and replayed later, never forfeited (2026-10-06: OpenCode Go hit its monthly limit).
 OPENROUTER_QUANTIZATIONS = ("fp8", "fp16", "bf16", "fp32", "unknown")
 UNAVAILABLE_MARKERS = ("usagelimit", "usage limit", "usage_limit", "insufficient balance", "insufficient_quota",
+                       "accessdenied.unpurchased", "throttling.allocationquota",
                        "exceeded your current quota", "credit balance", "payment required", "not logged in",
                        "please run /login", "invalid api key", "unauthorized", "http 401", "http 402", "http 403",
                        "no allowed providers")
 # A subscription usage or rate limit (forever tournament, LLM_LIMIT_WAIT=1): the engine waits and asks the
 # SAME move again once the limit resets. Never a forfeit, never a fallback move, never charged to the clock.
 LIMIT_MARKERS = ("usagelimit", "usage limit", "usage_limit", "rate limit", "rate_limit", "ratelimit", "too many requests",
+                 "throttling", "allocationquota", "unpurchased",
                  "hit your limit", "limit reached", "limit exceeded", "quota", "try again at", "try again in",
                  "overloaded", "capacity")
 LIMIT_429 = re.compile(r"(?:http|status|code)[^0-9]{0,4}429\b|\b429 too many", re.I)
 LIMIT_WAIT_FIRST_SECONDS = 60.0
 LIMIT_WAIT_MAX_SECONDS = 900.0
 CLAUDE_RESET = re.compile(r"usage limit reached\|(\d{9,11})", re.I)
+ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
 NOTE_MAX_CHARS = 200
 # Static rules for the cache-friendly prompt (forever tournament). Byte-identical for every player, game and
 # move: nothing in it may depend on the player, the game, the clock or the time of day.
@@ -525,11 +537,29 @@ def limit_error(text: str) -> bool:
     return any(marker in lowered for marker in LIMIT_MARKERS) or bool(LIMIT_429.search(text or ""))
 
 
-def limit_wait_seconds(text: str, attempt: int, now: float | None = None) -> float:
-    """Seconds to wait before asking again: the reset time when the CLI states it, else 60 s doubling to 15 min."""
+def limit_reset_epoch(text: str) -> float | None:
+    """A reset time named in a limit error: Claude's `usage limit reached|<epoch>` or an ISO timestamp
+    (Alibaba Throttling.AllocationQuota, OpenCode Go resetsAt)."""
     match = CLAUDE_RESET.search(text or "")
     if match:
-        until = int(match.group(1))
+        return float(match.group(1))
+    iso = ISO_TIME.search(text or "")
+    if iso:
+        import datetime as _dt
+        try:
+            stamp = _dt.datetime.fromisoformat(iso.group(0).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=_dt.timezone.utc)
+            return stamp.timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def limit_wait_seconds(text: str, attempt: int, now: float | None = None) -> float:
+    """Seconds to wait before asking again: the reset time when the error states it, else 60 s doubling to 15 min."""
+    until = limit_reset_epoch(text)
+    if until is not None:
         left = until - (time.time() if now is None else now)
         if 0 < left < 7 * 24 * 3600:
             return min(max(left + 5, LIMIT_WAIT_FIRST_SECONDS), 6 * 3600)
@@ -537,8 +567,15 @@ def limit_wait_seconds(text: str, attempt: int, now: float | None = None) -> flo
 
 
 def http_usage(usage: dict) -> dict:
-    """OpenAI-compatible usage -> {input, cached, output}. DeepSeek reports prompt_cache_hit_tokens."""
+    """OpenAI-compatible usage -> {input, cached, output}. DeepSeek reports prompt_cache_hit_tokens.
+    Anthropic wire (no prompt_tokens): input_tokens is only the uncached part, so the total adds the cache
+    reads and writes."""
     usage = usage or {}
+    if "prompt_tokens" not in usage and ("cache_read_input_tokens" in usage or "cache_creation_input_tokens" in usage):
+        read = int(usage.get("cache_read_input_tokens") or 0)
+        write = int(usage.get("cache_creation_input_tokens") or 0)
+        return {"input": int(usage.get("input_tokens") or 0) + read + write, "cached": read,
+                "output": int(usage.get("output_tokens") or 0)}
     total = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
     details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
     cached = details.get("cached_tokens") if isinstance(details, dict) else None
@@ -1117,7 +1154,11 @@ class SubscriptionChessClient:
         if not api_key:
             raise ProviderError(f"{route['key']} is not set")
         user: object = prompt
-        if self._image:
+        if self._image and route["style"] == "anthropic":
+            user = [{"type": "text", "text": prompt},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                 "data": base64.b64encode(self._image).decode("ascii")}}]
+        elif self._image:
             user = [{"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(self._image).decode("ascii")}}]
         conv = None if self._oneshot else self._conv
@@ -1154,7 +1195,11 @@ class SubscriptionChessClient:
             payload["reasoning_effort"] = effort or "high"
         elif style == "thinking":
             payload["thinking"] = {"type": "enabled"}
+        elif style == "anthropic":
+            payload = anthropic_payload(self.model, messages, effort)
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": BROWSER_UA}
+        if style == "anthropic":
+            headers["anthropic-version"] = ANTHROPIC_VERSION
         if self.provider == "opencode-go":
             headers["x-opencode-session"] = self.session_id
         if self.provider == "openrouter-chat":
@@ -1163,8 +1208,7 @@ class SubscriptionChessClient:
         started = time.monotonic()
         self._clock_start()
         think_cap = None if self._cutoff_s is None else THINK_SHARE * self._cutoff_s
-        streamed = self.http_stream(route["url"], {**payload, "stream": True, "stream_options": {"include_usage": True}},
-                                    headers, timeout, think_cap)
+        streamed = self.http_stream(route["url"], stream_payload(payload, style), headers, timeout, think_cap)
         self.usage_log.append(streamed.get("usage") or {})
         if streamed.get("usage"):
             self._add_usage(http_usage(streamed["usage"]))
@@ -1197,7 +1241,7 @@ class SubscriptionChessClient:
                  f"returning its {len(thoughts)} chars of thinking and asking for the move")
         self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
         self._think(f"\n[thinking stopped: {why} - answering from its own thoughts]\n")
-        messages = payload["messages"] + [
+        messages = plain_messages(payload["messages"]) + [
             {"role": "assistant", "content": "My thinking on this move so far:\n" + (thoughts or "(no visible thinking)")},
             {"role": "user", "content": "Your time for this move is up. Your full thinking so far is above. "
                                         "Reply now with only the JSON object for your move."}]
@@ -1205,9 +1249,14 @@ class SubscriptionChessClient:
                   "lowest": min(ANSWER_WITH_THOUGHTS_SECONDS, max(LOWEST_MIN_SECONDS, LOWEST_SHARE * total))}
         clock_left = None if self._left_ms is None else self._left_ms / 1000 - (time.monotonic() - started)
         for level in ("same", "lowest"):
-            follow = {**payload, "messages": messages, "max_tokens": ANSWER_MAX_TOKENS, "stream": True,
-                      "stream_options": {"include_usage": True}}
-            if level == "lowest":
+            if style == "anthropic":
+                follow = stream_payload({**payload, "messages": anthropic_messages(messages)}, style)
+                if level == "lowest":
+                    follow["thinking"] = {"type": "disabled"}
+            else:
+                follow = {**payload, "messages": messages, "max_tokens": ANSWER_MAX_TOKENS, "stream": True,
+                          "stream_options": {"include_usage": True}}
+            if level == "lowest" and style != "anthropic":
                 if style == "openrouter":
                     follow["reasoning"] = {"effort": "low"}  # Grok and GLM refuse reasoning off on OpenRouter
                 elif style == "effort":
@@ -1256,8 +1305,28 @@ class SubscriptionChessClient:
                             data = json.loads(chunk)
                         except json.JSONDecodeError:
                             continue
-                        if data.get("usage"):
+                        kind = data.get("type") if isinstance(data, dict) else None
+                        if data.get("usage") and not kind:
                             state["usage"] = data["usage"]
+                        if kind:  # Anthropic Messages events
+                            if kind == "message_start":
+                                state["usage"] = dict((data.get("message") or {}).get("usage") or {})
+                            elif kind == "message_delta":
+                                state["usage"] = {**state["usage"], **{k: v for k, v in (data.get("usage") or {}).items() if v is not None}}
+                                stop = (data.get("delta") or {}).get("stop_reason")
+                                if stop:
+                                    state["finish"] = "length" if stop == "max_tokens" else stop
+                            elif kind == "content_block_delta":
+                                delta = data.get("delta") or {}
+                                piece = str(delta.get("thinking") or "")
+                                state["reasoning"] += piece
+                                self._think(piece)
+                                state["content"] += str(delta.get("text") or "")
+                            elif kind == "error":
+                                err = data.get("error") or {}
+                                state["error"] = ("http", 529 if "overloaded" in str(err).lower() else 400,
+                                                  json.dumps(err)[:400])
+                            continue
                         for choice in data.get("choices") or []:
                             delta = choice.get("delta") or {}
                             piece = str(delta.get("reasoning_content") or delta.get("reasoning") or "")
@@ -1556,6 +1625,50 @@ def _flag_env(name: str, default: bool) -> bool:
     if value is None or not value.strip():
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def plain_messages(messages: list[dict]) -> list[dict]:
+    """Messages without cache markers (what is kept between turns)."""
+    out = []
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list):
+            content = [{k: v for k, v in block.items() if k != "cache_control"} if isinstance(block, dict) else block
+                       for block in content]
+            if len(content) == 1 and isinstance(content[0], dict) and content[0].get("type") == "text":
+                content = content[0]["text"]
+        out.append({**message, "content": content})
+    return out
+
+
+def anthropic_messages(messages: list[dict]) -> list[dict]:
+    """Anthropic wire: no system role in the list, and one cache breakpoint on the last block of the last
+    message, so the next request (same messages plus two) reads all of this one from cache."""
+    msgs = [dict(m) for m in plain_messages(messages) if m.get("role") != "system"]
+    if msgs:
+        last = msgs[-1]
+        content = last["content"]
+        blocks = [{"type": "text", "text": content}] if isinstance(content, str) else [dict(b) for b in content]
+        blocks[-1 if blocks[-1].get("type") == "text" else 0]["cache_control"] = {"type": "ephemeral"}
+        last["content"] = blocks
+    return msgs
+
+
+def anthropic_payload(model: str, messages: list[dict], effort: str) -> dict:
+    system = next((m["content"] for m in messages if m.get("role") == "system"), SYSTEM_PROMPT)
+    budget = ANTHROPIC_THINKING_BUDGET.get(effort or "high", ANTHROPIC_THINKING_BUDGET["high"])
+    payload = {"model": model, "max_tokens": HTTP_MAX_TOKENS,
+               "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+               "messages": anthropic_messages(messages)}
+    if effort not in ("none", "off", "minimal"):
+        payload["thinking"] = {"type": "enabled", "budget_tokens": min(budget, HTTP_MAX_TOKENS // 2)}
+    return payload
+
+
+def stream_payload(payload: dict, style: str) -> dict:
+    if style == "anthropic":
+        return {**payload, "stream": True}
+    return {**payload, "stream": True, "stream_options": {"include_usage": True}}
 
 
 def sum_usage(entries: list[dict]) -> dict:

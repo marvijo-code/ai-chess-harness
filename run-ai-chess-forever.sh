@@ -11,7 +11,8 @@
 #
 # Settings (environment): AI_CHESS_CONFIG, AI_CHESS_ENV_FILE (default ~/.config/ai-chess/env, KEY=VALUE,
 # mode 600), AI_CHESS_VIEWER_HOST (127.0.0.1), AI_CHESS_VIEWER_PORT (8770), AI_CHESS_ENGINE (Stockfish for the
-# viewer's eval bar and move marks), AI_CHESS_COMMENTARY=1 (viewer --commentary), PYTHON (python3).
+# viewer's eval bar and move marks), AI_CHESS_COMMENTARY (1 = on, the default: spoken commentary on the codex
+# subscription with the free edge-tts voice; 0 = off), COMMENTARY_ROUTE (codex), PYTHON (python3).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -112,7 +113,11 @@ case "${1:-}" in
     cd "$ROOT"
     args=(tools/llm_tournament_viewer.py --host "$VIEWER_HOST" --port "$VIEWER_PORT" --follow "$LIVE/current.json")
     if [[ -x "$ENGINE" ]]; then args+=(--engine "$ENGINE"); else args+=(--no-analysis); fi
-    if [[ "${AI_CHESS_COMMENTARY:-0}" == "1" ]]; then load_env; args+=(--commentary); fi
+    if [[ "${AI_CHESS_COMMENTARY:-1}" == "1" ]]; then
+      load_env
+      export COMMENTARY_ROUTE="${COMMENTARY_ROUTE:-codex}"   # subscription text, never a metered API
+      args+=(--commentary)
+    fi
     exec "$PY" "${args[@]}"
     ;;
   start) start_one runner; start_one viewer ;;

@@ -92,6 +92,8 @@ class GameHooks:
 
 
 HOOKS: GameHooks | None = None
+# At most this many games at the same time (config maxConcurrentGames; None = every board of the round).
+GAME_SLOTS: threading.Semaphore | None = None
 
 
 def load_config(path: Path) -> dict:
@@ -405,6 +407,16 @@ def kill_engine_tree(engine: LlmEngine) -> None:
 
 def play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: TournamentState,
               live_pgn: Path, log, replace_engine, start_ms: dict | None = None) -> None:
+    """One game. With GAME_SLOTS set, the game waits (status pending) until a board is free."""
+    slots = GAME_SLOTS
+    if slots is None:
+        return _play_game(game_id, white, black, cfg, ts, live_pgn, log, replace_engine, start_ms)
+    with slots:
+        return _play_game(game_id, white, black, cfg, ts, live_pgn, log, replace_engine, start_ms)
+
+
+def _play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: TournamentState,
+               live_pgn: Path, log, replace_engine, start_ms: dict | None = None) -> None:
     state = ts.state
     record = state["games"][game_id]
     board = chess.Board()
@@ -692,17 +704,37 @@ def run_knockout_stage(state: dict, ts: "TournamentState", cfg: dict, stage: str
 def run_knockouts(state: dict, ts: "TournamentState", cfg: dict, engine_for, replace_engine, log) -> bool:
     ko = state.setdefault("knockout", {})
     if not ko.get("seeds"):
-        seeds = knockout_seeds(state, int(cfg.get("knockoutSize", 4)))
+        # Fewer than 4 players (benched players sit out): the top two meet in the final, no semifinals.
+        size = 4 if min(int(cfg.get("knockoutSize", 4)), len(state["players"])) >= 4 else 2
+        seeds = knockout_seeds(state, size)
         names = [s["name"] for s in seeds]
-        with ts.lock:
-            ko.update(seeds=seeds, champion=None, runner_up=None, third=None, matches=[
+        if size >= 4:
+            matches = [
                 {"id": "sf1", "stage": "semifinals", "label": "Semifinal 1", "a": names[0], "b": names[3], "games": [],
                  "winner": None, "decided_by": None},
                 {"id": "sf2", "stage": "semifinals", "label": "Semifinal 2", "a": names[1], "b": names[2], "games": [],
-                 "winner": None, "decided_by": None}])
+                 "winner": None, "decided_by": None}]
+        else:
+            matches = [{"id": "final", "stage": "final", "label": "Final", "a": names[0], "b": names[1], "games": [],
+                        "winner": None, "decided_by": None}]
+        with ts.lock:
+            ko.update(seeds=seeds, champion=None, runner_up=None, third=None, matches=matches)
         log("knockout seeds: " + ", ".join(f"{s['seed']}. {s['name']} ({s['points']:g})" for s in seeds))
     rr = int(cfg["rounds"])
     semis = [m for m in ko["matches"] if m["stage"] == "semifinals"]
+    if not semis:
+        finals = [m for m in ko["matches"] if m["stage"] == "final"]
+        if not run_knockout_stage(state, ts, cfg, "final", rr + 1, "Final", finals, engine_for, replace_engine, log):
+            return False
+        final = finals[0]
+        with ts.lock:
+            ko["champion"] = final["winner"]
+            ko["runner_up"] = final["b"] if final["winner"] == final["a"] else final["a"]
+            ko["third"] = None
+            state["stage"] = "finished"
+        ts.save()
+        log(f"CHAMPION: {ko['champion']} (runner-up {ko['runner_up']})")
+        return True
     if not run_knockout_stage(state, ts, cfg, "semifinals", rr + 1, "Semifinals", semis, engine_for, replace_engine, log):
         return False
     if not any(m["stage"] == "final" for m in ko["matches"]):
@@ -841,7 +873,10 @@ def new_state(cfg: dict, slug: str, title: str | None = None, seed: int | None =
 
 def run_tournament(state: dict, cfg: dict, status_path: Path, log) -> int:
     """Play a (new or resumed) tournament to the end. 0 = finished, 3 = paused by a void game."""
+    global GAME_SLOTS
     players = {p["name"]: p for p in state["players"]}
+    cap = cfg.get("maxConcurrentGames")
+    GAME_SLOTS = threading.Semaphore(int(cap)) if cap else None
     LIVE_DIR.mkdir(parents=True, exist_ok=True)
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     ts = TournamentState(state, status_path)
