@@ -146,10 +146,11 @@ ERROR_BACKOFF_SECONDS = 30
 
 # ---- voice ----------------------------------------------------------------------------------------
 TTS_ROUTES = ("edge", "openrouter", "off")
-# en-US-AndrewMultilingualNeural: the newest generation of the three candidates, the most natural and lively
-# prosody, crisp consonants on move names ("Knight takes e5"), and it reads model names with digits cleanly.
-# GuyNeural is energetic but older and flatter; RyanNeural is clear but calmer. +8% rate gives a commentator's pace.
-EDGE_VOICE = "en-US-AndrewMultilingualNeural"
+# en-US-GuyNeural: the energetic, clear US newscaster voice, and fast to voice. Measured 2026-10-08 on the VPS
+# with 3 fresh ~16 s lines each: Guy took 0.18x the clip length to voice (1.3-5.1 s), RyanNeural 0.16x (clear
+# but calmer, British), AndrewMultilingualNeural 0.66x (8-14 s: the most natural, but too slow for live play).
+# +8% rate gives a commentator's pace. COMMENTARY_VOICE picks another voice.
+EDGE_VOICE = "en-US-GuyNeural"
 EDGE_RATE = "+8%"
 EDGE_TIMEOUT_SECONDS = 45
 MAX_LINE_CHARS = 700     # an intro naming ten players runs ~450 characters (2026-10-08 VPS run)
