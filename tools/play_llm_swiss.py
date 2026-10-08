@@ -123,6 +123,21 @@ def points_for(result: str) -> tuple[float, float]:
     return {"1-0": (1.0, 0.0), "0-1": (0.0, 1.0), "1/2-1/2": (0.5, 0.5)}.get(result, (0.0, 0.0))
 
 
+def loss_or_dead_draw(board: chess.Board, loser: chess.Color) -> str:
+    """Result when `loser` flags or forfeits: a loss, unless the opponent cannot checkmate by any legal sequence.
+
+    FIDE Laws 6.9 (flag fall) and 7.5.5 (illegal-move forfeit): then the game is drawn. python-chess only says
+    "insufficient" when mate is impossible from the material alone (bare king, K+B, K+N), as Lichess does.
+    """
+    if board.has_insufficient_material(not loser):
+        return "1/2-1/2"
+    return "0-1" if loser == chess.WHITE else "1-0"
+
+
+def dead_draw_note(engine_name: str, how: str, opponent_name: str) -> str:
+    return f"{engine_name} {how}, but {opponent_name} cannot checkmate: draw (insufficient material)"
+
+
 def compute_standings(state: dict) -> list[dict]:
     cfg = state["config"]
     rows = {
@@ -489,6 +504,7 @@ def _play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: 
             break
         side = board.turn
         engine = white if side == chess.WHITE else black
+        opponent = black if side == chess.WHITE else white
         started = time.time()
         publish(side, None)  # clock frozen until the model actually starts thinking
         go_line = engine.go_command(clocks[chess.WHITE], clocks[chess.BLACK], increment)
@@ -544,8 +560,10 @@ def _play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: 
         clocks[side] -= elapsed_ms
         if uci == "flag" or clocks[side] <= 0:
             clocks[side] = 0
-            result = "0-1" if side == chess.WHITE else "1-0"
+            result = loss_or_dead_draw(board, side)
             termination, end_kind = f"{engine.name} lost on time", "flag"
+            if result == "1/2-1/2":
+                termination = dead_draw_note(engine.name, "ran out of time", opponent.name)
             if uci == "flag":
                 replace_engine(engine)  # still thinking: restart it so the next game starts clean
             break
@@ -555,19 +573,23 @@ def _play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: 
             break
         if uci == "0000":
             invalid[side] += cfg["maxAttempts"]
-            result = "0-1" if side == chess.WHITE else "1-0"
+            result = loss_or_dead_draw(board, side)
             if comment.startswith("engine failure"):
                 termination = f"{engine.name} forfeited: {comment}"[:200]
             else:
                 termination = f"{engine.name} forfeited after {cfg['maxAttempts']} invalid replies"
+            if result == "1/2-1/2":
+                termination = dead_draw_note(engine.name, "forfeited", opponent.name)
             end_kind = "forfeit"
             node.comment = (node.comment + " " if node.comment else "") + f"{engine.name} forfeits: {comment}"[:300]
             break
         invalid[side] += max(0, tries - 1)
         move = chess.Move.from_uci(uci)
         if move not in board.legal_moves:
-            result = "0-1" if side == chess.WHITE else "1-0"
+            result = loss_or_dead_draw(board, side)
             termination, end_kind = f"{engine.name} forfeited with an illegal engine reply {uci}", "forfeit"
+            if result == "1/2-1/2":
+                termination = dead_draw_note(engine.name, "made an illegal move", opponent.name)
             break
         clocks[side] += increment
         san = board.san(move)

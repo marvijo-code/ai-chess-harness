@@ -40,7 +40,7 @@ The owner's top 5 plus Stockfish:
 | Gemini 3.8 Flash | `enabled: false` | No subscription route yet |
 | Stockfish 19 | Linux binary, ladder from depth 4 | `Threads 1`, `Hash 16` |
 
-No player uses `openrouter-chat` or any other metered route. Time control 10 min + 10 s,
+No player uses `openrouter-chat` or any other metered route. Time control 15 min + 10 s (owner 2026-10-08: fewer losses on time from winning positions),
 3 tries per move, `showLegalMoves: true`, no board image (the FEN and the diagram carry the
 position; an image would be uncached input on every move). No fallback move ever: a failed
 move after 3 tries is a forfeit, as before. `maxConcurrentGames: 2` caps the boards played at

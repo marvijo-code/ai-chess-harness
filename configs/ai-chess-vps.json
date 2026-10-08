@@ -5,7 +5,7 @@
   "knockoutSize": 4,
   "armageddonWhiteMs": 600000,
   "armageddonBlackMs": 450000,
-  "timeControlMs": 600000,
+  "timeControlMs": 900000,
   "incrementMs": 10000,
   "maxAttempts": 3,
   "attemptTimeoutSeconds": 900,
