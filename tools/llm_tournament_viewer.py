@@ -2888,13 +2888,26 @@ def main(argv: list[str] | None = None) -> int:
         # tournament file in the live dir: the runner writes the pointer's state every few seconds, so that is
         # the tournament the pointer names. It switches itself (memory reset, fresh intro) and keeps counting
         # clip numbers across tournaments, so the relay never sees a clip number twice.
-        start_path = Handler.current_state()
-        Handler.commentator = start_commentator(start_path,
-                                                follow_dir=None if Handler.state_path else Handler.live_dir)
-        if Handler.commentator is not None and Handler.annotator is not None:
-            # The commentator's own state_path: it moves to the next tournament file when the runner starts one.
-            Handler.commentator.marks_provider = lambda: Handler.annotator.annotations(Handler.commentator.state_path)
-            Handler.commentator.positions_provider = lambda: Handler.annotator.known(Handler.commentator.state_path)
+        def attach_commentary() -> None:
+            # The viewer can start before the runner wrote its first state (services start in any order):
+            # wait for it instead of leaving the commentary off for good.
+            start_path = Handler.current_state()
+            while start_path is None or not Path(start_path).exists():
+                time.sleep(5)
+                start_path = Handler.current_state()
+            Handler.commentator = start_commentator(start_path,
+                                                    follow_dir=None if Handler.state_path else Handler.live_dir)
+            if Handler.commentator is not None and Handler.annotator is not None:
+                # The commentator's own state_path: it moves to the next tournament file when the runner starts one.
+                Handler.commentator.marks_provider = lambda: Handler.annotator.annotations(Handler.commentator.state_path)
+                Handler.commentator.positions_provider = lambda: Handler.annotator.known(Handler.commentator.state_path)
+
+        first = Handler.current_state()
+        if first is not None and Path(first).exists():
+            attach_commentary()
+        else:
+            print("commentary: waiting for the first tournament state", flush=True)
+            threading.Thread(target=attach_commentary, daemon=True).start()
     if Handler.follow is not None:
         print(f"follow: {Handler.follow} -> {Handler.current_state()}", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
