@@ -240,28 +240,34 @@ class PromptOrderTest(unittest.TestCase):
         self.assertIn("POSITION (", second[3]["content"])
         self.assertEqual(client.last_report["usage"], {"calls": 1, "input": 2000, "cached": 900, "output": 20})
 
-    def test_claude_session_is_started_then_resumed(self):
+    def test_claude_game_blocks_grow_append_only_with_the_breakpoint_on_the_last(self):
         client = sp.SubscriptionChessClient("claude", lambda _m: None)
         client.board_image, client.conversation, client.context = False, True, dict(CONTEXT)
         calls = []
 
         def runner(argv, prompt, timeout, workdir):
-            calls.append((list(argv), prompt))
+            calls.append((list(argv), json.loads(prompt)))
             usage = {"input_tokens": 3, "cache_creation_input_tokens": 400, "cache_read_input_tokens": 3000 * len(calls) - 3000, "output_tokens": 30}
             reply = '{"move": "e5"}' if len(calls) == 1 else '{"move": "Nc6"}'
             return json.dumps({"type": "result", "result": reply, "duration_api_ms": 1000, "usage": usage}) + "\n"
 
         client.runner = runner
-        board = self.board_after(["e2e4"])
-        client.choose_move(board, GO, ["e2e4"])
-        board2 = self.board_after(["e2e4", "e7e5", "g1f3"])
-        client.choose_move(board2, GO, ["e2e4", "e7e5", "g1f3"])
-        (argv1, prompt1), (argv2, prompt2) = calls
-        sid = argv1[argv1.index("--session-id") + 1]
-        self.assertNotIn("--no-session-persistence", argv1)
-        self.assertEqual(argv2[argv2.index("--resume") + 1], sid)
-        self.assertTrue(prompt1.startswith(sp.RULES_TEXT))
-        self.assertTrue(prompt2.startswith("MOVES SINCE YOUR LAST TURN\n1... e5 2. Nf3"), prompt2[:50])
+        client.choose_move(self.board_after(["e2e4"]), GO, ["e2e4"])
+        client.choose_move(self.board_after(["e2e4", "e7e5", "g1f3"]), GO, ["e2e4", "e7e5", "g1f3"])
+        (argv1, msg1), (argv2, msg2) = calls
+        for argv in (argv1, argv2):  # one fresh request per move, the game travels in the blocks
+            self.assertIn("--no-session-persistence", argv)
+            self.assertEqual(argv[argv.index("--input-format") + 1], "stream-json")
+            self.assertNotIn("--resume", argv)
+        first, second = msg1["message"]["content"], msg2["message"]["content"]
+        self.assertEqual(len(first), 1)
+        self.assertTrue(first[0]["text"].startswith(sp.RULES_TEXT))
+        self.assertIn("cache_control", first[0])
+        # The second request starts with the first one's turn, byte for byte, then the reply, then the new turn.
+        self.assertEqual(second[0]["text"], first[0]["text"])
+        self.assertEqual(second[1]["text"], 'YOUR REPLY\n{"move": "e5"}')
+        self.assertTrue(second[2]["text"].startswith("MOVES SINCE YOUR LAST TURN\n1... e5 2. Nf3"), second[2]["text"][:50])
+        self.assertEqual([("cache_control" in b) for b in second], [False, False, True], "one breakpoint, on the last block")
         self.assertEqual(client.last_report["usage"]["cached"], 3000)
         self.assertEqual(client.last_report["usage"]["input"], 3403)
 

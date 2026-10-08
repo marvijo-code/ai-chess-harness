@@ -985,7 +985,9 @@ class SubscriptionChessClient:
 
     def _cli_session(self) -> dict | None:
         conv = self._conv
-        if self._oneshot or conv is None:
+        if self._oneshot or conv is None or self.provider == "claude":
+            # Claude keeps its game as content blocks in one fresh request (see _claude_flat_prompt):
+            # measured 2026-10-08, `claude -p --resume` gave no cache reads for chess turns.
             return None
         if conv.get("started") and conv.get("id"):
             return {"mode": "resume", "id": conv["id"]}
@@ -1008,6 +1010,9 @@ class SubscriptionChessClient:
                 image_file = workdir / f"board-{os.getpid()}-{time.time_ns()}.png"
                 image_file.write_bytes(self._image)
                 argv = argv[:-1] + ["-i", str(image_file), "--", "-"]
+        elif self.provider == "claude" and self._conv is not None and not self._oneshot:
+            argv = argv + ["--input-format", "stream-json"]
+            prompt = self._claude_flat_prompt(prompt)
         elif self.provider == "claude" and self._image:
             argv = argv + ["--input-format", "stream-json"]
             image = {"type": "image", "source": {"type": "base64", "media_type": "image/png",
@@ -1033,12 +1038,32 @@ class SubscriptionChessClient:
                 raise ProviderError(f"codex wrote no final message; output tail: {output[-300:]!r}")
             answer = claude_result_text(output)
             self._session_started(session, output)
+            if self._conv is not None and not self._oneshot and self._flat_turn is not None:
+                # The turn and the reply become fixed blocks of the next request (never the thinking).
+                self._conv.setdefault("blocks", []).extend([self._flat_turn, "YOUR REPLY\n" + answer.strip()])
+                self._conv["started"] = True
+                self._conv["id"] = self._conv.get("id") or self.session_id
             return answer
         finally:
             if last_message and last_message.exists():
                 last_message.unlink(missing_ok=True)
             if image_file is not None:
                 image_file.unlink(missing_ok=True)
+
+    _flat_turn: str | None = None
+
+    def _claude_flat_prompt(self, turn: str) -> str:
+        """One fresh `claude -p` request that carries the whole game as content blocks: the first turn,
+        then each later turn and reply as its own block, then this turn. The cache breakpoint sits on the
+        last block, so the next request (same blocks plus two) reads everything up to this turn from cache.
+        Four breakpoints at most: the CLI puts two on its system prompt and one on its closing system note."""
+        self._flat_turn = turn
+        blocks = [{"type": "text", "text": text} for text in (self._conv or {}).get("blocks", [])]
+        blocks.append({"type": "text", "text": turn, "cache_control": {"type": "ephemeral", "ttl": "1h"}})
+        if self._image:
+            blocks.append({"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                       "data": base64.b64encode(self._image).decode("ascii")}})
+        return json.dumps({"type": "user", "message": {"role": "user", "content": blocks}}) + "\n"
 
     def _session_started(self, session: dict | None, output: str) -> None:
         if session is None or self._conv is None:
