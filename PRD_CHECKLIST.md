@@ -247,3 +247,12 @@
 - [x] Remove the redundant Players and Current Attempt cards from the board screen, keep one slim slug/result/turn status row, and re-verify with screenshots plus tests.
 - [x] Add `run-llm-live-match.ps1` to launch the viewer and match as detached WMI processes that survive console teardown (PRD 177).
 - [x] Give each LLM engine process a PID-suffixed log file (PRD 177).
+- [ ] Forever tournament loop with numbered tournaments, the `out/live/current.json` pointer and resume on restart (PRD 179).
+- [ ] Viewer `--follow` pointer mode, ladder depth, latest notes and cache hit rates in the viewer (PRD 180, 181, 182, 183).
+- [ ] Stockfish depth ladder persisted in the memory repo `ladder.json` (PRD 181).
+- [ ] Agent memory: MEMORY.md in every move prompt, move notes, validated post-game reflection edits, background git push (PRD 182).
+- [ ] Cache-friendly conversation prompts with per-call usage and per-player hit rates (PRD 183).
+- [ ] Usage-limit wait without forfeits or clock charge (PRD 184).
+- [ ] Linux binary resolution and `run-ai-chess-forever.sh` launcher plus `docs/aichess-vps-forever.md` (PRD 185).
+- [ ] Focused tests plus the full suite green (Validation 81).
+- [ ] Real VPS preflight with measured cache hit rates and a reflection write (Validation 82).
