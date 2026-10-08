@@ -132,6 +132,19 @@ engine stores the difference), OpenAI-compatible `prompt_tokens_details.cached_t
 moves of the player); the memory repo has `tournaments/cache-stats.md`. Session files of the CLI
 routes are deleted when the game ends.
 
+Measured on the VPS, 2026-10-08, one real 40-ply game (GPT-6.1 Sol White, Sonnet 5.5 Black, 10 min + 10 s,
+empty memory):
+
+| Player | Requests | Input tokens | Cached | Hit rate | Warm (moves 4+) | Per move |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| GPT-6.1 Sol | 20 | 300,686 | 262,016 | 87.1% | 87.1% | 93 to 96% on 17 of 20 moves; 3 provider misses (0%, 71%, 75%) |
+| Sonnet 5.5 | 20 | 166,490 | 147,106 | 88.4% | 89.9% | 66% at move 2, 82% at move 6, 90.7% from move 13, 92 to 94% after |
+
+Claude's uncached part per move is about 700 to 900 tokens (the previous reply, the new turn with its
+position block, and the CLI's closing system note), so its rate climbs as the game grows; a non-empty
+MEMORY.md raises it from move 1. DeepSeek, GLM and MiMo could not be measured on 2026-10-08 (OpenCode
+Go monthly limit reached, resets 2026-10-14 07:24 UTC).
+
 ## Usage limits
 
 `limitWait: true` in the config. A usage or rate limit (HTTP 429, "usage limit", "rate limit",
