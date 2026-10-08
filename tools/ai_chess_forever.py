@@ -665,10 +665,12 @@ def main(argv: list[str] | None = None) -> int:
     log(f"memory repo {repo_root} (push {'on' if push else 'off'}), live dir {live_dir}")
 
     if args.preflight:
-        rows = preflight_moves(cfg, repo, live_dir)
+        # The same check every new tournament starts with: one real move per enabled player, limits bench.
+        playing, benched, rows = check_roster(cfg, live_dir)
         for row in rows:
             log("PREFLIGHT " + json.dumps(row))
-        return 0 if all(r.get("ok") for r in rows) else 2
+        log(f"would play: {[p['name'] for p in playing]}; benched: {[(b['name'], bench_label(b)) for b in benched]}")
+        return 0 if len(playing) >= int(fv.get("minPlayers") or 3) else 2
     if args.segment:
         names = [n.strip() for n in args.segment.split(",")]
         state = run_segment(cfg, names, args.plies, repo, pusher, live_dir)
