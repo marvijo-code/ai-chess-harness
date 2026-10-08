@@ -1,0 +1,21 @@
+[Unit]
+Description=AI chess pusher: local viewer 127.0.0.1:8770 -> relay ingest 127.0.0.1:8781 (marvijo.com/ai-chess)
+Documentation=file://__HOME__/ai-chess/docs/aichess-stream.md
+After=network-online.target ai-chess-viewer.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=__HOME__/ai-chess
+Environment=PYTHONUNBUFFERED=1
+Environment="AICHESS_PUSHER_ARGS=--local http://127.0.0.1:8770 --relay http://127.0.0.1:8781 --token-file __HOME__/acl-chess-relay/ingest.token --live-dir __HOME__/ai-chess/out/live"
+EnvironmentFile=-__HOME__/.config/ai-chess/services.env
+ExecStart=/usr/bin/python3 tools/aichess_push.py $AICHESS_PUSHER_ARGS
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
