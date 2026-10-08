@@ -1,0 +1,22 @@
+[Unit]
+Description=AI chess tournament viewer on 127.0.0.1:8770 (live boards, commentary clips, Stockfish analysis)
+Documentation=file://__HOME__/ai-chess/docs/aichess-stream.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=__HOME__/ai-chess
+Environment=PYTHONUNBUFFERED=1
+Environment="AICHESS_VIEWER_ARGS=--port 8770 --follow out/live/current.json --engine __HOME__/sf19/stockfish/stockfish-linux-x86-64-universal --commentary"
+EnvironmentFile=-__HOME__/.config/ai-chess/services.env
+ExecStart=/usr/bin/python3 tools/llm_tournament_viewer.py $AICHESS_VIEWER_ARGS
+Restart=always
+RestartSec=5
+OOMScoreAdjust=-100
+
+[Install]
+WantedBy=multi-user.target
