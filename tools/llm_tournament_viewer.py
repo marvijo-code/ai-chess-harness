@@ -307,6 +307,9 @@ body.stream .card.focused .lb-side, body.stream .card.focused .lb-under, body.st
 .champ-line { color: var(--muted); font-size: clamp(13px, 1.8vh, 16px); margin: 0 0 16px; overflow-wrap: anywhere; }
 .champ-btn { font: inherit; font-size: 15px; padding: 9px 22px; border-radius: 999px; background: #f5b942; color: #15120a; border: 0; font-weight: 700; cursor: pointer; }
 .champ-btn:hover { background: #ffd479; }
+.champ-count { margin: 4px auto 14px; width: min(360px, 90%); font-size: 14px; color: #f5d78a; font-variant-numeric: tabular-nums; }
+.champ-count-bar { display: block; height: 4px; margin-top: 6px; border-radius: 99px; background: rgba(245, 185, 66, .22); overflow: hidden; }
+.champ-count-bar b { display: block; height: 100%; width: 100%; background: #f5b942; transition: width .25s linear; }
 .champ-overlay.play .champ-crown { animation: crown-drop 1s cubic-bezier(.2, 1.45, .4, 1) .15s both; }
 .champ-overlay.play .champ-kicker { animation: rise .6s ease .6s both; }
 .champ-overlay.play .champ-name { animation: name-in .9s cubic-bezier(.2, 1.3, .4, 1) .85s both; }
@@ -1776,7 +1779,10 @@ function hideRoundCard() {
 // ---- champion moment ------------------------------------------------------------------------
 let champSeen = null;
 let champTimer = 0;
-const CHAMP_AUTOCLOSE_MS = 20000;
+let champEnds = 0;
+// Owner 2026-10-08: "the winner banner stays on the screen, which hides the games; fix by having it countdown
+// for 30 secs". Every page (stream, local viewer, marvijo.com) counts down and closes it by itself.
+const CHAMP_AUTOCLOSE_MS = 30000;
 function checkChampion() {
   const k = ko();
   const name = k && k.champion;
@@ -1801,7 +1807,17 @@ function champHtml(k) {
     + `<div class="podium">${k.runner_up ? `<div class="silver"><div class="lbl">Runner-up</div><div class="nm">${esc(k.runner_up)}</div></div>` : ""}`
     + `${k.third ? `<div class="bronze"><div class="lbl">Third place</div><div class="nm">${esc(k.third)}</div></div>` : ""}</div>`
     + (line ? `<p class="champ-line">${esc(line)}</p>` : "")
+    + `<div class="champ-count" aria-live="polite"><span id="champCountText">Back to the games in ${Math.round(CHAMP_AUTOCLOSE_MS / 1000)} s</span>`
+    + `<i class="champ-count-bar"><b id="champCountBar"></b></i></div>`
     + `<button type="button" class="champ-btn" data-close-champion>Back to the boards</button>`;
+}
+function champTick() {
+  const left = Math.max(0, champEnds - Date.now());
+  const txt = document.getElementById("champCountText");
+  const bar = document.getElementById("champCountBar");
+  if (txt) txt.textContent = `Back to the games in ${Math.ceil(left / 1000)} s`;
+  if (bar) bar.style.width = `${(100 * left / CHAMP_AUTOCLOSE_MS).toFixed(1)}%`;
+  if (left <= 0) hideChampion();
 }
 function showChampion(animate) {
   const k = ko();
@@ -1811,16 +1827,17 @@ function showChampion(animate) {
   ov.classList.toggle("play", !!animate);
   ov.hidden = false;
   director({ k: "champion", a: "show" });
-  clearTimeout(champTimer);
-  // Unattended screens (the stream, a viewer following the forever runner) close it by themselves.
-  if (STREAM || (data && data.viewer_follow)) champTimer = setTimeout(hideChampion, CHAMP_AUTOCLOSE_MS);
+  clearInterval(champTimer);
+  champEnds = Date.now() + CHAMP_AUTOCLOSE_MS;
+  champTimer = setInterval(champTick, 250);
+  champTick();
   stopConfetti();
   let still = false;
   try { still = matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { /* old browser */ }
   if (animate && !still) startConfetti();
 }
 function hideChampion() {
-  clearTimeout(champTimer);
+  clearInterval(champTimer);
   if (!document.getElementById("champOverlay").hidden) director({ k: "champion", a: "hide" });
   document.getElementById("champOverlay").hidden = true;
   stopConfetti();

@@ -221,6 +221,13 @@ class CommentaryOffTest(unittest.TestCase):
         finally:
             state.write_text(json.dumps(saved), encoding="utf-8")
 
+    def test_champion_banner_counts_down_30_s_on_every_page(self):
+        page = viewer.PAGE
+        self.assertIn("const CHAMP_AUTOCLOSE_MS = 30000;", page)
+        self.assertIn("Back to the games in", page)
+        self.assertIn("champTimer = setInterval(champTick, 250);", page)
+        self.assertNotIn("if (STREAM || (data && data.viewer_follow)) champTimer", page, "must not be stream-only")
+
     def test_page_has_round_cards_and_a_standings_strip(self):
         page = viewer.PAGE
         for needle in ('id="ticker"', "function showRoundCard", "function renderTicker", "Match of the round",
