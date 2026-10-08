@@ -8,7 +8,9 @@ reached through an ssh forward tunnel (run-aichess-push.ps1 starts both):
   * /api/tournament  when it changed (state_age_s and server_now_ms ignored), gzipped,
                      at most once every 1.5 s;
   * commentary clips audio first, then metadata. On a (re)start only the newest 20
-                     clips are sent, never the whole archive;
+                     clips are sent, never the whole archive. The clip cursor follows the
+                     relay's /healthz (read on start and every 30 s), never the status file,
+                     and drops when the local commentary renumbered from 1;
   * eval_track       added to that state: the viewer's Stockfish score and best move for every
                      position of every game, so the public page shows the engine on replays and
                      finished boards too (read from <live-dir>/<id>-annotations.json);
@@ -44,6 +46,8 @@ CLIPS_PER_CYCLE = 4
 STATUS_EVERY = 2.0
 VERSION_EVERY = 60.0
 AUDIO_MISSING_TRIES = 3
+HEALTH_EVERY = 30.0          # re-read the relay's last_clip_seq (it may have been reset)
+LOCAL_PROBE_EVERY = 15.0     # when idle, check the local commentary did not renumber from 1
 
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -233,6 +237,9 @@ class Pusher:
         self.state_bytes_gz = 0
         self.last_seq: int | None = None
         self.seq_known = False
+        self.health_at = -1e9
+        self.local_probe_at = -1e9
+        self.local_newest: int | None = None    # newest local clip seq seen (None: not known yet)
         self.clips_pushed = 0
         self.audio_misses: dict[int, int] = {}
         self.think_sizes: dict[tuple[str, int], int] = {}
@@ -377,23 +384,59 @@ class Pusher:
         self.last_state_push_epoch_ms = int(self.clock() * 1000)
         self.state_pushes += 1
 
+    def _sync_cursor_with_relay(self) -> None:
+        """Set the clip cursor from what the relay holds. The relay is the truth, the status file is not.
+
+        Resending is safe (the relay ingest is idempotent by tournament id + seq), skipping is not:
+        a relay whose data dir was archived reports 0 while the status file still says 509.
+        """
+        health = self._relay_health()
+        self.health_at = self.mono()
+        self.seq_known = True
+        try:
+            relay_last = int(health.get("last_clip_seq") or 0)
+        except (TypeError, ValueError):
+            relay_last = 0
+        other = (health.get("tournament_id") not in (None, self.tid)
+                 or health.get("clips_tournament_id") not in (None, self.tid))
+        cursor = None if other or relay_last <= 0 else relay_last   # None: newest 20 only
+        renumbered = cursor is not None and self.local_newest is not None and cursor > self.local_newest
+        if renumbered:                        # relay holds the old numbering: keep our own cursor
+            mine = self.last_seq
+            cursor = mine if mine is not None and mine <= self.local_newest else None
+        if cursor != self.last_seq:
+            reason = ("relay holds another tournament" if other else
+                      f"relay has seq {relay_last}, local newest {self.local_newest}" if renumbered else
+                      f"relay has seq {relay_last}")
+            self.log(f"clips: cursor {self.last_seq} -> {cursor} ({reason})")
+            self.last_seq = cursor
+
     def _push_clips(self) -> None:
-        if not self.seq_known:
-            health = self._relay_health()
-            relay_last = health.get("last_clip_seq") or 0
-            if relay_last > 0 and health.get("tournament_id") in (None, self.tid):
-                self.last_seq = int(relay_last)       # the relay knows what it already has
-            elif health.get("tournament_id") not in (None, self.tid):
-                self.last_seq = None                  # relay holds another tournament: newest 20 only
-            # relay empty: keep the status file value (None = first start)
-            self.seq_known = True
+        if not self.seq_known or self.mono() - self.health_at >= HEALTH_EVERY:
+            self._sync_cursor_with_relay()
         after = self.last_seq if self.last_seq is not None else 0
         raw = self._local_get(f"/api/commentary?after={after}")
         fetched = self.mono()
         data = json.loads(raw) if raw else {}
         if not data.get("enabled"):
             return
-        todo = select_new_clips(data.get("clips") or [], self.last_seq)
+        clips = data.get("clips") or []
+        seen = max((c["seq"] for c in clips if isinstance(c.get("seq"), int)), default=None)
+        if seen is not None:
+            self.local_newest = max(seen, self.local_newest or 0)
+        todo = select_new_clips(clips, self.last_seq)
+        if not todo and self.last_seq is not None and self.mono() - self.local_probe_at >= LOCAL_PROBE_EVERY:
+            # Nothing above the cursor. A fresh viewer process numbers its clips from 1 again, so
+            # check the local newest seq: below the cursor means everything new would be skipped.
+            self.local_probe_at = self.mono()
+            every = json.loads(self._local_get("/api/commentary?after=0") or b"{}").get("clips") or []
+            newest = max((c["seq"] for c in every if isinstance(c.get("seq"), int)), default=0)
+            self.local_newest = newest
+            if newest < self.last_seq:
+                self.log(f"clips: local newest seq {newest} is below cursor {self.last_seq}: resending newest")
+                self.last_seq = None
+                todo = select_new_clips(every, None)
+                fetched = self.mono()
         if todo and self.last_seq is not None and todo[0]["seq"] > self.last_seq + 1:
             self.log(f"clips: catching up from seq {todo[0]['seq']} (skipped {todo[0]['seq'] - self.last_seq - 1} older)")
         for clip in todo[:CLIPS_PER_CYCLE]:
@@ -410,6 +453,7 @@ class Pusher:
                     self.log(f"clip {clip['seq']}: audio {audio} missing locally, pushing text only")
             if isinstance(clip.get("age_s"), (int, float)):   # age at push: add the time spent uploading
                 clip = dict(clip, age_s=round(clip["age_s"] + (self.mono() - fetched), 1))
+            clip = dict(clip, tournament_id=self.tid)    # the relay keys clips by tournament id + seq
             result = self._relay_post("/ingest/clips", json.dumps([clip]).encode("utf-8"))
             self.last_seq = clip["seq"]
             self.audio_misses.pop(clip["seq"], None)
@@ -479,6 +523,8 @@ class Pusher:
     def _load_status_seq(self) -> None:
         self.seq_known = False
         self.last_seq = None
+        self.local_newest = None
+        self.local_probe_at = -1e9
         path = self.status_path()
         try:
             seq = json.loads(path.read_text("utf-8")).get("last_clip_seq")

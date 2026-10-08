@@ -47,6 +47,7 @@ MAX_WAV = 4 * 1024 * 1024            # one clip
 MAX_STATE_JSON = 64 * 1024 * 1024    # decompressed state (gzip bomb guard)
 CLIPS_DISK_CAP = 400 * 1024 * 1024   # oldest WAVs are pruned beyond this
 MAX_CLIP_META = 5000                 # clip metadata entries kept
+CLIP_IDENTITY = ("game", "ply", "text", "audio")   # a resend of a held seq matches on these
 THINK_TAIL_MAX = 64 * 1024           # bytes kept per game/ply
 THINK_PLIES_PER_GAME = 40            # newest plies kept per game
 THINK_TOTAL_CAP = 100 * 1024 * 1024  # all thinking tails together
@@ -323,8 +324,20 @@ class Store:
                 audio = clip.get("audio")
                 if audio and not (isinstance(audio, str) and CLIP_NAME.fullmatch(audio)):
                     raise ValueError("bad clip audio name")
-                if clip["seq"] in self.clips:
-                    continue                # idempotent by seq
+                tid = clip.get("tournament_id")
+                if tid is not None and not (isinstance(tid, str) and 0 < len(tid) <= 200):
+                    raise ValueError("bad clip tournament_id")
+                held_tid = self._clips_tid()
+                if tid and held_tid and tid != held_tid:
+                    self.clips.clear()      # clips of a new tournament: the old ones are stale
+                have = self.clips.get(clip["seq"])
+                if have is not None:
+                    if all(have.get(k) == clip.get(k) for k in CLIP_IDENTITY):
+                        continue            # idempotent by tournament id + seq
+                    # Same seq, other clip: the source renumbered (a fresh viewer starts at 1 again),
+                    # so everything held from this seq up belongs to the old numbering.
+                    for seq in [s for s in self.clips if s >= clip["seq"]]:
+                        del self.clips[seq]
                 age = clip.get("age_s")
                 entry = {k: v for k, v in clip.items() if not k.startswith("_")}
                 entry["_received"] = now
@@ -341,6 +354,10 @@ class Store:
                     self.log(f"clips persist failed (kept in memory): {exc}")
             last = max(self.clips) if self.clips else 0
         return {"ok": True, "added": added, "last_clip_seq": last}
+
+    def _clips_tid(self) -> str | None:
+        """Tournament of the clips held (the newest clip's tag; None for untagged or no clips)."""
+        return self.clips[max(self.clips)].get("tournament_id") if self.clips else None
 
     def clips_after(self, after: int, game: str = "") -> list[dict]:
         now = self.clock()
@@ -446,6 +463,7 @@ class Store:
         with self.lock:
             last = max(self.clips) if self.clips else 0
             n = len(self.clips)
+            clips_tid = self._clips_tid()
             wav_bytes = sum(self.wavs.values())
         used = wav_bytes + self.thinking_bytes() + (st["gz_len"] if st else 0)
         try:
@@ -454,7 +472,7 @@ class Store:
             free = None
         return {"ok": True, "state_age_s": self.state_age(), "state_updated_epoch_ms": st["updated"] if st else None,
                 "tournament_id": st["id"] if st else None, "last_clip_seq": last, "clips": n,
-                "clip_wavs": len(self.wavs), "disk_mb": round(used / (1024 * 1024), 1), "disk_free_mb": free}
+                "clips_tournament_id": clips_tid, "clip_wavs": len(self.wavs), "disk_mb": round(used / (1024 * 1024), 1), "disk_free_mb": free}
 
 
 # ---------------------------------------------------------------- HTTP

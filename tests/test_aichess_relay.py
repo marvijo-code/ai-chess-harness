@@ -325,3 +325,54 @@ def test_disk_write_failure_still_serves_from_memory(rl, monkeypatch):
     assert rl.ingest("/ingest/clips", json.dumps([{"seq": 1, "text": "x"}]).encode())[0] == 200
     assert rl.ingest("/ingest/clip-audio/clip-1.wav", wav(10))[0] == 500          # audio needs the disk
     assert any("persist failed" in line for line in rl.logs)
+
+def clip(seq: int, text: str, tid: str | None = "t-a") -> dict:
+    c = {"seq": seq, "game": "r1b1", "ply": seq, "text": text, "audio": f"clip-{seq}.wav"}
+    if tid is not None:
+        c["tournament_id"] = tid
+    return c
+
+
+def post_clips(rl, clips) -> dict:
+    status, _, body = rl.ingest("/ingest/clips", json.dumps(clips).encode())
+    assert status == 200
+    return json.loads(body)
+
+
+def test_clips_of_a_new_tournament_replace_the_old_ones(tmp_path):
+    rl = Relay(tmp_path / "data")
+    try:
+        post_clips(rl, [clip(s, f"a{s}") for s in range(1, 510)])
+        assert rl.get_json("/healthz")[1]["clips_tournament_id"] == "t-a"
+        assert post_clips(rl, [clip(1, "b1", "t-b")]) == {"ok": True, "added": 1, "last_clip_seq": 1}
+        _, health = rl.get_json("/healthz")
+        assert health["last_clip_seq"] == 1 and health["clips"] == 1 and health["clips_tournament_id"] == "t-b"
+        assert [c["text"] for c in rl.get_json("/api/commentary?after=0")[1]["clips"]] == ["b1"]
+    finally:
+        rl.close()
+    again = Relay(tmp_path / "data")              # the tag survives a relay restart
+    try:
+        assert again.get_json("/healthz")[1]["clips_tournament_id"] == "t-b"
+    finally:
+        again.close()
+
+
+def test_renumbered_source_drops_the_stale_numbering(rl):
+    post_clips(rl, [clip(s, f"old{s}") for s in range(1, 21)])
+    assert post_clips(rl, [clip(s, f"old{s}") for s in range(15, 21)])["added"] == 0   # plain resend
+    result = post_clips(rl, [clip(1, "new1"), clip(2, "new2")])                          # viewer restarted at 1
+    assert result == {"ok": True, "added": 2, "last_clip_seq": 2}
+    assert [c["text"] for c in rl.get_json("/api/commentary?after=0")[1]["clips"]] == ["new1", "new2"]
+
+
+def test_tagged_resend_of_an_untagged_clip_is_idempotent(rl):
+    post_clips(rl, [clip(s, f"c{s}", None) for s in range(1, 6)])
+    assert rl.get_json("/healthz")[1]["clips_tournament_id"] is None
+    assert post_clips(rl, [clip(s, f"c{s}") for s in range(1, 6)])["added"] == 0
+    assert post_clips(rl, [clip(6, "c6")])["last_clip_seq"] == 6
+    assert rl.get_json("/healthz")[1]["clips"] == 6
+
+
+def test_bad_clip_tournament_id_refused(rl):
+    status, _, _ = rl.ingest("/ingest/clips", json.dumps([dict(clip(1, "x"), tournament_id=7)]).encode())
+    assert status == 400
