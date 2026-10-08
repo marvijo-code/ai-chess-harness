@@ -1,8 +1,11 @@
 """Live web view of an LLM Swiss tournament written by tools/play_llm_swiss.py.
 
     python tools/llm_tournament_viewer.py --port 8770 [--state out/live/<slug>-tournament.json] [--commentary]
+    python tools/llm_tournament_viewer.py --port 8770 --follow out/live/current.json   # forever tournament
 
-Without --state it follows the newest out/live/*-tournament.json. The page polls
+Without --state it follows the newest out/live/*-tournament.json. With --follow it serves the state the pointer
+file names ({"state_path", "id", "number"}, written by tools/ai_chess_forever.py) and switches to the next
+tournament as soon as the pointer changes, without a restart. The page polls
 /api/tournament once a second and shows every board of the current round, the Elo
 standings and all rounds; click a finished game to replay it with the arrow keys,
 click a board header (or Focus) to watch that one board large.
@@ -62,6 +65,12 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 18px; pa
 /* The whole game card (bars, board, comment, moves, collapsed thinking) must fit one 1080p screen. */
 .boards > .card[data-game] { width: 100%; max-width: max(360px, calc(100vh - 575px)); justify-self: center; }
 .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+.ladder-tag { color: var(--muted); font-weight: 400; white-space: nowrap; }
+#agents .ag { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+#agents .ag:first-child { border-top: 0; }
+#agents .ag-n { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+#agents .ag-c { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+#agents .ag-note { grid-column: 1 / -1; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .game-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 6px 8px; cursor: pointer; min-width: 0; flex-wrap: wrap; }
 .card.focused .game-head { cursor: default; }
 .game-head .tag { font-size: 12px; color: var(--muted); min-width: 0; flex: 1 1 140px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
@@ -474,6 +483,7 @@ a.chip.pub { text-decoration: none; }
   <section class="boards" id="boards"><div class="empty card">Waiting for the tournament to start...</div></section>
   <aside class="side" id="side">
     <div class="card" id="standingsCard"><h2 id="standingsTitle">Standings (Elo)</h2><div id="standings"></div></div>
+    <div class="card" id="agentsCard" style="display:none"><h2>Notes and input cache</h2><div id="agents"></div></div>
     <div class="card" id="bracketCard" hidden><h2 id="bracketTitle">Bracket</h2><div id="bracket"></div></div>
     <div class="card"><h2>Rounds</h2><div id="rounds"></div></div>
     <div class="card"><h2>Rules</h2><ul class="rules" id="rules"></ul></div>
@@ -655,6 +665,28 @@ function boardHtml(squares, last) {
 }
 function nagHtml(mark) { return mark ? `<span class="nag ${NAG_CLASS[mark] || ""}" title="${NAG_TITLE[mark] || ""} (Stockfish, viewers only)">${esc(mark)}</span>` : ""; }
 function standingRow(name) { return (data.standings || []).find(r => r.name === name) || {}; }
+// Stockfish ladder: the player keeps one name ("Stockfish 19"); its depth is shown next to it.
+function ladderDepth(name, game) {
+  const lad = data.ladder;
+  if (!lad || name !== lad.player) return null;
+  return game && game.stockfish_depth ? game.stockfish_depth : lad.depth;
+}
+function ladderTag(name, game) { const d = ladderDepth(name, game); return d ? `<span class="ladder-tag"> \u00b7 depth ${esc(d)}</span>` : ""; }
+function renderAgents() {
+  const card = document.getElementById("agentsCard");
+  if (!card) return;
+  const notes = data.latest_notes || {}, cache = data.cache_stats || {};
+  const names = (data.players || []).map(p => p.name).filter(n => notes[n] || cache[n]);
+  card.style.display = names.length ? "" : "none";
+  if (!names.length) return;
+  const pctTxt = v => (v === null || v === undefined) ? "" : `${(v * 100).toFixed(1)}%`;
+  setHTML(document.getElementById("agents"), names.map(n => {
+    const c = cache[n] || {}, note = notes[n];
+    const hit = c.warm_hit_rate !== null && c.warm_hit_rate !== undefined ? c.warm_hit_rate : c.hit_rate;
+    return `<div class="ag"><span class="ag-n">${esc(n)}</span><span class="ag-c" title="Cached input tokens / all input tokens (without each game's first 3 moves)">${hit !== undefined && hit !== null ? "cache " + pctTxt(hit) : ""}</span>`
+      + (note ? `<span class="ag-note" title="${esc(note.game)} ply ${esc(note.ply)}">${esc(note.note)}</span>` : "") + `</div>`;
+  }).join(""));
+}
 function route(name) { const p = (data.players || []).find(x => x.name === name); return p ? (p.route || p.provider) : ""; }
 
 // ---- persistent game cards --------------------------------------------------------------
@@ -700,9 +732,10 @@ function updateBar(el, game, side, now) {
   // The side to move's clock runs down live from the moment its model starts thinking.
   let clk = game.clocks ? game.clocks[side] : ((data.config || {}).timeControlMs || 0);
   if (ticking) clk = Math.max(0, clk - think);
-  const thinking = ticking ? `thinking ${clock(think)}` : (moving ? "starting..." : "");
+  const waiting = live && game.waiting && game.waiting.side === side;
+  const thinking = waiting ? "waiting for usage limit" : ticking ? `thinking ${clock(think)}` : (moving ? "starting..." : "");
   el.classList.toggle("to-move", moving);
-  setHTML(el, `<span class="dot ${side[0]}"></span><span class="name" title="${esc(route(name))}">${esc(name)}</span>`
+  setHTML(el, `<span class="dot ${side[0]}"></span><span class="name" title="${esc(route(name))}">${esc(name)}${ladderTag(name, game)}</span>`
     + `<span class="elo">${s.elo ? Math.round(s.elo) : ""}</span><span class="think">${thinking}</span><span class="clock">${clock(clk)}</span>`);
 }
 function keepVisible(box, el) {
@@ -973,10 +1006,11 @@ function render() {
   renderBracket();
   const rows = (data.standings || []).map(r => {
     const d = r.elo_delta || 0;
-    return `<tr class="${r.rank === 1 && (r.played || 0) > 0 ? "rank1" : ""}"><td>${r.rank}</td><td class="player">${esc(r.name)}<span class="route">${esc(route(r.name))}</span></td>`
+    return `<tr class="${r.rank === 1 && (r.played || 0) > 0 ? "rank1" : ""}"><td>${r.rank}</td><td class="player">${esc(r.name)}${ladderTag(r.name)}<span class="route">${esc(route(r.name))}</span></td>`
       + `<td class="num"><b>${r.points}</b></td><td class="num">${Math.round(r.elo)} <span class="${d > 0 ? "up" : d < 0 ? "down" : ""}">${Math.round(d) ? (d > 0 ? "+" : "") + Math.round(d) : ""}</span></td>`
       + `<td class="num">${r.wins}/${r.draws}/${r.losses}</td><td class="num">${r.forfeits}</td><td class="num">${r.flags}</td><td class="num">${r.invalid_attempts}</td></tr>`;
   }).join("");
+  renderAgents();
   setHTML(document.getElementById("standings"), `<table><thead><tr><th>#</th><th>Player</th><th class="num">Pts</th><th class="num">Elo</th><th class="num">W/D/L</th><th class="num" title="Lost by 3 invalid replies">Forf</th><th class="num" title="Lost on time">Flag</th><th class="num" title="Rejected replies">Bad</th></tr></thead><tbody>${rows}</tbody></table>`);
   setHTML(document.getElementById("rounds"), (data.rounds || []).slice().reverse().map(r => {
     const pairs = r.pairings.map(p => {
@@ -2511,12 +2545,42 @@ def publish_status(live_dir: Path, state_path: Path, now: float | None = None) -
     return out
 
 
+def pointer_state(pointer: Path, cache: dict | None = None) -> Path | None:
+    """The state file a pointer JSON names (relative paths are relative to the pointer). Cached by mtime."""
+    pointer = Path(pointer)
+    try:
+        mtime = pointer.stat().st_mtime_ns
+    except OSError:
+        return (cache or {}).get("path")
+    if cache is not None and cache.get("mtime") == mtime:
+        return cache.get("path")
+    try:
+        data = json.loads(pointer.read_text(encoding="utf-8"))
+        path = Path(str(data["state_path"]))
+    except (OSError, ValueError, KeyError, TypeError):
+        return (cache or {}).get("path")   # mid-write: keep the last good answer
+    if not path.is_absolute():
+        path = pointer.parent / path
+    if cache is not None:
+        cache.update(mtime=mtime, path=path)
+    return path
+
+
 class Handler(BaseHTTPRequestHandler):
     state_path: Path | None = None
+    follow: Path | None = None
+    _follow_cache: dict = {}
     live_dir: Path = LIVE_DIR
     analyzer: Analyzer | None = None
     annotator: Annotator | None = None
     commentator = None
+
+    @classmethod
+    def current_state(cls) -> Path | None:
+        """The state to serve: the --follow pointer's target, else --state, else the newest state file."""
+        if cls.follow is not None:
+            return pointer_state(cls.follow, cls._follow_cache)
+        return cls.state_path or newest_state(cls.live_dir)
 
     def log_message(self, fmt: str, *args) -> None:  # keep the console quiet
         pass
@@ -2586,7 +2650,7 @@ class Handler(BaseHTTPRequestHandler):
         if not safe_id(game) or (wanted and not safe_id(wanted)) or not 1 <= ply <= THINK_MAX_PLY or since < 0:
             self._json({"error": "bad game, id, ply or since"}, 400)
             return
-        path = self.live_dir / f"{wanted}-tournament.json" if wanted else (self.state_path or newest_state(self.live_dir))
+        path = self.live_dir / f"{wanted}-tournament.json" if wanted else self.current_state()
         if not path or not path.exists():
             self._json({"error": "no tournament state yet"}, 404)
             return
@@ -2598,7 +2662,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
         elif url.path == "/api/tournament":
             wanted = (parse_qs(url.query).get("id") or [""])[0]
-            path = self.live_dir / f"{wanted}-tournament.json" if wanted else (self.state_path or newest_state(self.live_dir))
+            path = self.live_dir / f"{wanted}-tournament.json" if wanted else self.current_state()
             if not path or not path.exists():
                 self._send(404, b'{"error":"no tournament state yet"}', "application/json")
                 return
@@ -2640,7 +2704,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.analyzer is None:
                 self._send(200, b'{"enabled":false}', "application/json")
                 return
-            path = self.state_path or newest_state(self.live_dir)
+            path = self.current_state()
             try:
                 state = json.loads(path.read_bytes()) if path else {}
                 game = state["games"][query["game"][0]]
@@ -2706,9 +2770,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-annotations", action="store_true", help="no ?? ? ?! ! move marks")
     parser.add_argument("--annotation-depth", type=int, default=NAG_DEPTH)
     parser.add_argument("--commentary", action="store_true", help="serve tools/llm_commentary.py clips")
+    parser.add_argument("--follow", type=Path, help="pointer JSON {state_path, id, number}: always serve the tournament it names")
     args = parser.parse_args(argv)
     Handler.state_path = args.state.resolve() if args.state else None
+    Handler.follow = args.follow.resolve() if args.follow else None
     Handler.live_dir = args.live_dir.resolve()
+    if Handler.follow is not None and "--live-dir" not in (argv if argv is not None else sys.argv[1:]):
+        Handler.live_dir = Handler.follow.parent   # the pointer sits in the live dir next to the state files
     if not args.no_analysis:
         if args.engine.exists():
             Handler.analyzer = Analyzer(args.engine)
@@ -2719,11 +2787,36 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"analysis off: engine not found at {args.engine}", flush=True)
     if args.commentary:
-        Handler.commentator = start_commentator(Handler.state_path or newest_state(Handler.live_dir))
-        if Handler.commentator is not None and Handler.annotator is not None:
-            sp = Handler.state_path or newest_state(Handler.live_dir)
-            Handler.commentator.marks_provider = lambda: Handler.annotator.annotations(sp)
-            Handler.commentator.positions_provider = lambda: Handler.annotator.known(sp)
+        def attach(sp: Path | None):
+            commentator = start_commentator(sp)
+            if commentator is not None and Handler.annotator is not None:
+                commentator.marks_provider = lambda: Handler.annotator.annotations(sp)
+                commentator.positions_provider = lambda: Handler.annotator.known(sp)
+            return commentator
+
+        current = Handler.current_state()
+        Handler.commentator = attach(current)
+        if Handler.follow is not None:
+            def follow_commentary(current=current) -> None:
+                # A new tournament: the old commentator stops, a new one follows the new state file.
+                while True:
+                    time.sleep(5)
+                    latest = Handler.current_state()
+                    if latest is None or latest == current or not latest.exists():
+                        continue
+                    print(f"follow: tournament changed to {latest.name}; restarting commentary", flush=True)
+                    old = Handler.commentator
+                    if old is not None:
+                        try:
+                            old.stop()
+                        except Exception:
+                            pass
+                    Handler.commentator = attach(latest)
+                    current = latest
+
+            threading.Thread(target=follow_commentary, daemon=True).start()
+    if Handler.follow is not None:
+        print(f"follow: {Handler.follow} -> {Handler.current_state()}", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"tournament viewer on http://{args.host}:{args.port}/", flush=True)
     server.serve_forever()
