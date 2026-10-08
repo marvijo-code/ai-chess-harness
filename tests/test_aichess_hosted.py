@@ -50,7 +50,7 @@ class ExporterTest(unittest.TestCase):
         for line in self.page.splitlines():
             if 'method: "POST"' in line:
                 self.assertIn("if (!HOSTED)", line, line)
-        self.assertIn("if (HOSTED) { tourPending = false; return; }", self.page)
+        self.assertIn("if (HOSTED || STREAM) { tourPending = false; return; }", self.page)   # the live stream never tours either
         self.assertIn("setInterval(poll, HOSTED ? 2000 : 1000);", self.page)
         self.assertIn("setInterval(pollCommentary, HOSTED ? 1500 : 1000);", self.page)
         self.assertIn("since=${encodeURIComponent(data.updated_epoch_ms)}", self.page)
