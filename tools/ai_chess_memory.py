@@ -2,13 +2,18 @@
 
 The memory lives in its own git repository (public: github.com/marvijo-code/ai-chess-agent-memory):
 
-    agents/<slug>/MEMORY.md                    index + key lessons, written by the player itself (capped)
-    agents/<slug>/notes/<topic>.md             optional topic notes (capped, limited count)
-    agents/<slug>/games/<tournament>-<game>.md one file per game: result, PGN, notes, memory edits, cache use
-    ladder.json                                Stockfish depth ladder (current depth + every step)
-    tournaments/<slug>.md                      standings of one tournament
-    tournaments/index.md                       every tournament, number and champion
-    tournaments/cache-stats.md (+ .json)       input cache hit rate per player
+    agents/<folder>/MEMORY.md                    index + key lessons, written by the player itself (capped)
+    agents/<folder>/notes/<topic>.md             optional topic notes (capped, limited count)
+    agents/<folder>/games/<tournament>-<game>.md one file per game: result, PGN, notes, memory edits, cache use
+    ladder.json                                  Stockfish depth ladder (current depth + every step)
+    tournaments/<slug>.md                        standings of one tournament
+    tournaments/index.md                         every tournament, number and champion
+    tournaments/cache-stats.md (+ .json)         input cache hit rate per player
+    tournaments/learning.md (+ .json)            per player: memory read at game start, updates applied/rejected
+
+<folder> is the model family (player config `memoryFolder`, e.g. "gemini", "deepseek"; default the name slug), so
+a newer model of the same family keeps learning in the same folder. Every player may READ every folder (the
+reflection prompt shows the other players' MEMORY.md); a player WRITES only to its own folder.
 
 Only this module writes there. Every file is written atomically under one lock; GitPusher commits and pushes
 from a background thread with retries, so a slow or failing push never blocks or crashes a game.
@@ -16,6 +21,7 @@ from a background thread with retries, so a slow or failing push never blocks or
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -39,6 +45,10 @@ LADDER_FILE = "ladder.json"
 
 def slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "player"
+
+
+def text_sha(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:12]
 
 
 def clean_text(text: str) -> str:
@@ -77,6 +87,10 @@ def validate_edits(edits: object, existing_notes: list[str]) -> tuple[list[dict]
             rejected.append(f"edit {index}: not an object")
             continue
         path = edit.get("path")
+        if isinstance(path, str) and (path.startswith(("agents/", "../", "/")) or "/../" in path):
+            rejected.append(f"edit {index}: {path[:60]!r} is outside your own folder; you can read the other players' "
+                            "memory but write only your own MEMORY.md and notes/")
+            continue
         if not isinstance(path, str) or not (path == MEMORY_FILE or NOTE_PATH.match(path)):
             rejected.append(f"edit {index}: path {str(path)[:60]!r} is not MEMORY.md or notes/<lowercase-topic>.md")
             continue
@@ -117,7 +131,8 @@ def parse_reflection(text: str) -> tuple[dict | None, str]:
     if start < 0 or end <= start:
         return None, "the reply has no JSON object"
     try:
-        data = json.loads(text[start:end + 1])
+        # strict=False: models often put raw line breaks inside the long "content" strings.
+        data = json.loads(text[start:end + 1], strict=False)
     except json.JSONDecodeError as exc:
         return None, f"the JSON object does not parse: {exc}"
     if not isinstance(data, dict):
@@ -159,15 +174,24 @@ def ladder_step(ladder: dict, game: dict, ladder_player: str, tournament: str, n
 # ---------------------------------------------------------------- the repository
 
 
+def player_folders(players: list[dict]) -> dict[str, str]:
+    """{player name: memory folder} from the config: `memoryFolder` when set, else the name slug."""
+    return {p["name"]: slugify(p.get("memoryFolder") or p["name"]) for p in players if p.get("provider") != "uci"}
+
+
 class MemoryRepo:
-    def __init__(self, root: Path, log=print) -> None:
+    def __init__(self, root: Path, log=print, folders: dict[str, str] | None = None) -> None:
         self.root = Path(root)
         self.log = log
         self.lock = threading.RLock()
+        self.folders = dict(folders or {})
 
     # -- paths
+    def folder_of(self, name: str) -> str:
+        return self.folders.get(name) or slugify(name)
+
     def agent_dir(self, name: str) -> Path:
-        return self.root / "agents" / slugify(name)
+        return self.root / "agents" / self.folder_of(name)
 
     def memory_text(self, name: str) -> str:
         try:
@@ -187,6 +211,41 @@ class MemoryRepo:
             except OSError:
                 continue
         return out
+
+    def other_memories(self, name: str) -> list[tuple[str, str]]:
+        """(folder, MEMORY.md) of every other player folder in the repo, read-only for `name`."""
+        own = self.folder_of(name)
+        base = self.root / "agents"
+        out = []
+        for folder in sorted(p for p in base.glob("*") if p.is_dir()) if base.is_dir() else []:
+            if folder.name == own:
+                continue
+            try:
+                text = (folder / MEMORY_FILE).read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if text.strip():
+                out.append((folder.name, text))
+        return out
+
+    def migrate_folders(self) -> list[str]:
+        """Move agents/<name slug> to agents/<memoryFolder> once (git mv keeps the history). Idempotent."""
+        moved = []
+        with self.lock:
+            for name, folder in self.folders.items():
+                old, new = self.root / "agents" / slugify(name), self.root / "agents" / folder
+                if old == new or not old.is_dir() or new.exists():
+                    continue
+                done = False
+                if (self.root / ".git").exists():
+                    result = subprocess.run(["git", "-C", str(self.root), "mv", str(old.relative_to(self.root)),
+                                             str(new.relative_to(self.root))], capture_output=True, text=True)
+                    done = result.returncode == 0
+                if not done:
+                    os.replace(old, new)
+                moved.append(f"agents/{old.name} -> agents/{new.name}")
+                self.log(f"memory repo: moved agents/{old.name} to agents/{new.name} ({name})")
+        return moved
 
     # -- writes
     def apply_edits(self, name: str, edits: list[dict]) -> list[str]:
@@ -262,6 +321,16 @@ class MemoryRepo:
             self.write_file("tournaments/index.md", "\n".join(lines))
             self.write_file(f"tournaments/{state['id']}.md", tournament_markdown(state))
 
+    def record_learning(self, state: dict, last_written: dict[str, str]) -> None:
+        """tournaments/learning.json (+ .md): per player, did it read its latest memory and did it write lessons."""
+        with self.lock:
+            data = self.read_json("tournaments/learning.json") or {"tournaments": {}}
+            data.setdefault("tournaments", {})[state["id"]] = {"number": state.get("number"),
+                                                                "players": learning_rows(state)}
+            data["last_written"] = dict(last_written)
+            self.write_json("tournaments/learning.json", data)
+            self.write_file("tournaments/learning.md", learning_markdown(data, state["id"], self.folders))
+
     def record_cache_stats(self, state: dict) -> None:
         """Per player: this tournament and all tournaments together (cumulative json, rendered md)."""
         with self.lock:
@@ -295,6 +364,72 @@ def cache_stats_markdown(data: dict, current: str) -> str:
             hit = row["cached"] / row["input"] if row.get("input") else None
             warm = row["warm_cached"] / row["warm_input"] if row.get("warm_input") else None
             lines.append(f"| {name} | {row.get('calls', 0)} | {row.get('input', 0)} | {row.get('cached', 0)} | {pct(hit)} | {pct(warm)} |")
+        lines.append("")
+    return "\n".join(lines)
+
+
+LEARNING_KEYS = ("games", "read_in_prompt", "read_latest", "reflections", "memory_updates", "note_updates",
+                 "rejected", "errors", "retries")
+
+
+def learning_rows(state: dict) -> dict[str, dict]:
+    """Counts per AI player for one tournament, from the game records.
+
+    read_in_prompt: games where every move's prompt carried the memory read at game start (engine fingerprint).
+    read_latest: games whose start memory was the version the player wrote after its previous game."""
+    rows: dict[str, dict] = {}
+    for game in (state.get("games") or {}).values():
+        if game.get("status") != "finished":
+            continue
+        for side, read in (game.get("memory_read") or {}).items():
+            name = read.get("player")
+            row = rows.setdefault(name, {k: 0 for k in LEARNING_KEYS})
+            row["games"] += 1
+            shas = [m.get("memory_sha") for m in game.get("moves") or [] if m.get("side") == side]
+            if shas and all(s == read.get("sha") for s in shas):
+                row["read_in_prompt"] += 1
+            if read.get("expected") in (None, read.get("sha")):
+                row["read_latest"] += 1
+            refl = (game.get("reflection") or {}).get(name)
+            if not refl:
+                continue
+            if refl.get("error"):
+                row["errors"] += 1
+            else:
+                row["reflections"] += 1
+            applied = refl.get("applied") or []
+            row["memory_updates"] += int(MEMORY_FILE in applied)
+            row["note_updates"] += sum(1 for a in applied if a != MEMORY_FILE)
+            row["rejected"] += len(refl.get("rejected") or [])
+            row["retries"] += int(refl.get("retries") or 0)
+    return rows
+
+
+def learning_markdown(data: dict, current: str, folders: dict[str, str]) -> str:
+    totals: dict[str, dict] = {}
+    for entry in (data.get("tournaments") or {}).values():
+        for name, row in (entry.get("players") or {}).items():
+            t = totals.setdefault(name, {k: 0 for k in LEARNING_KEYS})
+            for key in LEARNING_KEYS:
+                t[key] += int(row.get(key) or 0)
+    lines = ["# Learning check", "",
+             "Each AI player writes only to its own folder (`agents/<folder>/`) and reads every other folder.",
+             "",
+             "- Read in prompt: games where every move request carried the player's MEMORY.md (fingerprint sent by the engine).",
+             "- Read latest: games that started with the exact MEMORY.md the player wrote after its previous game.",
+             "- Memory / note updates: reflections that changed MEMORY.md / a notes file. Rejected: edits over a cap or "
+             "outside the player's folder (the player gets one retry to shorten them).", ""]
+    folder_line = ", ".join(f"{name}: `agents/{folder}/`" for name, folder in sorted(folders.items()))
+    if folder_line:
+        lines += ["Folders: " + folder_line, ""]
+    current_rows = ((data.get("tournaments") or {}).get(current) or {}).get("players") or {}
+    for title, rows in ((f"Current tournament ({current})", current_rows), ("All tournaments since this check started", totals)):
+        lines += [f"## {title}", "",
+                  "| Player | Games | Read in prompt | Read latest | Reflections | MEMORY.md updates | Note updates | Rejected | Retries | Errors |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+        for name, r in sorted(rows.items()):
+            lines.append(f"| {name} | {r['games']} | {r['read_in_prompt']} | {r['read_latest']} | {r['reflections']} | "
+                         f"{r['memory_updates']} | {r['note_updates']} | {r['rejected']} | {r['retries']} | {r['errors']} |")
         lines.append("")
     return "\n".join(lines)
 
@@ -343,6 +478,14 @@ def game_markdown(state: dict, game: dict, player: str, reflection: dict | None,
              f"- Played: {game.get('start')} to {game.get('end')}"]
     if usage and usage.get("input"):
         lines.append(f"- Input tokens: {usage['input']}, cached {usage['cached']} ({pct(usage['cached'] / usage['input'])})")
+    read = (game.get("memory_read") or {}).get(color)
+    if read:
+        shas = [m.get("memory_sha") for m in game.get("moves") or [] if m.get("side") == color]
+        in_prompt = bool(shas) and all(s == read.get("sha") for s in shas)
+        lines.append(f"- Memory read at game start: MEMORY.md {read.get('bytes')} bytes (sha {read.get('sha')}); "
+                     f"in every move prompt: {'yes' if in_prompt else 'no'}")
+    if reflection and reflection.get("read_others"):
+        lines.append("- Read after the game (other players' memory): " + ", ".join(reflection["read_others"]))
     notes = [n for n in game.get("notes") or [] if n.get("player") == player]
     lines += ["", "## My notes during the game", ""]
     lines += [f"- ply {n['ply']} ({n.get('san', '')}): {n['note']}" for n in notes] or ["(none)"]

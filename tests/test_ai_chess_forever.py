@@ -156,6 +156,107 @@ class MemoryEditTest(unittest.TestCase):
         self.assertIn("ply 1 e4?!", FakeClient.prompt)
         self.assertIn("1. e4 e5", FakeClient.prompt)
 
+    def test_reads_other_players_writes_only_own_folder_and_retries_an_oversize_memory(self):
+        root = tmpdir(self)
+        repo = mem.MemoryRepo(root, folders={"Sonnet 5.5": "claude", "GPT-6.1 Sol": "gpt"})
+        repo.write_file("agents/gpt/MEMORY.md", "# GPT\n- Against Sonnet: the Chigorin holds.\n")
+        repo.write_file("agents/deepseek/MEMORY.md", "# DeepSeek\n- Count attackers before captures.\n")
+        cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
+        replies = [json.dumps({"summary": "Lost the c-file.", "edits": [
+                       {"path": "MEMORY.md", "content": "x" * (mem.MEMORY_MAX_BYTES + 50)},
+                       {"path": "notes/c-file.md", "content": "Contest the open c-file."},
+                       {"path": "agents/gpt/MEMORY.md", "content": "overwritten by Sonnet"}]}),
+                   json.dumps({"summary": "", "edits": [
+                       {"path": "MEMORY.md", "content": "# MEMORY\n- Contest open files.\n- Notes: notes/c-file.md\n"}]})]
+        prompts = []
+
+        class FakeClient:
+            last_report = {}
+
+            def ask_text(self, system, prompt, timeout):
+                prompts.append(prompt)
+                return replies[len(prompts) - 1]
+
+        game = {"id": "r1b1", "white": "Sonnet 5.5", "black": "GPT-6.1 Sol", "result": "0-1", "termination": "checkmate",
+                "round": 1, "pgn": "1. e4 e5 *", "notes": [], "moves": []}
+        out = forever.reflect({"name": "Sonnet 5.5", "provider": "claude", "model": "m"}, {"id": "t1", "number": 1},
+                              game, repo, cfg, {}, lambda p, c: FakeClient())
+        self.assertIn("Your folder is agents/claude/", prompts[0])
+        self.assertIn("--- agents/gpt/MEMORY.md ---\n# GPT\n- Against Sonnet: the Chigorin holds.", prompts[0])
+        self.assertIn("--- agents/deepseek/MEMORY.md ---", prompts[0])
+        self.assertEqual(out["read_others"], ["deepseek", "gpt"])
+        self.assertEqual(len(prompts), 2)
+        self.assertIn("YOUR REPLY WAS NOT FULLY ACCEPTED", prompts[1])
+        self.assertIn("over the 6144-byte cap", prompts[1])
+        self.assertIn("outside your own folder", prompts[1])
+        self.assertEqual(out["retries"], 1)
+        self.assertEqual(sorted(out["applied"]), ["MEMORY.md", "notes/c-file.md"])
+        self.assertEqual(out["rejected"], [])
+        self.assertIn("Contest open files", (root / "agents/claude/MEMORY.md").read_text(encoding="utf-8"))
+        self.assertEqual((root / "agents/gpt/MEMORY.md").read_text(encoding="utf-8"),
+                         "# GPT\n- Against Sonnet: the Chigorin holds.\n")
+        self.assertFalse((root / "agents/claude/agents").exists())
+        self.assertEqual(out["memory_after"], mem.text_sha(repo.memory_text("Sonnet 5.5")))
+
+    def test_reflection_json_with_raw_line_breaks_parses(self):
+        data, why = mem.parse_reflection('{"summary": "ok", "edits": [{"path": "MEMORY.md", "content": "# M\n- a\n"}]}')
+        self.assertEqual(why, "")
+        self.assertEqual(data["edits"][0]["content"], "# M\n- a\n")
+
+    def test_folders_move_to_the_model_family_once_with_history(self):
+        root = tmpdir(self)
+        mem.ensure_repo(root, None)
+        mem.MemoryRepo(root).write_file("agents/sonnet-5-5/MEMORY.md", "# Sonnet\n")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "first"], check=True)
+        cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
+        folders = mem.player_folders(cfg["players"])
+        self.assertEqual(folders["Sonnet 5.5"], "claude")
+        self.assertEqual(folders["DeepSeek V4.1 Flash"], "deepseek")
+        self.assertNotIn("Stockfish 19", folders)
+        repo = mem.MemoryRepo(root, folders=folders)
+        self.assertEqual(repo.migrate_folders(), ["agents/sonnet-5-5 -> agents/claude"])
+        self.assertEqual(repo.memory_text("Sonnet 5.5"), "# Sonnet\n")
+        self.assertFalse((root / "agents/sonnet-5-5").exists())
+        self.assertEqual(repo.migrate_folders(), [])
+        status = subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True).stdout
+        self.assertIn("R  agents/sonnet-5-5/MEMORY.md -> agents/claude/MEMORY.md", status)
+
+    def test_learning_check_counts_read_and_written_memory(self):
+        sha = mem.text_sha("# M\n")
+        state = {"id": "t1", "number": 1, "games": {
+            "r1b1": {"status": "finished", "white": "A", "black": "B",
+                     "memory_read": {"white": {"player": "A", "sha": sha, "expected": sha, "bytes": 4},
+                                     "black": {"player": "B", "sha": sha, "expected": "stale0000000", "bytes": 4}},
+                     "moves": [{"side": "white", "memory_sha": sha}, {"side": "black", "memory_sha": sha},
+                               {"side": "white", "memory_sha": sha}, {"side": "black"}],
+                     "reflection": {"A": {"applied": ["MEMORY.md", "notes/x.md"], "rejected": [], "retries": 1},
+                                    "B": {"applied": [], "rejected": ["too big"], "error": ""}}},
+            "r1b2": {"status": "live", "memory_read": {"white": {"player": "A", "sha": sha}}, "moves": []}}}
+        rows = mem.learning_rows(state)
+        self.assertEqual({k: rows["A"][k] for k in ("games", "read_in_prompt", "read_latest", "memory_updates",
+                                                    "note_updates", "retries")},
+                         {"games": 1, "read_in_prompt": 1, "read_latest": 1, "memory_updates": 1, "note_updates": 1, "retries": 1})
+        self.assertEqual((rows["B"]["read_in_prompt"], rows["B"]["read_latest"], rows["B"]["rejected"]), (0, 0, 1))
+        root = tmpdir(self)
+        repo = mem.MemoryRepo(root, folders={"A": "a"})
+        repo.record_learning(state, {"A": sha})
+        self.assertEqual(json.loads((root / "tournaments/learning.json").read_text())["last_written"], {"A": sha})
+        self.assertIn("| A | 1 | 1 | 1 | 1 | 1 | 1 | 0 | 1 | 0 |", (root / "tournaments/learning.md").read_text())
+
+    def test_every_move_request_reports_the_memory_it_carried(self):
+        client = sp.SubscriptionChessClient("claude", lambda m: None)
+        client.context = dict(CONTEXT)
+        client.last_report = {}
+        text = client._turn_text(chess.Board(), GO, [], [], None)
+        self.assertIn(CONTEXT["memory"].strip(), text)
+        self.assertEqual(client.last_report["memory"], {"sha": mem.text_sha(CONTEXT["memory"]),
+                                                        "bytes": len(CONTEXT["memory"].encode("utf-8"))})
+        import play_llm_series as series
+        self.assertEqual(series.parse_memory(["info string usage {}", "info string memory abc123def456 31"]), "abc123def456")
+        # The fingerprint line is never taken for the move comment.
+        self.assertEqual(series.parse_info(["info string memory abc123def456 31"])[0], "")
+
     def test_git_pusher_commits_without_dashes_and_without_a_remote(self):
         root = tmpdir(self)
         mem.ensure_repo(root, None)

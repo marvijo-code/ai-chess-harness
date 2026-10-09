@@ -32,7 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engines" / "llm-chess-engine"))
 import play_llm_swiss as swiss  # noqa: E402
 from ai_chess_memory import (GitPusher, MemoryRepo, MEMORY_MAX_BYTES, MAX_NOTE_FILES, NOTE_MAX_BYTES,  # noqa: E402
-                             ensure_repo, game_markdown, ladder_step, parse_reflection, slugify, validate_edits)
+                             ensure_repo, game_markdown, ladder_step, parse_reflection, player_folders, slugify,
+                             text_sha, validate_edits)
 from play_llm_series import LlmEngine, iso_now, parse_info, parse_note, parse_usage, write_text_retry  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,7 +116,8 @@ def game_header(state: dict, game: dict, side: str, cfg: dict, ladder: dict | No
 
 
 def reflection_prompt(player: str, state: dict, game: dict, memory: str, notes: list[tuple[str, str]],
-                      marks: dict[str, str]) -> str:
+                      marks: dict[str, str], folder: str | None = None,
+                      others: list[tuple[str, str]] | None = None) -> str:
     side = "white" if game["white"] == player else "black"
     opponent = game["black"] if side == "white" else game["white"]
     score = {"1-0": "won" if side == "white" else "lost", "0-1": "won" if side == "black" else "lost",
@@ -133,14 +135,18 @@ def reflection_prompt(player: str, state: dict, game: dict, memory: str, notes: 
         f"({game.get('result')}, {game.get('termination')}). Tournament #{state.get('number')} ({state['id']}), "
         f"{game.get('label') or 'round ' + str(game.get('round'))}.",
         "",
-        "Update your memory so you play better in later games. Your memory files:",
+        "Update your memory so you play better in later games. "
+        f"Your folder is agents/{folder or slugify(player)}/ in the public memory repo. You can READ every player's "
+        "memory (shown below); you can WRITE only your own files. Your memory files:",
         f"- MEMORY.md: an index plus your key lessons. Read at the start of every game and shown with every move. "
-        f"At most {MEMORY_MAX_BYTES} bytes. Keep it concise: merge, sharpen or drop old lessons instead of only "
+        f"At most {MEMORY_MAX_BYTES} bytes (now {len(memory.encode('utf-8'))} bytes; a file over the cap is "
+        "rejected whole). Keep it concise: merge, sharpen or drop old lessons instead of only "
         "appending. List your note files in it, one line each.",
         f"- notes/<topic>.md (lowercase letters, digits and hyphens): optional topic notes, at most {NOTE_MAX_BYTES} "
         f"bytes each and at most {MAX_NOTE_FILES} files. They are not shown during games; MEMORY.md is.",
         "Write only what helps your chess: openings that worked or failed, recurring tactical misses, time use, "
-        "how specific opponents play. No praise, no filler.",
+        "how specific opponents play. No praise, no filler. You may adopt a lesson from another player's memory "
+        "when it is good chess; write it in your own words in your own files.",
         "",
         "Reply with ONLY this JSON object:",
         '{"summary": "<one or two sentences: what you learned from this game>", "edits": ['
@@ -154,6 +160,8 @@ def reflection_prompt(player: str, state: dict, game: dict, memory: str, notes: 
         "YOUR NOTE FILES",
     ]
     parts += [f"--- {rel} ---\n{text.strip()}" for rel, text in notes] or ["(none)"]
+    parts += ["", "OTHER PLAYERS' MEMORY (read-only for you: agents/<folder>/MEMORY.md of every other AI player)"]
+    parts += [f"--- agents/{name}/MEMORY.md ---\n{text.strip()}" for name, text in others or []] or ["(none yet)"]
     parts += ["", "YOUR NOTES DURING THIS GAME"]
     parts += [f"after ply {n['ply']} ({n.get('san', '')}): {n['note']}" for n in own_notes] or ["(none)"]
     parts += ["", "STOCKFISH MOVE MARKS (?? blunder, ? mistake, ?! inaccuracy, ! only good move; viewer analysis "
@@ -219,24 +227,47 @@ def reflect(player: dict, state: dict, game: dict, repo: MemoryRepo, cfg: dict, 
             client_factory=make_client) -> dict:
     """One reflection call for one player; validated edits are applied. Never raises."""
     name = player["name"]
-    out = {"player": name, "summary": "", "applied": [], "rejected": [], "usage": None, "error": ""}
+    out = {"player": name, "summary": "", "applied": [], "rejected": [], "usage": None, "error": "", "retries": 0}
     try:
-        prompt = reflection_prompt(name, state, game, repo.memory_text(name), repo.notes_text(name), marks)
+        others = repo.other_memories(name)
+        out["read_others"] = [folder for folder, _ in others]
+        prompt = reflection_prompt(name, state, game, repo.memory_text(name), repo.notes_text(name), marks,
+                                   repo.folder_of(name), others)
         client = client_factory(player, cfg)
         started = time.monotonic()
-        text = client.ask_text(REFLECTION_SYSTEM, prompt, int(cfg["forever"]["reflectionTimeoutSeconds"]))
+        timeout = int(cfg["forever"]["reflectionTimeoutSeconds"])
+        text = client.ask_text(REFLECTION_SYSTEM, prompt, timeout)
         out["usage"] = (client.last_report or {}).get("usage")
-        out["seconds"] = round(time.monotonic() - started, 1)
         data, why = parse_reflection(text)
-        if data is None:
-            out["error"] = why
-            return out
-        out["summary"] = " ".join(str(data.get("summary") or "").split())[:500]
-        accepted, rejected = validate_edits(data.get("edits") or [], repo.note_paths(name))
+        accepted, rejected = [], []
+        if data is not None:
+            out["summary"] = " ".join(str(data.get("summary") or "").split())[:500]
+            accepted, rejected = validate_edits(data.get("edits") or [], repo.note_paths(name))
+        if data is None or rejected:
+            # One retry: a lesson lost to a few bytes over a cap or to broken JSON is still a lost lesson.
+            out["retries"] = 1
+            problems = [why] if data is None else rejected
+            retry = (prompt + "\n\nYOUR REPLY WAS NOT FULLY ACCEPTED\n" + "\n".join(problems) + "\n"
+                     "Reply again with ONLY the JSON object. Resend only the files that were rejected (or all of "
+                     "them if the JSON did not parse), each within its byte cap.")
+            data2, why2 = parse_reflection(client.ask_text(REFLECTION_SYSTEM, retry, timeout))
+            if data2 is not None:
+                if not out["summary"]:
+                    out["summary"] = " ".join(str(data2.get("summary") or "").split())[:500]
+                done = {e["path"] for e in accepted}
+                more = [e for e in data2.get("edits") or [] if not (isinstance(e, dict) and e.get("path") in done)]
+                notes_now = set(repo.note_paths(name)) | {e["path"] for e in accepted if not e.get("delete")}
+                notes_now -= {e["path"] for e in accepted if e.get("delete")}
+                accepted2, rejected = validate_edits(more, sorted(notes_now))
+                accepted += accepted2
+            elif data is None:
+                out["error"] = why2
+        out["seconds"] = round(time.monotonic() - started, 1)
         out["rejected"] = rejected
         out["applied"] = repo.apply_edits(name, accepted)
     except Exception as exc:
         out["error"] = f"{type(exc).__name__}: {exc}"[:300]
+    out["memory_after"] = text_sha(repo.memory_text(name))
     return out
 
 
@@ -256,6 +287,9 @@ class ForeverHooks(swiss.GameHooks):
         self.ladder = repo.load_ladder(self.ladder_player, int(fv["ladderStartDepth"]))
         self.lock = threading.RLock()
         self.context_dir = live_dir / "contexts"
+        # sha of each player's MEMORY.md right after its last reflection: its next game must start from it.
+        learning = repo.read_json("tournaments/learning.json") or {}
+        self.last_written: dict[str, str] = dict(learning.get("last_written") or {})
 
     def ladder_view(self) -> dict:
         with self.lock:
@@ -285,6 +319,10 @@ class ForeverHooks(swiss.GameHooks):
             engine.send(f"setoption name GameContextFile value {path}")
             with ts.lock:
                 game.setdefault("memory_bytes", {})[side] = len(memory.encode("utf-8"))
+                game.setdefault("memory_read", {})[side] = {
+                    "player": engine.name, "folder": self.repo.folder_of(engine.name),
+                    "bytes": len(memory.encode("utf-8")), "sha": text_sha(memory),
+                    "expected": self.last_written.get(engine.name)}
         ts.save()
 
     def after_game(self, ts, game_id: str) -> None:
@@ -318,6 +356,7 @@ class ForeverHooks(swiss.GameHooks):
             for thread in threads:
                 thread.join()
             for name, result in reflections.items():
+                self.last_written[name] = result["memory_after"]
                 log(f"{game_id} reflection {name}: applied {result['applied'] or 'nothing'}"
                     + (f"; rejected {result['rejected']}" if result["rejected"] else "")
                     + (f"; error {result['error']}" if result["error"] else ""))
@@ -328,8 +367,9 @@ class ForeverHooks(swiss.GameHooks):
             side = "white" if game["white"] == name else "black"
             usage = self.game_usage(game, side)
             text = game_markdown(state, game, name, reflections.get(name), usage)
-            self.repo.write_file(f"agents/{slugify(name)}/games/{state['id']}-{game_id}.md", text)
+            self.repo.write_file(f"agents/{self.repo.folder_of(name)}/games/{state['id']}-{game_id}.md", text)
         self.repo.record_tournament(state)
+        self.repo.record_learning(state, self.last_written)
         self.repo.record_cache_stats(state)
         result_line = f"Tournament #{number} {game_id}: {game['white']} {game['result']} {game['black']}"
         if self.pusher is not None:
@@ -669,9 +709,12 @@ def main(argv: list[str] | None = None) -> int:
     live_dir = args.live_dir.resolve()
     repo_root = (args.memory_repo or Path(fv["memoryRepo"])).resolve()
     ensure_repo(repo_root, None if args.memory_repo else fv.get("memoryRemote"), log)
-    repo = MemoryRepo(repo_root, log)
+    repo = MemoryRepo(repo_root, log, player_folders(cfg["players"]))
+    moved = repo.migrate_folders()
     push = bool(fv.get("push", True)) and not args.no_push
     pusher = GitPusher(repo, push=push, log=log)
+    if moved:
+        pusher.request("Memory folders by model family: " + "; ".join(moved))
     log(f"memory repo {repo_root} (push {'on' if push else 'off'}), live dir {live_dir}")
 
     if args.preflight:
