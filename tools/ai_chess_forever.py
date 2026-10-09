@@ -31,7 +31,8 @@ import chess
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engines" / "llm-chess-engine"))
 import play_llm_swiss as swiss  # noqa: E402
-from ai_chess_memory import (GitPusher, MemoryRepo, MEMORY_MAX_BYTES, MAX_NOTE_FILES, NOTE_MAX_BYTES,  # noqa: E402
+from ai_chess_memory import (GitPusher, MemoryRepo, MEMORY_MAX_BYTES, MEMORY_TARGET_BYTES, MAX_NOTE_FILES,  # noqa: E402
+                             NOTE_MAX_BYTES,
                              ensure_repo, game_markdown, ladder_step, parse_reflection, player_folders, slugify,
                              text_sha, validate_edits)
 from play_llm_series import LlmEngine, iso_now, parse_info, parse_note, parse_usage, write_text_retry  # noqa: E402
@@ -44,6 +45,7 @@ FOREVER_DEFAULTS = {"pauseSeconds": 120, "memoryRepo": str(ROOT / "out" / "ai-ch
                     "reflectionTimeoutSeconds": 600, "marksWaitSeconds": 60, "rosterCheck": True,
                     "rosterCheckTimeoutSeconds": 300, "minPlayers": 3, "rosterRetrySeconds": 900}
 PAUSED_RETRY_SECONDS = 300
+MAX_REFLECTION_RETRIES = 2
 OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
 
 REFLECTION_SYSTEM = (
@@ -139,8 +141,8 @@ def reflection_prompt(player: str, state: dict, game: dict, memory: str, notes: 
         f"Your folder is agents/{folder or slugify(player)}/ in the public memory repo. You can READ every player's "
         "memory (shown below); you can WRITE only your own files. Your memory files:",
         f"- MEMORY.md: an index plus your key lessons. Read at the start of every game and shown with every move. "
-        f"At most {MEMORY_MAX_BYTES} bytes (now {len(memory.encode('utf-8'))} bytes; a file over the cap is "
-        "rejected whole). Keep it concise: merge, sharpen or drop old lessons instead of only "
+        f"Hard cap {MEMORY_MAX_BYTES} bytes, aim for {MEMORY_TARGET_BYTES} or less (now {len(memory.encode('utf-8'))} "
+        "bytes; a file over the cap is rejected whole, so to add a lesson, drop or merge an old one). Keep it concise: merge, sharpen or drop old lessons instead of only "
         "appending. List your note files in it, one line each.",
         f"- notes/<topic>.md (lowercase letters, digits and hyphens): optional topic notes, at most {NOTE_MAX_BYTES} "
         f"bytes each and at most {MAX_NOTE_FILES} files. They are not shown during games; MEMORY.md is.",
@@ -227,7 +229,8 @@ def reflect(player: dict, state: dict, game: dict, repo: MemoryRepo, cfg: dict, 
             client_factory=make_client) -> dict:
     """One reflection call for one player; validated edits are applied. Never raises."""
     name = player["name"]
-    out = {"player": name, "summary": "", "applied": [], "rejected": [], "usage": None, "error": "", "retries": 0}
+    out = {"player": name, "summary": "", "applied": [], "rejected": [], "usage": None, "error": "", "retries": 0,
+           "attempts": []}
     try:
         others = repo.other_memories(name)
         out["read_others"] = [folder for folder, _ in others]
@@ -236,32 +239,42 @@ def reflect(player: dict, state: dict, game: dict, repo: MemoryRepo, cfg: dict, 
         client = client_factory(player, cfg)
         started = time.monotonic()
         timeout = int(cfg["forever"]["reflectionTimeoutSeconds"])
-        text = client.ask_text(REFLECTION_SYSTEM, prompt, timeout)
-        out["usage"] = (client.last_report or {}).get("usage")
-        data, why = parse_reflection(text)
-        accepted, rejected = [], []
-        if data is not None:
-            out["summary"] = " ".join(str(data.get("summary") or "").split())[:500]
-            accepted, rejected = validate_edits(data.get("edits") or [], repo.note_paths(name))
-        if data is None or rejected:
-            # One retry: a lesson lost to a few bytes over a cap or to broken JSON is still a lost lesson.
-            out["retries"] = 1
-            problems = [why] if data is None else rejected
-            retry = (prompt + "\n\nYOUR REPLY WAS NOT FULLY ACCEPTED\n" + "\n".join(problems) + "\n"
-                     "Reply again with ONLY the JSON object. Resend only the files that were rejected (or all of "
-                     "them if the JSON did not parse), each within its byte cap.")
-            data2, why2 = parse_reflection(client.ask_text(REFLECTION_SYSTEM, retry, timeout))
-            if data2 is not None:
+        attempt_prompt, accepted, rejected = prompt, [], []
+        for attempt in range(MAX_REFLECTION_RETRIES + 1):
+            text = client.ask_text(REFLECTION_SYSTEM, attempt_prompt, timeout)
+            if attempt == 0:
+                out["usage"] = (client.last_report or {}).get("usage")
+            data, why = parse_reflection(text)
+            sizes = {}
+            if data is not None:
                 if not out["summary"]:
-                    out["summary"] = " ".join(str(data2.get("summary") or "").split())[:500]
+                    out["summary"] = " ".join(str(data.get("summary") or "").split())[:500]
                 done = {e["path"] for e in accepted}
-                more = [e for e in data2.get("edits") or [] if not (isinstance(e, dict) and e.get("path") in done)]
+                edits = data.get("edits") or []
+                edits = [e for e in edits if not (isinstance(e, dict) and e.get("path") in done)] if isinstance(edits, list) else edits
+                sizes = {e["path"]: len(str(e.get("content") or "").encode("utf-8")) for e in edits
+                         if isinstance(e, dict) and isinstance(e.get("path"), str) and "content" in e}
                 notes_now = set(repo.note_paths(name)) | {e["path"] for e in accepted if not e.get("delete")}
                 notes_now -= {e["path"] for e in accepted if e.get("delete")}
-                accepted2, rejected = validate_edits(more, sorted(notes_now))
-                accepted += accepted2
-            elif data is None:
-                out["error"] = why2
+                more, rejected = validate_edits(edits, sorted(notes_now))
+                accepted += more
+            out["attempts"].append({"bytes": sizes, "rejected": len(rejected), "error": "" if data is not None else why})
+            if data is not None and not rejected:
+                break
+            if data is None and attempt == MAX_REFLECTION_RETRIES:
+                if not accepted:
+                    out["error"] = why
+                break
+            if attempt == MAX_REFLECTION_RETRIES:
+                break
+            # Retry: a lesson lost to a few bytes over a cap or to broken JSON is still a lost lesson.
+            out["retries"] = attempt + 1
+            problems = [why] if data is None else rejected
+            attempt_prompt = (prompt + "\n\nYOUR REPLY WAS NOT FULLY ACCEPTED (try " + str(attempt + 1) + ")\n"
+                              + "\n".join(problems) + "\n"
+                              "Reply again with ONLY the JSON object. Resend only the files that were rejected (or all "
+                              "of them if the JSON did not parse). Count bytes: cut at least the amount stated, by "
+                              "merging or dropping your weakest lessons; do not only shorten words.")
         out["seconds"] = round(time.monotonic() - started, 1)
         out["rejected"] = rejected
         out["applied"] = repo.apply_edits(name, accepted)
