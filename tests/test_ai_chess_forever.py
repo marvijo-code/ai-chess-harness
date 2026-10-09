@@ -198,6 +198,38 @@ class MemoryEditTest(unittest.TestCase):
         self.assertFalse((root / "agents/claude/agents").exists())
         self.assertEqual(out["memory_after"], mem.text_sha(repo.memory_text("Sonnet 5.5")))
 
+    def test_an_oversize_memory_gets_two_retries_with_the_bytes_to_cut(self):
+        root = tmpdir(self)
+        repo = mem.MemoryRepo(root, folders={"GPT-6.1 Sol": "gpt"})
+        repo.write_file("agents/gpt/MEMORY.md", "# GPT\n" + "- old lesson\n" * 400)
+        cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
+        sizes = [mem.MEMORY_MAX_BYTES + 900, mem.MEMORY_MAX_BYTES + 200, 4000]
+        prompts = []
+
+        class FakeClient:
+            last_report = {}
+
+            def ask_text(self, system, prompt, timeout):
+                prompts.append(prompt)
+                body = "# GPT\n" + "y" * (sizes[len(prompts) - 1] - 7) + "\n"
+                edits = [{"path": "MEMORY.md", "content": body}]
+                if len(prompts) == 1:
+                    edits.append({"path": "notes/ruy.md", "content": "Ruy: fine."})
+                return json.dumps({"summary": "s", "edits": edits})
+
+        game = {"id": "r1b2", "white": "Sonnet 5.5", "black": "GPT-6.1 Sol", "result": "1/2-1/2",
+                "termination": "draw", "round": 1, "pgn": "*", "notes": [], "moves": []}
+        out = forever.reflect({"name": "GPT-6.1 Sol", "provider": "codex", "model": "m"}, {"id": "t", "number": 1},
+                              game, repo, cfg, {}, lambda p, c: FakeClient())
+        self.assertIn(f"aim for {mem.MEMORY_TARGET_BYTES} or less", prompts[0])
+        self.assertIn(f"cut at least {mem.MEMORY_MAX_BYTES + 900 - mem.MEMORY_TARGET_BYTES} bytes", prompts[1])
+        self.assertIn("(try 2)", prompts[2])
+        self.assertEqual(out["retries"], 2)
+        self.assertEqual(sorted(out["applied"]), ["MEMORY.md", "notes/ruy.md"])
+        self.assertEqual(out["rejected"], [])
+        self.assertEqual([a["bytes"].get("MEMORY.md") for a in out["attempts"]], sizes)
+        self.assertEqual(len(repo.memory_text("GPT-6.1 Sol").encode("utf-8")), 4000)
+
     def test_reflection_json_with_raw_line_breaks_parses(self):
         data, why = mem.parse_reflection('{"summary": "ok", "edits": [{"path": "MEMORY.md", "content": "# M\n- a\n"}]}')
         self.assertEqual(why, "")

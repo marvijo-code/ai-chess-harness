@@ -33,6 +33,7 @@ from pathlib import Path
 
 MEMORY_FILE = "MEMORY.md"
 MEMORY_MAX_BYTES = 6144
+MEMORY_TARGET_BYTES = 5200  # what the prompt asks for: models undercount bytes
 NOTE_MAX_BYTES = 4096
 MAX_NOTE_FILES = 8
 MAX_EDITS = 6
@@ -109,7 +110,9 @@ def validate_edits(edits: object, existing_notes: list[str]) -> tuple[list[dict]
         cap = MEMORY_MAX_BYTES if path == MEMORY_FILE else NOTE_MAX_BYTES
         size = len(text.encode("utf-8"))
         if size > cap:
-            rejected.append(f"edit {index}: {path} is {size} bytes, over the {cap}-byte cap")
+            target = MEMORY_TARGET_BYTES if path == MEMORY_FILE else int(cap * 0.85)
+            rejected.append(f"edit {index}: {path} is {size} bytes, over the {cap}-byte cap: "
+                            f"cut at least {size - target} bytes (to about {target})")
             continue
         if path != MEMORY_FILE and path not in notes and len(notes) >= MAX_NOTE_FILES:
             rejected.append(f"edit {index}: {path} would be note file {len(notes) + 1}, over the limit of {MAX_NOTE_FILES}")
