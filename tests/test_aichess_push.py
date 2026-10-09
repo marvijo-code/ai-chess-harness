@@ -151,14 +151,96 @@ def test_restart_uses_relay_last_seq(tmp_path):
     assert metas == [46, 47, 48, 49, 50]
 
 
-def test_restart_uses_status_file_when_relay_is_empty(tmp_path):
-    (tmp_path / "t-1-publish-status.json").write_text(json.dumps({"last_clip_seq": 48}))
-    p, http, mono, _ = make(tmp_path)
-    for _ in range(3):
+def clip_metas(http) -> list[dict]:
+    return [json.loads(b)[0] for path, b, _ in http.posts if path == "/ingest/clips"]
+
+
+def run_cycles(p, mono, n, step=1.1):
+    for _ in range(n):
         p.cycle()
-        mono.now += 1.1
-    metas = [json.loads(b)[0]["seq"] for path, b, _ in http.posts if path == "/ingest/clips"]
-    assert metas == [49, 50]
+        mono.now += step
+
+
+def test_archived_relay_beats_a_stale_status_file(tmp_path):
+    # 2026-10-08 on the VPS: relay data dir archived (healthz 0), status file still said 509.
+    (tmp_path / "t-1-publish-status.json").write_text(json.dumps({"last_clip_seq": 509}))
+    http = FakeHttp()
+    http.clips = [{"seq": s, "game": "r1b1", "audio": f"clip-{s}.wav", "text": f"c{s}"} for s in range(1, 521)]
+    http.relay_health = {"ok": True, "last_clip_seq": 0, "tournament_id": "t-1"}
+    p, http, mono, logs = make(tmp_path, http)
+    run_cycles(p, mono, 6)
+    assert [c["seq"] for c in clip_metas(http)] == list(range(501, 521))
+    assert p.clips_pushed == 20 and p.last_seq == 520
+    assert any("cursor 509 -> None" in line for line in logs)
+
+
+def test_relay_reset_while_running_resends_newest(tmp_path):
+    p, http, mono, _ = make(tmp_path)
+    run_cycles(p, mono, 6)
+    assert len(clip_metas(http)) == 20 and p.last_seq == 50
+    http.relay_health = {"ok": True, "last_clip_seq": 0, "tournament_id": "t-1"}   # relay archived
+    run_cycles(p, mono, 5)                    # before the next health read: nothing new to send
+    assert len(clip_metas(http)) == 20
+    mono.now += push.HEALTH_EVERY
+    run_cycles(p, mono, 6)
+    assert [c["seq"] for c in clip_metas(http)][20:] == list(range(31, 51))
+
+
+def test_relay_ahead_of_status_file_still_wins(tmp_path):
+    (tmp_path / "t-1-publish-status.json").write_text(json.dumps({"last_clip_seq": 10}))
+    http = FakeHttp()
+    http.relay_health = {"ok": True, "last_clip_seq": 48, "tournament_id": "t-1"}
+    p, http, mono, _ = make(tmp_path, http)
+    run_cycles(p, mono, 3)
+    assert [c["seq"] for c in clip_metas(http)] == [49, 50]
+
+
+def test_fresh_viewer_renumbered_from_1_is_not_skipped(tmp_path):
+    # The relay persisted clips up to 509; the new viewer process counts from 1 again.
+    http = FakeHttp()
+    http.clips = [{"seq": s, "game": "r1b1", "audio": f"clip-{s}.wav", "text": f"new{s}"} for s in range(1, 6)]
+    http.relay_health = {"ok": True, "last_clip_seq": 509, "tournament_id": "t-1"}
+    p, http, mono, logs = make(tmp_path, http)
+    run_cycles(p, mono, 4)
+    metas = clip_metas(http)
+    assert [c["seq"] for c in metas] == [1, 2, 3, 4, 5]
+    assert all(c["tournament_id"] == "t-1" for c in metas)
+    assert any("local newest seq 5 is below cursor 509" in line for line in logs)
+    # An old relay still says 509 on the next health read: the cursor must not jump back up.
+    mono.now += push.HEALTH_EVERY
+    http.clips.append({"seq": 6, "game": "r1b1", "audio": "clip-6.wav", "text": "new6"})
+    run_cycles(p, mono, 2)
+    assert [c["seq"] for c in clip_metas(http)] == [1, 2, 3, 4, 5, 6] and p.last_seq == 6
+
+
+def test_empty_fresh_viewer_pushes_its_first_clip(tmp_path):
+    http = FakeHttp()
+    http.clips = []
+    http.relay_health = {"ok": True, "last_clip_seq": 509, "tournament_id": "t-1"}
+    p, http, mono, _ = make(tmp_path, http)
+    run_cycles(p, mono, 2)
+    assert p.last_seq is None
+    mono.now += push.HEALTH_EVERY                # health read again (still 509): stays None
+    http.clips = [{"seq": 1, "game": "r1b1", "audio": "clip-1.wav", "text": "first"}]
+    run_cycles(p, mono, 2)
+    assert [c["seq"] for c in clip_metas(http)] == [1]
+
+
+def test_relay_clips_of_another_tournament_mean_newest_20(tmp_path):
+    http = FakeHttp()
+    http.relay_health = {"ok": True, "last_clip_seq": 45, "tournament_id": "t-1", "clips_tournament_id": "t-0"}
+    p, http, mono, _ = make(tmp_path, http)
+    run_cycles(p, mono, 6)
+    assert [c["seq"] for c in clip_metas(http)] == list(range(31, 51))
+
+
+def test_idle_local_probe_is_rate_limited(tmp_path):
+    http = FakeHttp()
+    http.relay_health = {"ok": True, "last_clip_seq": 50, "tournament_id": "t-1"}
+    p, http, mono, _ = make(tmp_path, http)
+    run_cycles(p, mono, 10)                   # 11 s idle at the cursor: one probe only
+    probes = [g for g in http.gets if g == LOCAL + "/api/commentary?after=0"]
+    assert len(probes) == 1 and p.last_seq == 50 and clip_metas(http) == []
 
 
 def test_thinking_pushed_when_size_changes_and_rate_limited(tmp_path):
