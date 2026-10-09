@@ -498,6 +498,8 @@ class LlmChessUci:
         report = getattr(self.client, "last_report", None) or {}
         if report.get("usage"):
             print(f"info string usage {json.dumps(report['usage'], separators=(',', ':'))}", flush=True)
+        if report.get("memory"):
+            print(f"info string memory {report['memory']['sha']} {report['memory']['bytes']}", flush=True)
         if report.get("note"):
             print(f"info string note {' '.join(str(report['note']).split())[:240]}", flush=True)
         if report.get("tries", 0) > 1 or report.get("illegal"):

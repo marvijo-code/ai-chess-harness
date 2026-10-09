@@ -144,14 +144,28 @@ default with `COMMENTARY_ROUTE=codex` (codex subscription text, free edge-tts vo
 ## Agent memory (github.com/marvijo-code/ai-chess-agent-memory)
 
 ```
-agents/<slug>/MEMORY.md                    index + key lessons, at most 6144 bytes
-agents/<slug>/notes/<topic>.md             optional, at most 4096 bytes each, at most 8 files
-agents/<slug>/games/<tournament>-<game>.md result, my notes, memory changes, input tokens, PGN
+agents/<folder>/MEMORY.md                    index + key lessons, at most 6144 bytes
+agents/<folder>/notes/<topic>.md             optional, at most 4096 bytes each, at most 8 files
+agents/<folder>/games/<tournament>-<game>.md result, my notes, memory read + changes, input tokens, PGN
 ladder.json
 tournaments/index.md (+ index.json)        every tournament, number and champion
 tournaments/<slug>.md                      round robin table and games
 tournaments/cache-stats.md (+ .json)       input cache hit rate per player, this tournament and all
+tournaments/learning.md (+ .json)          learning check per player (see below)
 ```
+
+- **Folders by model family** (owner 2026-10-09: "llms can read other llm's knowledge as well, but can only
+  write to their own, e.g., gemini3.8 to the gemini folder, deepseek4.1 to deepseek folder"). Player config
+  `memoryFolder`: Sonnet 5.5 -> `claude`, GPT-6.1 Sol -> `gpt`, DeepSeek V4.1 Flash -> `deepseek`,
+  GLM 5.3 Flash -> `glm`, Gemini 3.8 Flash -> `gemini`. A newer model of the same family keeps the folder.
+  On start the runner moves an old `agents/<name-slug>` folder to its family folder once (`git mv`).
+- **Read all, write own.** The reflection prompt shows every other folder's MEMORY.md (read-only). Edits
+  may only target `MEMORY.md` and `notes/<topic>.md` of the player's own folder; a path like
+  `agents/gpt/MEMORY.md` is rejected with "outside your own folder".
+- **Learning check** (`tournaments/learning.md`): per player, games where every move prompt carried its
+  MEMORY.md (the engine reports `info string memory <sha> <bytes>` per move, stored as `moves[].memory_sha`),
+  games that started with the exact MEMORY.md written after the player's previous game (`memory_read` in
+  the game record vs `last_written`), reflections, MEMORY.md and note updates, rejected edits, retries, errors.
 
 - At the start of each game the runner writes a context file (`out/live/contexts/<id>-<game>-<side>.json`
   with the player's MEMORY.md and the game header) and sends `setoption name GameContextFile`. The
@@ -164,6 +178,9 @@ tournaments/cache-stats.md (+ .json)       input cache hit rate per player, this
   `{"summary", "edits": [{"path", "content"} | {"path", "delete": true}]}`. Edits are validated:
   only `MEMORY.md` and `notes/<lowercase-topic>.md`, no other path, size caps enforced by rejecting
   (never truncating), at most 6 edits, at most 8 note files, em and en dashes turned into " - ".
+  JSON is parsed with `strict=False` (raw line breaks inside strings). When the reply does not parse or
+  any edit is rejected, the player gets ONE retry with the reasons (2026-10-09: GPT-6.1 Sol's MEMORY.md
+  had been stuck since Tournament #2 because every rewrite was 50 to 900 bytes over the cap).
 - Then the runner commits and pushes in the background (one commit per finished game, plain message,
   no attribution). A failed push retries from 30 s doubling to 10 min and never blocks a game.
 - Stockfish has no memory.

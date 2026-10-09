@@ -37,7 +37,7 @@ import chess
 import chess.pgn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from play_llm_series import (LlmEngine, iso_now, move_comment, parse_info, parse_note, parse_usage,  # noqa: E402
+from play_llm_series import (LlmEngine, iso_now, move_comment, parse_info, parse_memory, parse_note, parse_usage,  # noqa: E402
                              write_text_retry)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -607,6 +607,9 @@ def _play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: 
                      "illegal": illegal, "comment": comment[:400], "clock_ms": clocks[side]}
             if usage:
                 entry["usage"] = usage
+            memory_sha = parse_memory(lines)
+            if memory_sha:
+                entry["memory_sha"] = memory_sha
             if note:
                 entry["note"] = note[:200]
                 record.setdefault("notes", []).append({"ply": len(history), "side": side_name, "player": engine.name,

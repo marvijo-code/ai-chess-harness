@@ -258,6 +258,15 @@ def parse_usage(lines: list[str]) -> dict | None:
     return None
 
 
+def parse_memory(lines: list[str]) -> str | None:
+    """Fingerprint of the memory inside this move's prompt (`info string memory <sha> <bytes>`)."""
+    for line in reversed(lines):
+        if line.startswith("info string memory "):
+            parts = line.split()
+            return parts[3] if len(parts) > 3 else None
+    return None
+
+
 def parse_info(lines: list[str]) -> tuple[str, int, list[str]]:
     comment, tries, illegal = "", 1, []
     for line in lines:
@@ -265,7 +274,7 @@ def parse_info(lines: list[str]) -> tuple[str, int, list[str]]:
             continue
         text = line[len("info string "):]
         match = re.match(r"attempts tries=(\d+) illegal=(\S+)", text)
-        if text.startswith(("thinkms ", "hurried ", "clockstart ", "usage ", "note ", "limitwait ")):
+        if text.startswith(("thinkms ", "hurried ", "clockstart ", "usage ", "note ", "limitwait ", "memory ")):
             continue
         if match:
             tries = int(match.group(1))

@@ -15,6 +15,7 @@ never picks a move for the model.
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -806,6 +807,10 @@ class SubscriptionChessClient:
         image = self.board_image and self._image is not None
         if self.context is None:
             return build_prompt(board, go_args, history, rejections, self.show_legal, cap, self._nudge, self.board_image)
+        # Proof of read: the fingerprint of the memory that is inside this request (or its session).
+        memory = self.context.get("memory") or ""
+        self.last_report["memory"] = {"sha": hashlib.sha256(memory.encode("utf-8")).hexdigest()[:12],
+                                      "bytes": len(memory.encode("utf-8"))}
         conv = self._conv if self.conversation else None
         if conv and conv.get("started"):
             if rejections and conv.get("turn_plies") == len(history):
