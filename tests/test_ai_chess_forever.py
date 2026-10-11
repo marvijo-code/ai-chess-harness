@@ -35,35 +35,112 @@ def tmpdir(test) -> Path:
 
 
 class LadderTest(unittest.TestCase):
-    def game(self, white, black, result, depth=4):
-        return {"id": "r1b1", "white": white, "black": black, "result": result, "stockfish_depth": depth,
-                "termination": "checkmate"}
+    SF = "Stockfish 19"
 
-    def test_only_an_ai_win_against_stockfish_raises_the_depth(self):
-        ladder = mem.new_ladder("Stockfish 19", 4)
-        self.assertIsNone(mem.ladder_step(ladder, self.game("Sonnet", "Stockfish 19", "1/2-1/2"), "Stockfish 19", "t", 1, "now"))
-        self.assertIsNone(mem.ladder_step(ladder, self.game("Sonnet", "Stockfish 19", "0-1"), "Stockfish 19", "t", 1, "now"))
-        self.assertIsNone(mem.ladder_step(ladder, self.game("Sonnet", "GPT", "1-0"), "Stockfish 19", "t", 1, "now"))
-        self.assertIsNone(mem.ladder_step(ladder, self.game("Sonnet", "Stockfish 19", "*"), "Stockfish 19", "t", 1, "now"))
-        self.assertEqual(ladder["depth"], 4)
-        step = mem.ladder_step(ladder, self.game("Stockfish 19", "GPT", "0-1"), "Stockfish 19", "t", 1, "now")
-        self.assertEqual((step["from"], step["to"], step["winner"], step["color"], step["game"]), (4, 5, "GPT", "black", "r1b1"))
-        mem.ladder_step(ladder, self.game("Sonnet", "Stockfish 19", "1-0", depth=5), "Stockfish 19", "t", 1, "now")
-        self.assertEqual(ladder["depth"], 6)
-        self.assertEqual([s["to"] for s in ladder["steps"]], [5, 6])
+    def game(self, white, black, result, depth=4, gid="r1b1", end_kind="board", termination="checkmate"):
+        return {"id": gid, "white": white, "black": black, "result": result, "stockfish_depth": depth,
+                "termination": termination, "end_kind": end_kind}
 
-    def test_ladder_persists_and_later_games_use_the_new_depth(self):
+    def play(self, ladder, ai, outcome, ai_white=True, **kw):
+        result = {"win": "1-0" if ai_white else "0-1", "loss": "0-1" if ai_white else "1-0", "draw": "1/2-1/2"}[outcome]
+        white, black = (ai, self.SF) if ai_white else (self.SF, ai)
+        return mem.ladder_step(ladder, self.game(white, black, result, depth=mem.ladder_depth(ladder, ai), **kw),
+                               self.SF, "t", 1, "now")
+
+    def test_win_win_steps_up_and_resets_the_streak(self):
+        ladder = mem.new_ladder(self.SF, 4)
+        first = self.play(ladder, "Sonnet", "win")
+        self.assertEqual((first["outcome"], first["streak"], first["stepped"], first["depth"]), ("win", 1, False, 4))
+        self.assertEqual(mem.ladder_depth(ladder, "Sonnet"), 4)
+        second = self.play(ladder, "Sonnet", "win", ai_white=False)
+        self.assertEqual((second["stepped"], second["from"], second["to"], second["streak"]), (True, 4, 5, 0))
+        self.assertEqual(ladder["players"]["Sonnet"]["depth"], 5)
+        self.assertEqual(ladder["players"]["Sonnet"]["streak"], 0)
+        self.assertEqual([(s["from"], s["to"], s["color"]) for s in ladder["players"]["Sonnet"]["steps"]], [(4, 5, "black")])
+
+    def test_win_loss_win_does_not_step(self):
+        ladder = mem.new_ladder(self.SF, 4)
+        self.play(ladder, "GPT", "win")
+        lost = self.play(ladder, "GPT", "loss")
+        self.assertEqual((lost["outcome"], lost["streak"]), ("loss", 0))
+        self.play(ladder, "GPT", "win")
+        self.assertEqual((ladder["players"]["GPT"]["depth"], ladder["players"]["GPT"]["streak"]), (4, 1))
+        self.assertEqual(ladder["players"]["GPT"]["steps"], [])
+
+    def test_win_draw_win_steps(self):
+        ladder = mem.new_ladder(self.SF, 4)
+        self.play(ladder, "GPT", "win")
+        drew = self.play(ladder, "GPT", "draw")
+        self.assertEqual((drew["outcome"], drew["streak"]), ("draw", 1))
+        step = self.play(ladder, "GPT", "win")
+        self.assertTrue(step["stepped"])
+        self.assertEqual(ladder["players"]["GPT"]["depth"], 5)
+
+    def test_a_forfeit_or_flag_by_the_ai_is_a_loss_even_as_a_dead_draw(self):
+        ladder = mem.new_ladder(self.SF, 4)
+        self.play(ladder, "GLM", "win")
+        dead = mem.ladder_step(ladder, self.game("GLM", self.SF, "1/2-1/2", end_kind="flag",
+                                                termination="GLM lost on time, but Stockfish 19 cannot checkmate"),
+                               self.SF, "t", 1, "now")
+        self.assertEqual((dead["outcome"], ladder["players"]["GLM"]["streak"]), ("loss", 0))
+        self.play(ladder, "GLM", "win")
+        self.play(ladder, "GLM", "loss", end_kind="forfeit", termination="GLM forfeited after 3 invalid replies")
+        self.assertEqual(ladder["players"]["GLM"]["streak"], 0)
+
+    def test_games_without_stockfish_or_unfinished_change_nothing(self):
+        ladder = mem.new_ladder(self.SF, 4)
+        self.assertIsNone(mem.ladder_step(ladder, self.game("Sonnet", "GPT", "1-0"), self.SF, "t", 1, "now"))
+        self.assertIsNone(mem.ladder_step(ladder, self.game("Sonnet", self.SF, "*"), self.SF, "t", 1, "now"))
+        self.assertEqual(ladder["players"], {})
+
+    def test_each_ai_has_its_own_ladder(self):
+        ladder = mem.new_ladder(self.SF, 4)
+        self.play(ladder, "Sonnet", "win")
+        self.play(ladder, "Sonnet", "win")
+        self.play(ladder, "GPT", "win")
+        self.assertEqual(mem.ladder_depth(ladder, "Sonnet"), 5)
+        self.assertEqual(mem.ladder_depth(ladder, "GPT"), 4)
+        self.assertEqual(mem.ladder_depth(ladder, "DeepSeek"), 4, "a new player starts at start_depth")
+        self.assertEqual(ladder["players"]["DeepSeek"]["streak"], 0)
+        self.assertEqual(mem.ladder_lines(ladder), ["DeepSeek: depth 4, streak 0 of 2", "GPT: depth 4, streak 1 of 2",
+                                                     "Sonnet: depth 5, streak 0 of 2"])
+
+    def test_an_old_shared_ladder_file_is_migrated(self):
+        root = tmpdir(self)
+        old_steps = [{"from": 4, "to": 5, "winner": "Sonnet 5.5", "game": "r1b1"},
+                     {"from": 5, "to": 6, "winner": "GPT-6.1 Sol", "game": "r2b1"}]
+        (root / mem.LADDER_FILE).write_text(json.dumps({"player": self.SF, "depth": 6, "start_depth": 4,
+                                                        "steps": old_steps, "updated_at": "then"}))
+        ladder = mem.MemoryRepo(root).load_ladder(self.SF, 4)
+        on_disk = json.loads((root / mem.LADDER_FILE).read_text())
+        for data in (ladder, on_disk):
+            self.assertNotIn("depth", data)
+            self.assertNotIn("steps", data)
+            self.assertEqual(data["history"], old_steps)
+            self.assertEqual((data["player"], data["start_depth"], data["players"]), (self.SF, 4, {}))
+        self.assertEqual(mem.ladder_depth(ladder, "GPT-6.1 Sol"), 4, "everyone starts again at depth 4")
+        # A file already in the new format is kept as it is.
+        again = mem.MemoryRepo(root).load_ladder(self.SF, 4)
+        self.assertEqual(again["history"], old_steps)
+
+    def test_depth_is_chosen_per_opponent_and_persists(self):
         root = tmpdir(self)
         repo = mem.MemoryRepo(root)
         cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
         cfg["forever"]["reflection"] = False
         hooks = forever.ForeverHooks(cfg, repo, None, root / "live")
+        on_disk = json.loads((root / "ladder.json").read_text())
+        ais = [p["name"] for p in cfg["players"] if p.get("provider") != "uci"]
+        self.assertEqual({n: (p["depth"], p["streak"]) for n, p in on_disk["players"].items()}, {n: (4, 0) for n in ais},
+                         "every AI in the config starts at depth 4")
         state = swiss.new_state(cfg, "t-ladder")
         state["number"] = 1
-        state["games"] = {"r1b1": {"id": "r1b1", "round": 1, "board": 1, "white": "Sonnet 5.5", "black": "Stockfish 19",
-                                   "result": "*", "moves": []},
-                          "r2b1": {"id": "r2b1", "round": 2, "board": 1, "white": "Stockfish 19", "black": "GPT-6.1 Sol",
-                                   "result": "*", "moves": []}}
+        games = {}
+        for i, (white, black) in enumerate([("Sonnet 5.5", self.SF), (self.SF, "Sonnet 5.5"), (self.SF, "GPT-6.1 Sol"),
+                                            ("Sonnet 5.5", self.SF)], start=1):
+            games[f"r{i}b1"] = {"id": f"r{i}b1", "round": i, "board": 1, "white": white, "black": black,
+                                "result": "*", "moves": []}
+        state["games"] = games
         ts = swiss.TournamentState(state, root / "live" / "t-ladder-tournament.json")
         (root / "live").mkdir()
         sent = []
@@ -76,20 +153,36 @@ class LadderTest(unittest.TestCase):
                 sent.append((self.name, line))
 
         players = {p["name"]: p for p in state["players"]}
-        hooks.before_game(ts, "r1b1", FakeEngine(players["Sonnet 5.5"]), FakeEngine(players["Stockfish 19"]))
-        self.assertEqual(state["games"]["r1b1"]["stockfish_depth"], 4)
+
+        def play(gid, result):
+            g = state["games"][gid]
+            hooks.before_game(ts, gid, FakeEngine(players[g["white"]]), FakeEngine(players[g["black"]]))
+            depth = g["stockfish_depth"]
+            g.update(result=result, termination="checkmate", end_kind="board", pgn="")
+            hooks.after_game(ts, gid)
+            return depth
+
+        self.assertEqual(play("r1b1", "1-0"), 4)
         self.assertTrue(any(line.startswith("setoption name GameContextFile value ") for _n, line in sent))
-        state["games"]["r1b1"].update(result="1-0", termination="checkmate", pgn="")
-        hooks.after_game(ts, "r1b1")
-        self.assertEqual(json.loads((root / "ladder.json").read_text())["depth"], 5)
-        hooks.before_game(ts, "r2b1", FakeEngine(players["Stockfish 19"]), FakeEngine(players["GPT-6.1 Sol"]))
-        self.assertEqual(state["games"]["r2b1"]["stockfish_depth"], 5)
-        self.assertEqual(players["Stockfish 19"]["depth"], 5)
-        self.assertEqual(state["ladder"]["depth"], 5)
+        self.assertEqual(state["ladder"]["players"]["Sonnet 5.5"], {"depth": 4, "streak": 1})
+        self.assertEqual(play("r2b1", "0-1"), 4)
+        self.assertEqual(state["ladder"]["players"]["Sonnet 5.5"], {"depth": 5, "streak": 0})
+        self.assertEqual(json.loads((root / "ladder.json").read_text())["players"]["Sonnet 5.5"]["depth"], 5)
+        self.assertEqual(play("r3b1", "1/2-1/2"), 4, "GPT still plays Stockfish at its own depth")
+        self.assertEqual(players[self.SF]["depth"], 4)
+        self.assertEqual(play("r4b1", "0-1"), 5, "Sonnet now plays depth 5")
+        self.assertEqual(state["ladder"]["players"]["Sonnet 5.5"], {"depth": 5, "streak": 0})
+        self.assertEqual(set(state["ladder"]), {"player", "start_depth", "wins_to_step", "players", "last_step"})
+        self.assertEqual(state["ladder"]["last_step"]["outcome"], "loss")
+        header = forever.game_header(state, state["games"]["r4b1"], "white", cfg, state["ladder"])
+        self.assertIn("search depth 5", header)
+        md = mem.tournament_markdown(state)
+        self.assertIn("- Sonnet 5.5: depth 5, streak 0 of 2", md)
+        self.assertIn("- GPT-6.1 Sol: depth 4, streak 0 of 2", md)
         # A restart loads the ladder from the repo, not from the config.
         again = forever.ForeverHooks(cfg, mem.MemoryRepo(root), None, root / "live")
-        self.assertEqual(again.ladder["depth"], 5)
-        self.assertEqual(again.ladder["steps"][0]["winner"], "Sonnet 5.5")
+        self.assertEqual(again.ladder["players"]["Sonnet 5.5"]["depth"], 5)
+        self.assertEqual(again.ladder["players"]["Sonnet 5.5"]["steps"][0]["game"], "r2b1")
 
 
 class MemoryEditTest(unittest.TestCase):
@@ -585,7 +678,8 @@ class ForeverLoopTest(unittest.TestCase):
 
         def fake_run(state, cfg_, status_path, log):
             played.append((state["id"], state["number"], forever.read_pointer(live / "current.json")["id"]))
-            self.assertEqual(state["ladder"]["depth"], 4)
+            self.assertTrue(state["ladder"]["players"])
+            self.assertTrue(all(p["depth"] == 4 for p in state["ladder"]["players"].values()))
             state["finished"] = True
             swiss.TournamentState(state, status_path).save()
             return 0

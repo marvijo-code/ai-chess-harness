@@ -70,6 +70,7 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 18px; pa
 .boards > .card[data-game] { width: 100%; max-width: max(360px, calc(100vh - 575px)); justify-self: center; }
 .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
 .ladder-tag { color: var(--muted); font-weight: 400; white-space: nowrap; }
+.ladder-line { display: block; color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.25; white-space: normal; }
 #agents .ag { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 6px 0; border-top: 1px solid var(--line); }
 #agents .ag:first-child { border-top: 0; }
 #agents .ag-n { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
@@ -840,13 +841,21 @@ function boardHtml(squares, last) {
 }
 function nagHtml(mark) { return mark ? `<span class="nag ${NAG_CLASS[mark] || ""}" title="${NAG_TITLE[mark] || ""} (Stockfish, viewers only)">${esc(mark)}</span>` : ""; }
 function standingRow(name) { return (data.standings || []).find(r => r.name === name) || {}; }
-// Stockfish ladder: the player keeps one name ("Stockfish 19"); its depth is shown next to it.
+// Stockfish ladder: the player keeps one name ("Stockfish 19"). Every AI has its own depth against it, so a game
+// shows the depth of that game; the standings show one small line per AI (its depth and its win streak).
 function ladderDepth(name, game) {
   const lad = data.ladder;
   if (!lad || name !== lad.player) return null;
-  return game && game.stockfish_depth ? game.stockfish_depth : lad.depth;
+  if (game && game.stockfish_depth) return game.stockfish_depth;
+  return lad.players ? null : lad.depth;   // an old shared-ladder state still has one depth
 }
 function ladderTag(name, game) { const d = ladderDepth(name, game); return d ? `<span class="ladder-tag"> \u00b7 depth ${esc(d)}</span>` : ""; }
+function ladderLine(name) {
+  const lad = data.ladder, p = lad && lad.players ? lad.players[name] : null;
+  if (!p) return "";
+  const need = lad.wins_to_step || 2;
+  return `<span class="ladder-line" title="Stockfish plays this AI at depth ${esc(p.depth)}; ${need} wins without a loss raise it by 1">v SF depth ${esc(p.depth)}, ${esc(p.streak || 0)} of ${esc(need)} wins</span>`;
+}
 function renderAgents() {
   const card = document.getElementById("agentsCard");
   if (!card) return;
@@ -1205,7 +1214,7 @@ function render() {
   renderBracket();
   const rows = (data.standings || []).map(r => {
     const d = r.elo_delta || 0;
-    return `<tr class="${r.rank === 1 && (r.played || 0) > 0 ? "rank1" : ""}"><td>${r.rank}</td><td class="player">${pn(r.name)}${ladderTag(r.name)}<span class="route">${esc(route(r.name))}</span></td>`
+    return `<tr class="${r.rank === 1 && (r.played || 0) > 0 ? "rank1" : ""}"><td>${r.rank}</td><td class="player">${pn(r.name)}${ladderTag(r.name)}<span class="route">${esc(route(r.name))}</span>${ladderLine(r.name)}</td>`
       + `<td class="num"><b>${r.points}</b></td><td class="num">${Math.round(r.elo)} <span class="${d > 0 ? "up" : d < 0 ? "down" : ""}">${Math.round(d) ? (d > 0 ? "+" : "") + Math.round(d) : ""}</span></td>`
       + `<td class="num">${r.wins}/${r.draws}/${r.losses}</td><td class="num">${r.forfeits}</td><td class="num">${r.flags}</td><td class="num">${r.invalid_attempts}</td></tr>`;
   }).join("");

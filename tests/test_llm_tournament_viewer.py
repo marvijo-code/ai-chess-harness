@@ -755,3 +755,32 @@ class KnockoutStateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class PerModelLadderPageTest(unittest.TestCase):
+    """ladderDepth / ladderTag / ladderLine from the page, run in node: every AI has its own Stockfish depth."""
+
+    def run_js(self, ladder, body: str):
+        page = viewer.PAGE
+        src = page[page.index("// Stockfish ladder: the player keeps one name"):page.index("function renderAgents()")]
+        script = ("const esc = s => String(s);\n" + f"let data = {{ladder: {json.dumps(ladder)}}};\n" + src + "\n" + body)
+        return subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60, check=True).stdout.strip()
+
+    def test_one_line_per_ai_and_the_game_depth(self):
+        ladder = {"player": "Stockfish 19", "start_depth": 4, "wins_to_step": 2,
+                  "players": {"Sonnet 5.5": {"depth": 5, "streak": 1}, "GPT-6.1 Sol": {"depth": 4, "streak": 0}}}
+        out = self.run_js(ladder, 'console.log([ladderLine("Sonnet 5.5"), ladderLine("Stockfish 19"), '
+                                  'ladderTag("Stockfish 19", {stockfish_depth: 5}), ladderTag("Stockfish 19")].join("|"));')
+        line, sf_line, game_tag, row_tag = out.split("|")
+        self.assertIn('class="ladder-line"', line)
+        self.assertIn("v SF depth 5, 1 of 2 wins", line)
+        self.assertEqual(sf_line, "")
+        self.assertIn("depth 5", game_tag)
+        self.assertEqual(row_tag, "", "no single Stockfish depth in the standings any more")
+
+    def test_an_old_shared_ladder_state_still_shows_its_depth(self):
+        out = self.run_js({"player": "Stockfish 19", "depth": 6}, 'console.log(ladderTag("Stockfish 19") + "|" + ladderLine("Sonnet 5.5"));')
+        tag, line = out.split("|")
+        self.assertIn("depth 6", tag)
+        self.assertEqual(line, "")

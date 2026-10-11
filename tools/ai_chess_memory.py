@@ -5,7 +5,7 @@ The memory lives in its own git repository (public: github.com/marvijo-code/ai-c
     agents/<folder>/MEMORY.md                    index + key lessons, written by the player itself (capped)
     agents/<folder>/notes/<topic>.md             optional topic notes (capped, limited count)
     agents/<folder>/games/<tournament>-<game>.md one file per game: result, PGN, notes, memory edits, cache use
-    ladder.json                                  Stockfish depth ladder (current depth + every step)
+    ladder.json                                  Stockfish depth ladder (per AI: depth, streak, steps)
     tournaments/<slug>.md                        standings of one tournament
     tournaments/index.md                         every tournament, number and champion
     tournaments/cache-stats.md (+ .json)         input cache hit rate per player
@@ -144,34 +144,104 @@ def parse_reflection(text: str) -> tuple[dict | None, str]:
 
 
 # ---------------------------------------------------------------- Stockfish ladder
+#
+# Every AI player has its OWN depth against the ladder player (owner 2026-10-11: "not lose and win 2 times
+# without losing"). A win adds 1 to the player's streak, a draw leaves it, a loss (forfeits, flags and illegal
+# moves included) resets it to 0. When the streak reaches LADDER_WINS_TO_STEP the depth rises by 1 and the
+# streak goes back to 0.
+
+LADDER_WINS_TO_STEP = 2
 
 
 def new_ladder(player: str, start_depth: int) -> dict:
-    return {"player": player, "depth": int(start_depth), "start_depth": int(start_depth), "steps": [],
-            "updated_at": None}
+    return {"player": player, "start_depth": int(start_depth), "players": {}, "history": [], "updated_at": None}
+
+
+def migrate_ladder(data: dict | None, player: str, start_depth: int) -> dict:
+    """Return a per-player ladder. An old shared ladder (top-level "depth" and "steps") keeps its steps under
+    "history"; every AI then starts again at start_depth."""
+    if not isinstance(data, dict) or data.get("player") != player:
+        return new_ladder(player, start_depth)
+    if isinstance(data.get("players"), dict):
+        data.setdefault("start_depth", int(start_depth))
+        data.setdefault("history", [])
+        return data
+    fresh = new_ladder(player, start_depth)
+    fresh["history"] = list(data.get("steps") or [])
+    fresh["updated_at"] = data.get("updated_at")
+    return fresh
+
+
+def ladder_entry(ladder: dict, name: str) -> dict:
+    """The ladder record of one AI player, created at start_depth with streak 0 when first seen."""
+    players = ladder.setdefault("players", {})
+    entry = players.get(name)
+    if not isinstance(entry, dict):
+        entry = players[name] = {"depth": int(ladder.get("start_depth") or 1), "streak": 0, "steps": []}
+    entry.setdefault("depth", int(ladder.get("start_depth") or 1))
+    entry.setdefault("streak", 0)
+    entry.setdefault("steps", [])
+    return entry
+
+
+def ladder_depth(ladder: dict, name: str) -> int:
+    return int(ladder_entry(ladder, name)["depth"])
+
+
+def ladder_outcome(game: dict, ai: str) -> str | None:
+    """"win", "draw" or "loss" for the AI player in a finished game; None when the game did not finish.
+    A forfeit or flag by the AI is a loss even when the board rule made it a draw."""
+    result = game.get("result")
+    if result not in ("1-0", "0-1", "1/2-1/2"):
+        return None
+    if game.get("end_kind") in ("forfeit", "flag") and str(game.get("termination") or "").startswith(ai + " "):
+        return "loss"
+    if result == "1/2-1/2":
+        return "draw"
+    winner = game.get("white") if result == "1-0" else game.get("black")
+    return "win" if winner == ai else "loss"
 
 
 def ladder_step(ladder: dict, game: dict, ladder_player: str, tournament: str, number: int | None,
                 at: str) -> dict | None:
-    """Raise the depth by 1 when an AI player beat the ladder player in this finished game.
+    """Apply the streak rule to the AI that played the ladder player in this finished game.
 
-    Returns the step record (also appended to ladder["steps"]) or None. A draw, a Stockfish win or an
-    unfinished game changes nothing. The depth used in that game is recorded with the step."""
-    result = game.get("result")
-    if ladder_player not in (game.get("white"), game.get("black")) or result not in ("1-0", "0-1"):
+    Returns an event {"player", "outcome", "depth" (played at), "streak" (after), "stepped", "from", "to", ...}
+    or None when the ladder player did not play or the game did not finish. When the depth rises, the step
+    record is also appended to the player's "steps"."""
+    white, black = game.get("white"), game.get("black")
+    if ladder_player not in (white, black) or white == black:
         return None
-    winner = game["white"] if result == "1-0" else game["black"]
-    if winner == ladder_player:
+    ai = black if white == ladder_player else white
+    outcome = ladder_outcome(game, ai)
+    if outcome is None:
         return None
-    before = int(ladder.get("depth") or ladder.get("start_depth") or 1)
-    step = {"from": before, "to": before + 1, "tournament": tournament, "number": number, "game": game.get("id"),
-            "winner": winner, "color": "white" if winner == game.get("white") else "black",
-            "played_at_depth": game.get("stockfish_depth", before), "termination": game.get("termination", ""),
-            "at": at}
-    ladder["depth"] = before + 1
-    ladder.setdefault("steps", []).append(step)
+    entry = ladder_entry(ladder, ai)
+    before = int(entry["depth"])
+    if outcome == "win":
+        entry["streak"] = int(entry.get("streak") or 0) + 1
+    elif outcome == "loss":
+        entry["streak"] = 0
+    event = {"player": ai, "outcome": outcome, "depth": int(game.get("stockfish_depth") or before),
+             "streak": int(entry["streak"]), "stepped": False, "from": before, "to": before,
+             "tournament": tournament, "number": number, "game": game.get("id"),
+             "color": "white" if ai == white else "black", "termination": game.get("termination", ""), "at": at}
+    if entry["streak"] >= LADDER_WINS_TO_STEP:
+        entry["depth"] = before + 1
+        entry["streak"] = 0
+        event.update({"stepped": True, "to": before + 1, "streak": 0})
+        entry["steps"].append({"from": before, "to": before + 1, "tournament": tournament, "number": number,
+                               "game": game.get("id"), "color": event["color"], "played_at_depth": event["depth"],
+                               "termination": event["termination"], "at": at})
+    entry["updated_at"] = at
     ladder["updated_at"] = at
-    return step
+    return event
+
+
+def ladder_lines(ladder: dict) -> list[str]:
+    """One line per AI: "<AI>: depth N, streak k of 2"."""
+    return [f"{name}: depth {p.get('depth')}, streak {p.get('streak', 0)} of {LADDER_WINS_TO_STEP}"
+            for name, p in sorted((ladder.get("players") or {}).items())]
 
 
 # ---------------------------------------------------------------- the repository
@@ -289,9 +359,9 @@ class MemoryRepo:
     # -- ladder
     def load_ladder(self, player: str, start_depth: int) -> dict:
         with self.lock:
-            data = self.read_json(LADDER_FILE)
-            if not data or data.get("player") != player:
-                data = new_ladder(player, start_depth)
+            raw = self.read_json(LADDER_FILE)
+            data = migrate_ladder(raw, player, start_depth)
+            if data is not raw:
                 self.write_json(LADDER_FILE, data)
             return data
 
@@ -445,7 +515,9 @@ def tournament_markdown(state: dict) -> str:
     if ko.get("champion"):
         lines.append(f"Champion: **{ko['champion']}**, runner-up {ko.get('runner_up')}, third {ko.get('third')}.")
     if ladder:
-        lines.append(f"Stockfish ladder: {ladder.get('player')} now plays at depth {ladder.get('depth')}.")
+        lines.append(f"Stockfish ladder ({ladder.get('player')}, each AI has its own depth, "
+                     f"{LADDER_WINS_TO_STEP} wins without a loss to step up):")
+        lines += [""] + [f"- {line}" for line in ladder_lines(ladder)]
     benched = state.get("benched") or []
     if benched:
         lines += ["", "## Benched for this tournament", "", "| Player | Route | Why | Resets (UTC) |", "| --- | --- | --- | --- |"]

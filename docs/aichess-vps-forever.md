@@ -3,13 +3,13 @@
 The VPS plays one AI chess tournament after another, with no laptop involved:
 round robin, then semifinals and a final (the same format as the laptop tournaments), then a
 short pause, then the next numbered tournament. Every AI player keeps its own memory, and
-Stockfish 19 climbs a depth ladder whenever an AI beats it.
+Stockfish 19 climbs a separate depth ladder for every AI: two wins without a loss in between raise that AI's depth by 1.
 
 ```
 tools/ai_chess_forever.py  -- runs tournaments forever, writes out/live/<slug>-tournament.json
         |                      and the pointer out/live/current.json {"state_path", "id", "number"}
         |-- engines/llm-chess-engine (one process per AI player, subscription routes only)
-        |-- Stockfish 19 (Linux binary, depth from the ladder)
+        |-- Stockfish 19 (Linux binary, depth from the opponent's own ladder)
         `-- memory repo /home/marvijo/ai-chess-agent-memory  -- git push after every game
 tools/llm_tournament_viewer.py --follow out/live/current.json  (port 8770, follows each new tournament)
 tools/aichess_push.py  -- reads the viewer, so it follows the new tournament too
@@ -38,7 +38,7 @@ The owner's top 5 plus Stockfish:
 | DeepSeek V4.1 Flash | `alibaba`, `deepseek-v4.1-flash`, effort high | Alibaba (Bailian) Token Plan subscription, Anthropic Messages wire |
 | GLM 5.3 Flash | `opencode-go`, `glm-5.3-flash` | Its only subscription route. OpenCode Go monthly limit reached on 2026-10-08, resets 2026-10-14 07:24 UTC (09:24 SAST). Z.ai answered code 1113 (no plan). |
 | Gemini 3.8 Flash | `enabled: false` | No subscription route yet |
-| Stockfish 19 | Linux binary, ladder from depth 4 | `Threads 1`, `Hash 16` |
+| Stockfish 19 | Linux binary, own ladder per AI from depth 4 | `Threads 1`, `Hash 128` (owner 2026-10-11: strongest Stockfish, more hash; Threads stays 1 because RAM is tight with two games at once) |
 
 No player uses `openrouter-chat` or any other metered route. Time control 15 min + 10 s (owner 2026-10-08: fewer losses on time from winning positions),
 3 tries per move, `showLegalMoves: true`, no board image (the FEN and the diagram carry the
@@ -132,14 +132,27 @@ default with `COMMENTARY_ROUTE=codex` (codex subscription text, free edge-tts vo
 
 ## Stockfish ladder
 
-- The ladder player is `forever.ladderPlayer` ("Stockfish 19"); it starts at `forever.ladderStartDepth` (4).
-- Before every game the runner sets Stockfish's depth from the ladder and stores it in the game
-  (`stockfish_depth`). After every game, an AI win against Stockfish raises the depth by 1 for every
-  LATER game. Draws and Stockfish wins change nothing.
-- `ladder.json` in the memory repo holds `depth`, `start_depth` and every step:
-  `{"from", "to", "tournament", "number", "game", "winner", "color", "played_at_depth", "termination", "at"}`.
-  It carries across tournaments and restarts. The state has `ladder` for the viewer, which shows
-  "Stockfish 19 · depth N" next to the name.
+Owner rule (2026-10-11): "not lose and win 2 times without losing". Every AI player has its OWN depth.
+
+- The ladder player is `forever.ladderPlayer` ("Stockfish 19"). Every AI starts at `forever.ladderStartDepth` (4).
+  An AI that is not in `ladder.json` yet gets depth 4 and streak 0 when it is first seen (the runner adds every
+  enabled AI in the config at start).
+- Before every game against Stockfish (round robin, knockout and Armageddon deciders alike) the runner sets
+  Stockfish's depth to THAT AI's depth and stores it in the game (`stockfish_depth`).
+- After every finished game against Stockfish: a win adds 1 to the AI's streak, a draw leaves the streak as it
+  is, a loss sets it to 0. Forfeits, flags and illegal-move losses are losses, also when the board rule turned
+  them into a draw. A void game changes nothing. When the streak reaches 2, the depth rises by 1 and the streak
+  goes back to 0. Log lines: `LADDER: <AI> beat Stockfish 19 at depth N (streak k of 2)` and
+  `LADDER: <AI> now plays Stockfish 19 at depth N+1`.
+- `ladder.json` in the memory repo:
+  `{"player": "Stockfish 19", "start_depth": 4, "players": {"<AI>": {"depth", "streak", "steps": [...]}}, "history": [...], "last_step", "updated_at"}`.
+  A step is `{"from", "to", "tournament", "number", "game", "color", "played_at_depth", "termination", "at"}`.
+  `history` holds the steps of the old shared ladder (before 2026-10-11, one depth for everyone); an old-format
+  file (top-level `depth` and `steps`) is migrated on load, with every AI back at depth 4.
+- The state has `ladder` = `{"player", "start_depth", "wins_to_step", "players": {name: {"depth", "streak"}}, "last_step"}`
+  for the viewer, the relay and marvijo.com. The standings show one small line per AI ("v SF depth 4, 1 of 2 wins");
+  a game card shows the Stockfish depth of that game next to its name. `tournaments/<id>.md` lists
+  "<AI>: depth N, streak k of 2".
 
 ## Agent memory (github.com/marvijo-code/ai-chess-agent-memory)
 
