@@ -15,8 +15,12 @@ Routes (2026-10-08, owner: run the commentary 24/7 on the VPS with no metered sp
     OpenCode Go plan). The old OpenRouter path needs COMMENTARY_ROUTE=openrouter AND
     COMMENTARY_ALLOW_OPENROUTER=1 (off by default). COMMENTARY_MODEL / COMMENTARY_EFFORT override.
   * Voice: edge-tts (Microsoft neural voices, no key, no spend), COMMENTARY_VOICE picks the voice.
-    The MP3 it returns is decoded to WAV with ffmpeg. A failed voice = that line stays silent.
-    COMMENTARY_TTS=openrouter (needs the same opt-in) is the old metered Gemini voice.
+    The MP3 it returns is decoded to WAV with ffmpeg. A failed voice is tried again for the SAME
+    text (the line is never written twice); after VOICE_TRIES the line is dropped and the host
+    pauses, longer for each dropped line in a row, so a voice outage cannot eat the text cap.
+    Microsoft moved the read-aloud websocket to a new host on 2026-10-10 and the old one answers
+    403 since: both hosts are tried and the one that works is remembered (COMMENTARY_EDGE_WSS_URL
+    pins one). COMMENTARY_TTS=openrouter (needs the same opt-in) is the old metered Gemini voice.
   * Pacing: at most COMMENTARY_CALLS_PER_HOUR text calls (default 90) in any hour, spread by a
     small token bucket; thinking filler and routine updates stop at 75% of the cap so the big
     moments (results, recaps, previews) keep room. Subscription spend is 0: calls are counted.
@@ -153,7 +157,17 @@ TTS_ROUTES = ("edge", "openrouter", "off")
 EDGE_VOICE = "en-US-GuyNeural"
 EDGE_RATE = "+8%"
 EDGE_TIMEOUT_SECONDS = 45
-MAX_LINE_CHARS = 700     # an intro naming ten players runs ~450 characters (2026-10-08 VPS run)
+# 2026-10-10: speech.platform.bing.com (the host edge-tts 7.2.8 ships with) started to answer the websocket
+# handshake with 403 outside North America; Microsoft Edge itself now talks to this host. It takes the same
+# public client token and the same Sec-MS-GEC value (edge-tts issue 490; measured 6 of 6 from the VPS).
+EDGE_FALLBACK_WSS = "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?Ocp-Apim-Subscription-Key={token}"
+EDGE_REFUSED_STATUS = {401, 403, 404}   # the handshake was refused: try the other host
+VOICE_TRIES = 3                  # one line is voiced at most this many times, then dropped
+VOICE_RETRY_WAITS = (2.0, 6.0)   # seconds before the 2nd and the 3rd try
+VOICE_RETRY_WINDOW_SECONDS = 25.0   # a line older than this is stale: no further try
+VOICE_DOWN_SECONDS = 30          # pause after a dropped line; doubles for each dropped line in a row
+VOICE_DOWN_MAX_SECONDS = 900
+MAX_LINE_CHARS = 700    # an intro naming ten players runs ~450 characters (2026-10-08 VPS run)
 MAX_CLIP_SECONDS = 80     # the relay takes at most 4 MB per clip: 80 s of 24 kHz mono 16-bit is 3.84 MB
 
 # Spoken names: say the version numbers the way a commentator would.
@@ -685,8 +699,24 @@ def mp3_to_pcm(mp3: bytes, runner=subprocess.run) -> bytes:
     return decoded.samples.tobytes()
 
 
-def edge_tts_mp3(text: str, voice: str, rate: str = EDGE_RATE, timeout: float = EDGE_TIMEOUT_SECONDS) -> bytes:
+_edge_endpoint = 0   # index into edge_endpoints() of the host that answered last
+
+
+def edge_endpoints(env: dict | None = None) -> list[str | None]:
+    """Websocket addresses to try, in order. None = the one the installed edge-tts ships with."""
+    pinned = ((os.environ if env is None else env).get("COMMENTARY_EDGE_WSS_URL") or "").strip()
+    if pinned:
+        return [pinned]
+    try:
+        from edge_tts.constants import TRUSTED_CLIENT_TOKEN  # noqa: PLC0415
+    except ImportError:
+        return [None]
+    return [None, EDGE_FALLBACK_WSS.format(token=TRUSTED_CLIENT_TOKEN)]
+
+
+def _edge_fetch(text: str, voice: str, rate: str, timeout: float, wss_url: str | None) -> bytes:
     import edge_tts  # noqa: PLC0415 - optional: pip install edge-tts
+    import edge_tts.communicate as edge_communicate  # noqa: PLC0415
 
     async def collect() -> bytes:
         audio = bytearray()
@@ -695,7 +725,36 @@ def edge_tts_mp3(text: str, voice: str, rate: str = EDGE_RATE, timeout: float = 
                 audio += chunk.get("data") or b""
         return bytes(audio)
 
-    return asyncio.run(asyncio.wait_for(collect(), timeout))
+    shipped = getattr(edge_communicate, "WSS_URL", None)
+    if wss_url and shipped is not None:
+        edge_communicate.WSS_URL = wss_url
+    try:
+        return asyncio.run(asyncio.wait_for(collect(), timeout))
+    finally:
+        if shipped is not None:
+            edge_communicate.WSS_URL = shipped
+
+
+def edge_tts_mp3(text: str, voice: str, rate: str = EDGE_RATE, timeout: float = EDGE_TIMEOUT_SECONDS,
+                 fetch=None, endpoints: list[str | None] | None = None) -> bytes:
+    """The line as MP3. A refused handshake (403) moves on to the next host; the host that works is kept."""
+    global _edge_endpoint
+    fetch = fetch or _edge_fetch
+    endpoints = endpoints or edge_endpoints()
+    first = _edge_endpoint % len(endpoints)
+    refused: Exception | None = None
+    for step in range(len(endpoints)):
+        index = (first + step) % len(endpoints)
+        try:
+            audio = fetch(text, voice, rate, timeout, endpoints[index])
+        except Exception as exc:
+            if getattr(exc, "status", None) not in EDGE_REFUSED_STATUS:
+                raise
+            refused = exc
+            continue
+        _edge_endpoint = index
+        return audio
+    raise refused
 
 
 def voice_ready() -> str:
@@ -809,6 +868,8 @@ class Commentator:
         self.runner = run_cli     # subscription CLIs; replaceable in tests
         self.text_backend = None  # (system, user, max_tokens, temperature) -> str; replaces the route in tests
         self.tts_backend = None   # (text) -> pcm bytes; replaces the voice in tests
+        self.sleep = self._stop.wait   # the wait between two voice tries; replaceable in tests
+        self._voice_drops = 0     # lines dropped in a row because the voice failed
         self._reset_memory()
         self.tournament = saved.get("tournament")
         self._restore(saved)
@@ -825,6 +886,7 @@ class Commentator:
         self._reasons: dict[str, tuple[str, float]] = {}
         self._thought: set = set()  # (game, ply) whose live thinking was already read out
         self._said: dict[str, set] = {}      # game -> one-time reasons already spoken
+        self._results_done: set = set()      # games whose closing line was written (voiced or not)
         self._last_blunder: dict[str, int] = {}   # game -> ply of the last blunder line
         self._quiet_since: float | None = None   # nothing worth saying since (None = just spoke)
         self._tour_until = 0.0    # the viewer is on a time-lapse tour: stay silent until then
@@ -1143,6 +1205,8 @@ class Commentator:
         if text is None:
             return None   # capped or backing off: the moment stays open for the next tick
         self._done_ply[game_id] = plies
+        if finished:
+            self._results_done.add(game_id)   # one closing line per game, also when its voice fails
         if reason in {"opening", "endgame", "decided", "draw", "time"}:
             self._said.setdefault(game_id, set()).add(reason)
         if reason in {"blunder", "mistake"}:
@@ -1191,7 +1255,7 @@ class Commentator:
     def _publish(self, game_id: str, text: str, ply: int, extra: dict) -> dict | None:
         """Voice a line and hand it to the viewer at once; a failed voice keeps the host silent for this line."""
         started = time.monotonic()
-        voiced = self._speak(text)
+        voiced = self._voice(text)
         # Writing plus voicing time (EMA): the next line starts this long before the current one ends.
         # Measured 2026-10-08 on the VPS: codex luna 3.6-4.5 s, edge-tts 0.5-0.85x the clip length.
         prep = self._last_text_s + (time.monotonic() - started)
@@ -1389,7 +1453,7 @@ class Commentator:
         return now - ended < RECENT_RESULT_SECONDS
 
     def _said_result(self, game_id: str) -> bool:
-        return any(c.get("final") for c in self._clips.get(game_id, []))
+        return game_id in self._results_done or any(c.get("final") for c in self._clips.get(game_id, []))
 
     def _annotations(self, state: dict) -> dict:
         if self.marks_provider is not None:
@@ -1502,6 +1566,31 @@ class Commentator:
         return ((reply.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
 
     # ------------------------------------------------------------ voice
+    def _voice(self, text: str) -> tuple[bytes, str | None] | None:
+        """Voice a line that is already written. A failed voice is tried again with the same text, never with a
+        new text call. None = the line is dropped; each dropped line in a row pauses the host for longer."""
+        if self.tts_backend is None and self.tts not in ("edge", "openrouter"):
+            return None   # voice off
+        free = self.tts_backend is not None or self.tts == "edge"
+        tries = VOICE_TRIES if free else 1   # a metered voice is never called twice for one line
+        started = time.monotonic()
+        attempt = 0
+        while True:
+            attempt += 1
+            voiced = self._speak(text)
+            if voiced is not None:
+                self._voice_drops = 0
+                return voiced
+            if attempt >= tries or time.monotonic() - started > VOICE_RETRY_WINDOW_SECONDS or self._stop.is_set():
+                break
+            self.sleep(VOICE_RETRY_WAITS[min(attempt, len(VOICE_RETRY_WAITS)) - 1])
+        self._voice_drops += 1
+        pause = min(VOICE_DOWN_MAX_SECONDS, VOICE_DOWN_SECONDS * 2 ** (self._voice_drops - 1))
+        self._backoff_until = max(self._backoff_until, time.time() + pause)
+        self.log(f"commentary: voice failed {attempt} time{'' if attempt == 1 else 's'}, line stays silent, "
+                 f"pausing {pause}s: {text[:80]}")
+        return None
+
     def _speak(self, text: str) -> tuple[bytes, str | None] | None:
         """PCM (24 kHz mono 16-bit) for the line, or None (logged) when the voice failed: no paid fallback."""
         try:
@@ -1518,10 +1607,10 @@ class Commentator:
             else:
                 return None
         except Exception as exc:
-            self.log(f"commentary: voice failed, line stays silent ({type(exc).__name__}: {str(exc)[:200]}): {text[:80]}")
+            self.log(f"commentary: voice try failed ({type(exc).__name__}: {str(exc)[:200]})")
             return None
         if not pcm:
-            self.log(f"commentary: voice returned no audio, line stays silent: {text[:80]}")
+            self.log("commentary: voice try returned no audio")
             return None
         return pcm, generation_id
 
