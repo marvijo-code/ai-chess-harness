@@ -458,7 +458,7 @@ body.stream .card.focused .lb-side, body.stream .card.focused .lb-under, body.st
 .rc-sub b { color: #ffd479; }
 .rc-body { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: clamp(14px, 2.4vw, 36px); width: min(1500px, 100%); align-items: start; }
 .rc-col h3 { margin: 0 0 8px; font-size: clamp(12px, 1.6vh, 15px); text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
-.rc-m { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 10px; padding: clamp(8px, 1.4vh, 14px) 14px; margin-bottom: 8px;
+.rc-m { display: grid; grid-template-columns: minmax(76px, 6.4em) minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 10px; padding: clamp(8px, 1.4vh, 14px) 14px; margin-bottom: 8px;
   border-radius: 12px; background: rgba(23, 26, 31, .94); border: 1px solid var(--line); font-size: clamp(14px, 2.1vh, 22px); font-weight: 650;
   animation: rc-in .5s cubic-bezier(.2, 1.2, .4, 1) both; animation-delay: calc(.8s + var(--i) * .22s); }
 @keyframes rc-in { from { opacity: 0; transform: translateX(-40px); } to { opacity: 1; transform: none; } }
@@ -489,7 +489,7 @@ body.stream .card.focused .lb-side, body.stream .card.focused .lb-under, body.st
 .rc-next b { color: #ffd479; }
 .rc-skip { position: absolute; bottom: 14px; right: 18px; font-size: 13px; color: var(--muted); }
 .rc-bar { position: absolute; left: 0; bottom: 0; height: 4px; background: linear-gradient(90deg, var(--accent), #f5b942); animation: intro-bar var(--dur, 12s) linear both; }
-@media (max-width: 900px) { .rc-body { grid-template-columns: minmax(0, 1fr); } .rc-m { grid-template-columns: 44px minmax(0, 1fr) auto minmax(0, 1fr); } }
+@media (max-width: 900px) { .rc-body { grid-template-columns: minmax(0, 1fr); } .rc-m { grid-template-columns: 44px minmax(0, 1fr) auto minmax(0, 1fr); } .rc-m .bd { white-space: normal; overflow-wrap: anywhere; line-height: 1.15; } }
 @media (prefers-reduced-motion: reduce) { .rcard * { animation-duration: .01s !important; animation-delay: 0s !important; } }
 @media (max-width: 900px) {
   .boards > .card.focused { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "boardcol" "infocol"; }
