@@ -3,6 +3,7 @@
 #
 #   Xvfb (virtual screen) -> Chrome kiosk on the viewer URL (audio -> PulseAudio null sink "aichess")
 #   ffmpeg x11grab + pulse monitor (+ optional ducked music bed) -> libx264 + AAC -> RTMP (YouTube)
+#   With a Twitch key file present the same encode is also sent to Twitch (tee muxer, no second encode).
 #
 # Everything it starts is its own: its own X display, its own PulseAudio daemon (socket in the run dir),
 # its own Chrome profile. On exit it stops exactly those processes.
@@ -13,6 +14,9 @@
 # The stream key is read from $AICHESS_STREAM_KEY_FILE (default ~/.config/ai-chess/youtube-stream.env,
 # lines YOUTUBE_RTMP_URL=... and YOUTUBE_STREAM_KEY=...). It is never exported to Chrome and never
 # logged: ffmpeg output passes through a filter that replaces it with <key>.
+# The optional Twitch key is read the same way from $AICHESS_TWITCH_KEY_FILE (default
+# ~/.config/ai-chess/twitch-stream.env, lines TWITCH_RTMP_URL=... and TWITCH_STREAM_KEY=...). No such
+# file or no key in it = YouTube only, exactly the single-output command as before.
 #
 # Settings (environment, or ~/.config/ai-chess/stream.env through the unit):
 #   AICHESS_STREAM_URL        viewer URL                      (http://127.0.0.1:8770/)
@@ -30,6 +34,7 @@
 #   AICHESS_CHROME_MAX_MB     restart Chrome above this RSS   (1400)
 #   AICHESS_STREAM_OUTPUT     "rtmp" (default), "null" (encode, discard) or a file path (.flv) for tests
 #   AICHESS_STREAM_KEY_FILE   env file with the key           (~/.config/ai-chess/youtube-stream.env)
+#   AICHESS_TWITCH_KEY_FILE   env file with the Twitch key, "" = no Twitch  (~/.config/ai-chess/twitch-stream.env)
 #   AICHESS_CHROME            browser binary                  (google-chrome, else Playwright chromium)
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -55,6 +60,7 @@ LOCALSTORAGE="${AICHESS_STREAM_LOCALSTORAGE:-}"
 CHROME_MAX_MB="${AICHESS_CHROME_MAX_MB:-1400}"
 OUTPUT="${AICHESS_STREAM_OUTPUT:-rtmp}"
 KEY_FILE="${AICHESS_STREAM_KEY_FILE:-$HOME/.config/ai-chess/youtube-stream.env}"
+TWITCH_KEY_FILE="${AICHESS_TWITCH_KEY_FILE-$HOME/.config/ai-chess/twitch-stream.env}"
 RUN="${RUNTIME_DIRECTORY:-${XDG_RUNTIME_DIR:-/tmp}/ai-chess-stream}"
 STATE_DIR="$HOME/.local/share/ai-chess-stream"
 PROFILE="$STATE_DIR/chrome-profile"
@@ -164,6 +170,22 @@ read_key() {
   [ -n "$YT_KEY" ] || return 1
   [ -n "$YT_URL" ] || YT_URL="rtmp://a.rtmp.youtube.com/live2"
 }
+read_twitch_key() {
+  TW_URL=""; TW_KEY=""
+  [ -n "$TWITCH_KEY_FILE" ] && [ -r "$TWITCH_KEY_FILE" ] || return 1
+  TW_URL="$(sed -n 's/^TWITCH_RTMP_URL=//p' "$TWITCH_KEY_FILE" | tail -n1)"
+  TW_KEY="$(sed -n 's/^TWITCH_STREAM_KEY=//p' "$TWITCH_KEY_FILE" | tail -n1)"
+  [ -n "$TW_KEY" ] || return 1
+  [ -n "$TW_URL" ] || TW_URL="rtmp://ingest.global-contribute.live-video.net/app"
+}
+# One encode, two targets (tee muxer). $1 = main target (YouTube), $2 = second target (Twitch).
+# The main target is a plain leg: when it fails ffmpeg exits and the watchdog restarts it, as with one
+# output. The second target runs in its own thread behind a queue (fifo muxer): it reconnects by itself
+# (Twitch ends every broadcast at 48 hours) and while it is slow or down its packets are dropped, so
+# it can never hold up or stop the main target.
+tee_spec() {
+  printf '[f=flv:onfail=abort]%s|[f=fifo:fifo_format=flv:queue_size=600:drop_pkts_on_overflow=1:attempt_recovery=1:recovery_wait_time=10:recover_any_error=1:restart_with_keyframe=1:onfail=ignore]%s' "$1" "$2"
+}
 
 rm -f "$RUN/progress.fifo"; mkfifo "$RUN/progress.fifo"
 # keep only the newest ffmpeg -progress block in progress.txt (the raw stream would grow forever)
@@ -173,7 +195,7 @@ PROG_PID=$!
 
 start_ffmpeg() {
   local out_args=() in_music=() af
-  FF_PID=""; FF_STARTED=$(date +%s)
+  FF_PID=""; FF_STARTED=$(date +%s); TWITCH_ON=0; TW_URL=""; TW_KEY=""
   case "$OUTPUT" in
     rtmp)
       if ! read_key; then log "no stream key in $KEY_FILE"; return 1; fi
@@ -184,7 +206,12 @@ start_ffmpeg() {
         python3 "$HERE/cdp.py" --port "$CDP_PORT" reload >/dev/null 2>&1 || true
         return 1
       fi
-      out_args=(-f flv "$YT_URL/$YT_KEY") ;;
+      if read_twitch_key; then
+        # the tee muxer does not ask the encoders for global headers, and FLV needs them
+        TWITCH_ON=1; out_args=(-flags +global_header -f tee "$(tee_spec "$YT_URL/$YT_KEY" "$TW_URL/$TW_KEY")")
+      else
+        out_args=(-f flv "$YT_URL/$YT_KEY")
+      fi ;;
     null) out_args=(-f null -) ;;
     *) out_args=(-f flv -y "$OUTPUT") ;;
   esac
@@ -216,12 +243,14 @@ start_ffmpeg() {
     -c:a aac -b:a "$AB" -ar 48000 -ac 2 \
     -output_ts_offset "-$(date +%s)" -progress "$RUN/progress.fifo" \
     "${out_args[@]}" \
-    2> >(YT_KEY="${YT_KEY:-}" python3 -u -c 'import os,sys
-k=os.environ.get("YT_KEY") or "\0none\0"
-for line in sys.stdin: sys.stdout.write(line.replace(k, "<key>"))' | sed -u 's/^/ffmpeg: /') &
+    2> >(YT_KEY="${YT_KEY:-}" TW_KEY="${TW_KEY:-}" python3 -u -c 'import os,sys
+ks=[k for k in (os.environ.get("YT_KEY"), os.environ.get("TW_KEY")) if k]
+for line in sys.stdin:
+    for k in ks: line = line.replace(k, "<key>")
+    sys.stdout.write(line)' | sed -u 's/^/ffmpeg: /') &
   FF_PID=$!
   FF_STARTED=$(date +%s)
-  log "ffmpeg pid $FF_PID ${W}x${H}@${FPS} ${PRESET} ${VB}k -> $([ "$OUTPUT" = rtmp ] && echo "$YT_URL/<key>" || echo "$OUTPUT") music=$([ -n "${in_music[*]}" ] && echo on || echo off)"
+  log "ffmpeg pid $FF_PID ${W}x${H}@${FPS} ${PRESET} ${VB}k -> $([ "$OUTPUT" = rtmp ] && echo "$YT_URL/<key>$([ "$TWITCH_ON" = 1 ] && echo " + $TW_URL/<key>")" || echo "$OUTPUT") music=$([ -n "${in_music[*]}" ] && echo on || echo off)"
 }
 
 MUSIC_PID=""
@@ -238,14 +267,20 @@ start_music
 
 BACKOFF=3
 FF_RESTARTS=0
+TWITCH_ON=0
+RTMP_CONNS=0
+LAST_CONNS=""
+# ffmpeg's only network connections are its RTMP targets (screen and sound come over local sockets)
+rtmp_conns() { alive "$FF_PID" || { echo 0; return; }; ss -Htnp state established 2>/dev/null | grep -c "pid=$FF_PID,"; }
 start_ffmpeg || true
 LAST_CHECK=0
 
 write_status() {
-  printf '{"updated":"%s","url":"%s","size":"%s","fps":%s,"preset":"%s","vbitrate_k":%s,"output":"%s","music":%s,"xvfb_pid":%s,"pulse_pid":%s,"chrome_pid":%s,"chrome_mb":%s,"chrome_restarts":%s,"ffmpeg_pid":%s,"ffmpeg_restarts":%s,"seeded":%s}\n' \
+  printf '{"updated":"%s","url":"%s","size":"%s","fps":%s,"preset":"%s","vbitrate_k":%s,"output":"%s","music":%s,"xvfb_pid":%s,"pulse_pid":%s,"chrome_pid":%s,"chrome_mb":%s,"chrome_restarts":%s,"ffmpeg_pid":%s,"ffmpeg_restarts":%s,"seeded":%s,"twitch":%s,"rtmp_conns":%s}\n' \
     "$(date -Is)" "$URL" "$SIZE" "$FPS" "$PRESET" "$VB" "$([ "$OUTPUT" = rtmp ] && echo rtmp || echo "$OUTPUT")" \
     "$(alive "$MUSIC_PID" && echo true || echo false)" \
     "${XVFB_PID:-0}" "${PULSE_PID:-0}" "${CHROME_PID:-0}" "$(chrome_rss_mb)" "$CHROME_RESTARTS" "${FF_PID:-0}" "$FF_RESTARTS" "$SEEDED" \
+    "$([ "$TWITCH_ON" = 1 ] && echo true || echo false)" "${RTMP_CONNS:-0}" \
     >"$RUN/status.json.tmp" && mv "$RUN/status.json.tmp" "$RUN/status.json"
 }
 
@@ -292,6 +327,11 @@ while true; do
       log "chrome uses ${mb} MB (> ${CHROME_MAX_MB}); restarting it"
       stop_chrome; CHROME_RESTARTS=$((CHROME_RESTARTS + 1)); start_chrome
     fi
+    RTMP_CONNS="$(rtmp_conns)"
+    if [ "$TWITCH_ON" = 1 ] && [ "$RTMP_CONNS" != "$LAST_CONNS" ]; then
+      log "rtmp connections: $RTMP_CONNS of 2 (YouTube + Twitch)"
+    fi
+    LAST_CONNS="$RTMP_CONNS"
     write_status
   fi
 done

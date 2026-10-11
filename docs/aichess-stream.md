@@ -43,6 +43,31 @@ It is never written on the laptop, never exported to Chrome and never logged (ff
 through a filter that replaces it with `<key>`). It is in ffmpeg's command line, so local users of the
 VPS can see it with `ps`.
 
+## Twitch (optional second target)
+
+The same encode can also go to a Twitch channel. There is no second encoder: ffmpeg's tee muxer
+sends the one encoded stream to both places, so the extra cost is about 4.7 Mbit/s of upload.
+
+- On: put the Twitch key on the VPS in `~/.config/ai-chess/twitch-stream.env` (mode 600, lines
+  `TWITCH_RTMP_URL=` and `TWITCH_STREAM_KEY=`), then `sudo systemctl restart ai-chess-stream`.
+  From the laptop, with the key copied from the Twitch dashboard (Settings > Stream > Copy):
+  `pwsh tools/aichess_stream/install-twitch-key.ps1` (reads the clipboard, prints length + sha256 prefix only).
+- Off: delete that file (or set `AICHESS_TWITCH_KEY_FILE=` empty in `stream.env`) and restart the unit.
+  Without a key the script builds exactly the single-output YouTube command.
+- YouTube stays the main target, a plain leg: when it fails ffmpeg exits and the watchdog restarts it, as before.
+- Twitch runs behind a queue in its own thread (fifo muxer). It reconnects by itself every 10 s and
+  drops its own packets while it is slow or down, so it cannot hold up or stop YouTube. Twitch ends
+  every broadcast at 48 hours; the reconnect starts the next one.
+- `status.sh` prints `targets: YouTube + Twitch, N of 2 connected`; the journal logs every change of N.
+- Twitch rules for a stream that is also on another platform: the Twitch picture may not be worse
+  than the other one (it is the same encode) and the Twitch page may not send viewers to the other
+  stream. The `?stream=1` page already hides the YouTube link.
+
+Pilot on the VPS (tiny test picture, `tee_spec` cut out of `stream.sh`, 2026-10-11): second target
+dead for the whole run = main target complete (12.0 s of 12 s); second target killed at 8 s and back
+at 14 s = main target complete (40.0 s of 40 s) and the second target received 22 s after its return;
+main target dead = ffmpeg exits with an error.
+
 ## Install and enable (VPS)
 
 ```bash
