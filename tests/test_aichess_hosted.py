@@ -71,6 +71,23 @@ class ExporterTest(unittest.TestCase):
         self.assertLess(self.page.index("const tracked = trackEval(game, ply);"), self.page.index("if (analyzeOff) return undefined;"))
         self.assertIn('trackMate ? "" : Math.abs(a.mate)', self.page)
 
+    def test_live_eval_holds_the_last_number_while_the_new_position_has_none(self):
+        # after every move the engine has no result for the new position for a moment: the bar must stay
+        # where it was, not jump to the middle (owner 2026-10-11)
+        self.assertIn("const liveEvalHold = {};", self.page)
+        self.assertIn("if (cur) { liveEvalHold[game.id] = cur; return cur; }", self.page)
+        self.assertIn('{ ...held, best: "", pv: "", depth: 0, hold: true }', self.page)
+        self.assertIn("for (const k of Object.keys(liveEvalHold)) delete liveEvalHold[k];", self.page)
+
+    def test_phone_header_is_one_row_of_chips_and_one_row_of_links(self):
+        phone = self.page[self.page.index("@media (max-width: 700px) {\n  header { gap: 6px;"):]
+        phone = phone[:phone.index("</style>")]
+        for needle in (".chips, .hdr-links { flex: none;", "flex-wrap: nowrap;", "overflow-x: auto;",
+                       ".ticker { flex-wrap: nowrap;", ".wide { display: none; } .narrow { display: inline; }"):
+            self.assertIn(needle, phone, needle)
+        self.assertIn('<span><span class="wide">Watch the </span>livestream</span>', self.page)
+        self.assertIn('<span class="narrow">Tap to hear the commentary</span>', self.page)
+
     def test_output_is_deterministic_and_has_no_long_dashes(self):
         self.assertEqual(self.page, exporter.build_page())
         for bad in (chr(0x2014), chr(0x2013)):   # em and en dash

@@ -128,6 +128,7 @@ body.stream .side > .card, body.stream .boards { transform-origin: top left; }
 .evalline .score { font: 700 16px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--text); min-width: 58px; }
 .evalline .pv { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .evalline .eng { white-space: nowrap; }
+.evalline.hold .score { opacity: .6; }   /* the score of the position before: the new one is on its way */
 .chip.btn { cursor: pointer; user-select: none; } .chip.btn.on { color: var(--accent); border-color: rgba(91, 157, 255, .5); }
 .chip.btn.wait { color: var(--warn); border-color: rgba(245, 185, 66, .45); }
 .comment { margin-top: 10px; padding: 9px 11px; background: var(--panel-2); border-radius: 10px; font-size: 14px; min-height: 58px; overflow-wrap: anywhere; }
@@ -552,6 +553,7 @@ a.chip, button.chip { text-decoration: none; font: inherit; font-size: 13px; cur
 .lm-body p { margin: 6px 0; }
 .lm-body code { background: var(--panel-2); border-radius: 4px; padding: 0 4px; font-size: .92em; }
 .lm-foot { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+.narrow { display: none; }   /* short wording for phones; .wide is the full wording everywhere else */
 body.no-think .thinking { display: none; }
 body.archive .pbar .think:empty { display: none; }   /* a finished game has no thinking timer: the name gets that room */
 body.stream .hdr-links, body.stream .extras, body.stream .archive-bar { display: none !important; }
@@ -565,6 +567,25 @@ body.stream .hdr-links, body.stream .extras, body.stream .archive-bar { display:
   .pbar .think { min-width: 0; }
   td, th { padding: 6px 4px; font-size: 13px; }
 }
+/* ---- phones: a short top (owner 2026-10-11: "the top takes too much space"). The title, then ONE row of
+   chips and ONE row of links; a row wider than the screen scrolls sideways instead of stacking, and it
+   runs to the screen edge so a cut chip shows there is more. The standings strip is one row too. ---- */
+@media (max-width: 700px) {
+  header { gap: 6px; padding: 8px 12px; }
+  h1 { flex: 1 1 100%; min-width: 0; font-size: 16px; line-height: 1.25; text-wrap: balance; }
+  .chips, .hdr-links { flex: none; width: calc(100% + 24px); margin: 0 -12px; padding: 0 12px; gap: 6px; flex-wrap: nowrap;
+    overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .chips::-webkit-scrollbar, .hdr-links::-webkit-scrollbar, .ticker::-webkit-scrollbar { display: none; }
+  .chips > *, .hdr-links > *, .ticker > * { flex: none; }
+  .chip, a.chip, button.chip, .chip.tsel select { font-size: 12px; }
+  .chip { padding: 2px 9px; }
+  .hdr-links .chip { padding: 3px 9px; }
+  .chip.tsel { padding-right: 4px; } .chip.tsel > span { display: none; } .chip.tsel select { max-width: 150px; }
+  .wide { display: none; } .narrow { display: inline; } .chip.yt { text-transform: capitalize; }
+  .ticker { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; padding: 5px 12px; }
+  .hosted-banner { padding: 4px 12px; font-size: 12px; flex-wrap: nowrap; } .hosted-banner .hear { margin-left: 2px; white-space: nowrap; }
+  main { padding: 10px 12px; }
+}
 </style>
 </head>
 <body>
@@ -573,7 +594,7 @@ body.stream .hdr-links, body.stream .extras, body.stream .archive-bar { display:
   <h1 id="title">AI Chess Swiss</h1>
   <div class="chips" id="chips"></div>
   <div class="hdr-links" id="hdrLinks">
-    <a class="chip yt" id="liveLink" href="#" target="_blank" rel="noopener" hidden title="Open the YouTube livestream of this tournament"><svg viewBox="0 0 24 17" aria-hidden="true"><path fill="#f00" d="M23.5 2.65A3.02 3.02 0 0 0 21.38.5C19.5 0 12 0 12 0S4.5 0 2.62.5A3.02 3.02 0 0 0 .5 2.65C0 4.53 0 8.46 0 8.46s0 3.93.5 5.81a3.02 3.02 0 0 0 2.12 2.14c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 0 0 2.12-2.14c.5-1.88.5-5.81.5-5.81s0-3.93-.5-5.81z"/><path fill="#fff" d="M9.55 12.03V4.89l6.27 3.57z"/></svg>Watch the livestream</a>
+    <a class="chip yt" id="liveLink" href="#" target="_blank" rel="noopener" hidden title="Open the YouTube livestream of this tournament" aria-label="Watch the livestream"><svg viewBox="0 0 24 17" aria-hidden="true"><path fill="#f00" d="M23.5 2.65A3.02 3.02 0 0 0 21.38.5C19.5 0 12 0 12 0S4.5 0 2.62.5A3.02 3.02 0 0 0 .5 2.65C0 4.53 0 8.46 0 8.46s0 3.93.5 5.81a3.02 3.02 0 0 0 2.12 2.14c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 0 0 2.12-2.14c.5-1.88.5-5.81.5-5.81s0-3.93-.5-5.81z"/><path fill="#fff" d="M9.55 12.03V4.89l6.27 3.57z"/></svg><span><span class="wide">Watch the </span>livestream</span></a>
     <label class="chip tsel" id="tourPick" hidden title="Watch an earlier tournament: every game can be replayed move by move"><span>Tournament</span><select id="tourSelect" aria-label="Choose a tournament to watch"></select></label>
     <button type="button" class="chip learn" id="learntBtn" hidden title="Each AI keeps a memory file between games: open it here">What each AI has learnt</button>
   </div>
@@ -631,6 +652,7 @@ let analysisOn = store("swissAnalysis") !== "off";
 let soundOn = store("swissMoveSound") !== "off";
 let commentaryOn = HOSTED ? store("swissCommentary") !== "off" : store("swissCommentary") === "on";   // hosted: on unless the viewer muted it
 const replayEval = {};        // "game|ply" -> Stockfish result for replay positions
+const liveEvalHold = {};      // game id -> last Stockfish result of that game's live position
 let replayFetchAt = 0;
 const cards = new Map();      // game id -> persistent card DOM + render keys
 
@@ -728,7 +750,14 @@ function trackEval(game, ply) {
 }
 function evalFor(game, ply, total) {
   if (!analysisOn) return null;
-  if (ply >= total && game.status === "live") return (data.analysis || {})[game.id] || null;
+  if (ply >= total && game.status === "live") {
+    const cur = (data.analysis || {})[game.id];
+    if (cur) { liveEvalHold[game.id] = cur; return cur; }
+    // A move was just played and the engine has no number for the new position yet. Keep the bar and the
+    // score of the position before it until the new number comes; never jump back to the middle.
+    const held = liveEvalHold[game.id];
+    return held && !held.over && !held.error ? { ...held, best: "", pv: "", depth: 0, hold: true } : null;
+  }
   const tracked = trackEval(game, ply);
   if (tracked !== undefined) return tracked;
   if (analyzeOff) return undefined;
@@ -1119,6 +1148,7 @@ function updateCard(c, game, now) {
   if (ev !== undefined) {
     const h = whiteShare(ev).toFixed(1) + "%";
     if (p.evalwhite.style.height !== h) p.evalwhite.style.height = h;
+    p.evalline.classList.toggle("hold", !!(ev && ev.hold));
     setHTML(p.evalline, `<span class="score">${evalText(ev)}</span><span class="pv">${ev && ev.best ? "best " + esc(ev.best) + (ev.pv ? " - " + esc(ev.pv) : "") : (ev && (ev.over || ev.track) ? "" : "analysing...")}</span><span class="eng">${esc((ev && ev.engine) || data.analysis_engine || "Stockfish")}${ev && ev.depth && ev.depth < 99 ? " d" + ev.depth : ""}</span>`);
   }
   const shownMove = ply > 0 ? moves[ply - 1] : null;
@@ -1723,7 +1753,7 @@ function renderBanner() {
   }
   const name = `hosted-banner ${cls}`;
   if (el.className !== name) el.className = name;
-  const hear = data && data.commentary && commentaryOn && needGesture ? `<span class="hear">Commentary is on - click anywhere to hear it</span>` : "";
+  const hear = data && data.commentary && commentaryOn && needGesture ? `<span class="hear"><span class="wide">Commentary is on - click anywhere to hear it</span><span class="narrow">Tap to hear the commentary</span></span>` : "";
   setHTML(el, `<span class="dot" aria-hidden="true"></span><span class="msg">${msg}</span>${hear}`);
 }
 function publishChip() {
@@ -2294,6 +2324,7 @@ function newTournament() {
   champSeen = null;
   cards.forEach(c => c.el.remove());
   cards.clear();
+  for (const k of Object.keys(liveEvalHold)) delete liveEvalHold[k];
   document.getElementById("boards")._sig = null;   // same game ids in the new tournament: attach the new cards
   selected = null;
   replayPly = null;
