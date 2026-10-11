@@ -213,6 +213,13 @@ class PageTest(unittest.TestCase):
                        "if (!data || !data.commentary || !commentaryOn || isArchive()) return;"):
             self.assertIn(needle, self.page, needle)
 
+    def test_the_stream_never_starts_pinned_to_a_restored_focus_address(self):
+        page = self.page
+        drop = 'if (STREAM && focusId) { focusId = null;'
+        self.assertIn(drop, page)
+        self.assertLess(page.index(drop), page.index("if (focusId) { focusPinned = true; autoFocus = false; }"))
+        self.assertIn("if (autoFocus && !STREAM) { autoFocus = false;", page)
+
     def run_js(self, source: str, body: str):
         out = subprocess.run([NODE, "-e", source + "\n" + body], capture_output=True, text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)

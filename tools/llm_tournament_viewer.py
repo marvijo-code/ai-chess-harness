@@ -655,6 +655,8 @@ function readHash() {
   focusId = m ? decodeURIComponent(m[1]) : null;
 }
 readHash();
+// The stream has no viewer: a #focus address its browser restored after a restart must never pin one board.
+if (STREAM && focusId) { focusId = null; try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* ignore */ } }
 if (focusId) { focusPinned = true; autoFocus = false; }   // a #focus link is the viewer's own choice
 function setAutoFocus(on) {
   autoFocus = on;
@@ -687,7 +689,7 @@ function onHistory() {
   const before = focusId;
   readHash();
   if (focusId === before) return;
-  if (autoFocus) { autoFocus = false; store("swissAutoFocus", "off"); }   // back/forward is a manual choice
+  if (autoFocus && !STREAM) { autoFocus = false; store("swissAutoFocus", "off"); }   // back/forward is a manual choice
   focusPinned = !!focusId;
   render();
 }
