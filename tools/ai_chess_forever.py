@@ -11,8 +11,9 @@ Stockfish depth ladder (configs/ai-chess-vps.json, runs on the VPS).
 * Memory (tools/ai_chess_memory.py): every AI player's MEMORY.md is read at the start of each game, frozen,
   and sent with every move; after every game one reflection call per AI player (same subscription route)
   returns file edits that are validated and applied; the memory repo is committed and pushed in the background.
-* Stockfish ladder: the ladder player starts at `forever.ladderStartDepth`; each AI win against it raises the
-  depth by 1 for every later game (ladder.json in the memory repo, kept across tournaments and restarts).
+* Stockfish ladder: every AI player has its own depth against the ladder player, starting at
+  `forever.ladderStartDepth`. Two wins without a loss in between raise that player's depth by 1 (a draw keeps the
+  streak, a loss, forfeit or flag resets it). ladder.json in the memory repo, kept across tournaments and restarts.
 * Usage limits never end the loop: the engines wait and ask the same move again (limitWait).
 """
 
@@ -33,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engines" / "llm-ch
 import play_llm_swiss as swiss  # noqa: E402
 from ai_chess_memory import (GitPusher, MemoryRepo, MEMORY_MAX_BYTES, MEMORY_TARGET_BYTES, MAX_NOTE_FILES,  # noqa: E402
                              NOTE_MAX_BYTES,
-                             ensure_repo, game_markdown, ladder_step, parse_reflection, player_folders, slugify,
+                             LADDER_WINS_TO_STEP, ensure_repo, game_markdown, ladder_depth, ladder_entry, ladder_step, parse_reflection, player_folders, slugify,
                              text_sha, validate_edits)
 from play_llm_series import LlmEngine, iso_now, parse_info, parse_note, parse_usage, write_text_retry  # noqa: E402
 
@@ -298,6 +299,13 @@ class ForeverHooks(swiss.GameHooks):
         fv = cfg["forever"]
         self.ladder_player = fv["ladderPlayer"]
         self.ladder = repo.load_ladder(self.ladder_player, int(fv["ladderStartDepth"]))
+        # Every AI in the config gets its own ladder record now (depth start_depth, streak 0 when first seen).
+        known = set(self.ladder.get("players") or {})
+        for p in cfg.get("players") or []:
+            if p.get("provider") != "uci":
+                ladder_entry(self.ladder, p["name"])
+        if set(self.ladder.get("players") or {}) != known:
+            repo.save_ladder(self.ladder)
         self.lock = threading.RLock()
         self.context_dir = live_dir / "contexts"
         # sha of each player's MEMORY.md right after its last reflection: its next game must start from it.
@@ -306,18 +314,21 @@ class ForeverHooks(swiss.GameHooks):
 
     def ladder_view(self) -> dict:
         with self.lock:
-            return {"player": self.ladder["player"], "depth": self.ladder["depth"],
-                    "start_depth": self.ladder.get("start_depth"), "steps": len(self.ladder.get("steps") or []),
-                    "last_step": (self.ladder.get("steps") or [None])[-1]}
+            players = {name: {"depth": int(p.get("depth") or 0), "streak": int(p.get("streak") or 0)}
+                       for name, p in sorted((self.ladder.get("players") or {}).items())}
+            return {"player": self.ladder["player"], "start_depth": self.ladder.get("start_depth"),
+                    "wins_to_step": LADDER_WINS_TO_STEP, "players": players,
+                    "last_step": self.ladder.get("last_step")}
 
     def before_game(self, ts, game_id: str, white: LlmEngine, black: LlmEngine) -> None:
         state = ts.state
         game = state["games"][game_id]
         with ts.lock:
-            for engine in (white, black):
-                if engine.is_uci and engine.name == self.ladder_player:
+            for engine, opponent in ((white, black), (black, white)):
+                if engine.is_uci and engine.name == self.ladder_player and not opponent.is_uci:
+                    # Stockfish plays each AI at that AI's own depth.
                     with self.lock:
-                        depth = int(self.ladder["depth"])
+                        depth = ladder_depth(self.ladder, opponent.name)
                     engine.player["depth"] = depth
                     game["stockfish_depth"] = depth
             state["ladder"] = self.ladder_view()
@@ -346,11 +357,21 @@ class ForeverHooks(swiss.GameHooks):
         with self.lock:
             step = ladder_step(self.ladder, game, self.ladder_player, state["id"], number, iso_now())
             if step:
+                self.ladder["last_step"] = step
                 self.repo.save_ladder(self.ladder)
         if step:
-            log(f"LADDER: {step['winner']} beat {self.ladder_player} at depth {step['from']} in {game_id}; "
-                f"depth is now {step['to']} for every later game")
-            messages.append(f"Ladder: {self.ladder_player} depth {step['from']} to {step['to']} after {step['winner']} won {game_id}")
+            ai, sf = step["player"], self.ladder_player
+            if step["stepped"]:
+                log(f"LADDER: {ai} now plays {sf} at depth {step['to']} (won twice at depth {step['from']} "
+                    f"without a loss, last in {game_id})")
+                messages.append(f"Ladder: {ai} now plays {sf} at depth {step['to']} after 2 wins at depth {step['from']}")
+            elif step["outcome"] == "win":
+                log(f"LADDER: {ai} beat {sf} at depth {step['from']} (streak {step['streak']} of {LADDER_WINS_TO_STEP}) in {game_id}")
+                messages.append(f"Ladder: {ai} beat {sf} at depth {step['from']}, streak {step['streak']} of {LADDER_WINS_TO_STEP}")
+            elif step["outcome"] == "loss":
+                log(f"LADDER: {ai} lost to {sf} at depth {step['from']}; streak reset to 0 in {game_id}")
+            else:
+                log(f"LADDER: {ai} drew {sf} at depth {step['from']}; streak stays {step['streak']} of {LADDER_WINS_TO_STEP} in {game_id}")
         with ts.lock:
             state["ladder"] = self.ladder_view()
         ts.save()

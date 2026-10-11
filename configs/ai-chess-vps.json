@@ -41,6 +41,6 @@
      "image": false, "route": "Gemini CLI subscription (route not wired yet)"},
     {"name": "Stockfish 19", "provider": "uci", "model": "stockfish-19", "effort": "ladder", "depth": 4,
      "path": "/home/marvijo/sf19/stockfish/stockfish-linux-x86-64-universal",
-     "options": {"Threads": 1, "Hash": 16}, "route": "Local engine, depth ladder from 4"}
+     "options": {"Threads": 1, "Hash": 128}, "route": "Local engine, own depth ladder per AI from 4"}
   ]
 }
