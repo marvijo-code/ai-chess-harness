@@ -193,6 +193,18 @@ tournaments/learning.md (+ .json)          learning check per player (see below)
   MEMORY.md (the engine reports `info string memory <sha> <bytes>` per move, stored as `moves[].memory_sha`),
   games that started with the exact MEMORY.md written after the player's previous game (`memory_read` in
   the game record vs `last_written`), reflections, MEMORY.md and note updates, rejected edits, retries, errors.
+  A "Memory shape now" table shows per player how many lines MEMORY.md holds, its longest run and how many
+  runs are over the ply cap.
+- **Lines, not databases** (owner 2026-10-11: "llms shouldn't save long lines, but prefer learning like humans
+  ... humans learn lines, but not so many lines"). A line is a run of consecutive moves in any notation
+  (`1.e4 c5 2.Nf3`, `e4/c5/Nf3`, `...Bf5 e6 Nd7`). Limits in `tools/ai_chess_memory.py`: no run longer than
+  `LINE_MAX_PLIES` (16), at most `MAX_LINES_PER_FILE` (6) runs of `LINE_COUNTED_PLIES` (8) or more plies per
+  file (MEMORY.md and each notes file). The reflection prompt says so and states the player's current count;
+  `validate_edits` rejects a file that breaks the rule with the offending run quoted (retries as for the byte
+  cap). Ratchet: a file that already holds more than allowed is accepted when it holds at least one line (and
+  one over-long run) fewer than now, so the old memories shrink one line per game instead of freezing.
+  Background: after 31 tournaments (162 games against Stockfish depth 4 to 6) the AIs had 2 wins, and the
+  memory files were a third opening lines copied from lost games.
 
 - At the start of each game the runner writes a context file (`out/live/contexts/<id>-<game>-<side>.json`
   with the player's MEMORY.md and the game header) and sends `setoption name GameContextFile`. The

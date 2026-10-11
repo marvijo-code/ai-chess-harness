@@ -933,3 +933,80 @@ class AnthropicRouteTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LineLimitTests(unittest.TestCase):
+    """Owner 2026-10-11: memory is for patterns, not long move sequences; a few short lines are allowed."""
+
+    LONG = " ".join(f"{n}.e{(n % 4) + 1} d{(n % 4) + 1}" for n in range(1, 13))  # 24 plies, numbered
+
+    def test_move_runs_are_counted_in_plies_in_every_notation(self):
+        self.assertEqual(mem.move_runs("1.e4 c5 2.Nf3 Nc6 3.d4 cxd4 4.Nxd4 g6")[0][0], 8)
+        self.assertEqual(mem.move_runs("e4/c5/Nf3/Nc6/d4/cxd4/Nxd4/g6/c4/Nf6")[0][0], 10)
+        self.assertEqual(mem.move_runs("...Bf5 e6 Nd7 c5 Be7 Rc8 Qb6")[0][0], 7)
+        self.assertEqual(mem.move_runs("9.O-O O-O 10.Qd2 Rfe8 11.Nd5 h8=Q+ Rxe1+?? Qxg2#")[0][0], 8)
+
+    def test_words_squares_and_punctuation_end_a_run(self):
+        runs = mem.move_runs("the e4 pawn is hit by Qe6+Re7 and guarded by Qd3 only; T31R2 32...Rce7! 33.Kh2?? Qxe4")
+        self.assertEqual(max(n for n, _ in runs), 3)
+        self.assertEqual([n for n, _ in mem.move_runs("Nf3. Next Bb5, then O-O; squares g6<-f7/h7")], [1, 1, 1, 1, 2])
+        self.assertEqual(mem.line_shape("count attackers before every capture")["lines"], 0)
+
+    def test_shape_counts_lines_and_over_long_runs(self):
+        text = f"- Maroczy: {self.LONG}\n- Lasker: 1.d4 d5 2.c4 e6 3.Nc3 Nf6 4.Bg5 Be7 5.e3 O-O\n- short: 1.e4 e5 2.Nf3\n"
+        shape = mem.line_shape(text)
+        self.assertEqual((shape["lines"], shape["over"], shape["longest"]), (2, 1, 24))
+        self.assertEqual(shape["examples"][0][0], 24)
+
+    def test_a_new_file_must_obey_the_limits(self):
+        ok = "\n".join(f"- line {i}: 1.d4 d5 2.c4 e6 3.Nc3 Nf6 4.Bg5 Be7" for i in range(mem.MAX_LINES_PER_FILE))
+        self.assertEqual(mem.line_problems("MEMORY.md", ok, ""), [])
+        too_many = ok + "\n- one more: 1.e4 c5 2.Nf3 d6 3.d4 cxd4 4.Nxd4 Nf6"
+        [problem] = mem.line_problems("MEMORY.md", too_many, "")
+        self.assertIn(f"holds {mem.MAX_LINES_PER_FILE + 1} move sequences of {mem.LINE_COUNTED_PLIES}+ plies", problem)
+        self.assertIn(f"allowed now: {mem.MAX_LINES_PER_FILE}", problem)
+        [problem] = mem.line_problems("notes/x.md", f"- {self.LONG}", "")
+        self.assertIn(f"longer than {mem.LINE_MAX_PLIES} plies (allowed now: 0)", problem)
+        self.assertIn("is 24 plies", problem)
+
+    def test_an_old_file_over_the_limit_is_a_ratchet_one_line_fewer_each_time(self):
+        line = "1.d4 d5 2.c4 e6 3.Nc3 Nf6 4.Bg5 Be7"
+        current = "\n".join(f"- {i}: {line}" for i in range(10)) + f"\n- long a: {self.LONG}\n- long b: {self.LONG}\n"
+        self.assertEqual(mem.line_allowance(current), (11, 1))
+        # same count again: rejected; one line fewer and one over-long run fewer: accepted
+        self.assertTrue(mem.line_problems("MEMORY.md", current, current))
+        fewer = "\n".join(f"- {i}: {line}" for i in range(10)) + f"\n- long a: {self.LONG}\n"
+        self.assertEqual(mem.line_problems("MEMORY.md", fewer, current), [])
+        # from inside the limits the limits apply
+        self.assertEqual(mem.line_allowance(""), (mem.MAX_LINES_PER_FILE, 0))
+
+    def test_validate_edits_rejects_lines_with_the_current_text_as_the_ratchet(self):
+        edits = [{"path": "MEMORY.md", "content": f"# M\n- {self.LONG}\n"},
+                 {"path": "notes/ok.md", "content": "- count attackers before every capture\n"}]
+        accepted, rejected = mem.validate_edits(edits, [], {"MEMORY.md": "# M\n- nothing yet\n"})
+        self.assertEqual([e["path"] for e in accepted], ["notes/ok.md"])
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("MEMORY.md holds 1 move sequences longer than", rejected[0])
+        # the same long line was already there: keeping it is allowed only while another one goes
+        twice = f"# M\n- {self.LONG}\n- {self.LONG}\n"
+        accepted, rejected = mem.validate_edits([{"path": "MEMORY.md", "content": f"# M\n- {self.LONG}\n"}], [],
+                                                {"MEMORY.md": twice})
+        self.assertEqual(rejected, [])
+        self.assertEqual(len(accepted), 1)
+
+    def test_reflection_prompt_states_the_rule_and_the_current_shape(self):
+        state = {"id": "t1", "number": 1}
+        game = {"white": "A", "black": "B", "result": "0-1", "termination": "checkmate", "moves": [], "notes": []}
+        memory = f"# M\n- {self.LONG}\n- 1.e4 e5 2.Nf3 Nc6 3.Bb5 a6 4.Ba4 Nf6\n"
+        prompt = forever.reflection_prompt("A", state, game, memory, [], {}, "a", [])
+        self.assertIn("Learn like a human player, not like a database", prompt)
+        self.assertIn(f"at most {mem.LINE_MAX_PLIES} plies long", prompt)
+        self.assertIn("Your MEMORY.md now holds 2 such lines (longest 24 plies)", prompt)
+        self.assertIn(f"at most {mem.MAX_LINES_PER_FILE} lines and 0 longer than {mem.LINE_MAX_PLIES} plies", prompt)
+
+    def test_learning_markdown_shows_the_memory_shape(self):
+        data = {"tournaments": {"t1": {"number": 1, "players": {"A": {k: 1 for k in mem.LEARNING_KEYS}}}}}
+        text = mem.learning_markdown(data, "t1", {"A": "a"}, {"A": mem.line_shape(f"- {self.LONG}\n")})
+        self.assertIn("## Memory shape now", text)
+        self.assertIn("| A | 1 | 24 | 1 |", text)
+        self.assertIn("Memory is for patterns, not long move sequences.", text)

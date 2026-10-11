@@ -38,6 +38,64 @@ NOTE_MAX_BYTES = 4096
 MAX_NOTE_FILES = 8
 MAX_EDITS = 6
 NOTE_PATH = re.compile(r"^notes/[a-z0-9][a-z0-9-]{0,47}\.md$")
+
+# Lines (runs of consecutive moves). Owner 2026-10-11: "llms shouldn't save long lines, but prefer learning like
+# humans ... humans learn lines, but not so many lines". A file may hold a few short lines (the opening moves a
+# human player knows by heart); everything else is kept as patterns: what to check, what was missed, how an
+# opponent plays. The limits are a ratchet: a file that already holds more lines than allowed must lose at least
+# one per reflection, so an old memory is never rejected whole for its history.
+LINE_MAX_PLIES = 16        # no single run of moves longer than this (8 moves by each side)
+LINE_COUNTED_PLIES = 8     # a run of at least this many plies counts as a line (4 moves by each side)
+MAX_LINES_PER_FILE = 6     # MEMORY.md and every notes file: at most this many lines
+_MOVE = (r"(?<![A-Za-z0-9=])(?:O-O-O|O-O|[KQRBN][a-h]?[1-8]?x?[a-h][1-8]|[a-h]x[a-h][1-8]|[a-h][1-8])"
+         r"(?:=[QRBN])?[+#]?[!?]{0,2}(?![A-Za-z0-9=])")
+_MOVE_NUMBER = r"(?:\d+\.(?:\.\.)?|\.\.\.)"
+_MOVE_SEP = r"(?:\s+|\s*/\s*)"
+MOVE_TOKEN = re.compile(_MOVE)
+MOVE_RUN = re.compile(rf"(?:{_MOVE_NUMBER}\s*)?{_MOVE}(?:{_MOVE_SEP}(?:{_MOVE_NUMBER}\s*)?{_MOVE})*")
+
+
+def move_runs(text: str) -> list[tuple[int, str]]:
+    """Every run of consecutive chess moves in the text as (plies, text): "1.e4 c5 2.Nf3 Nc6" (4), GPT's
+    "e4/c5/Nf3/Nc6" (4), "...Bf5 e6 Nd7" (3). A comma, a full stop, a word or a line break ends a run; a single
+    square name ("the e4 pawn") is a run of 1 and never counts as a line."""
+    return [(len(MOVE_TOKEN.findall(m.group(0))), m.group(0)) for m in MOVE_RUN.finditer(text or "")]
+
+
+def line_shape(text: str) -> dict:
+    """{"lines": runs of LINE_COUNTED_PLIES+ plies, "over": runs longer than LINE_MAX_PLIES, "longest": plies,
+    "examples": [(plies, text)] of the longest runs} for one memory or notes file."""
+    runs = move_runs(text)
+    lines = [r for r in runs if r[0] >= LINE_COUNTED_PLIES]
+    return {"lines": len(lines), "over": sum(1 for r in runs if r[0] > LINE_MAX_PLIES),
+            "longest": max([r[0] for r in runs] or [0]),
+            "examples": sorted(lines, key=lambda r: -r[0])[:3]}
+
+
+def line_allowance(current_text: str) -> tuple[int, int]:
+    """(lines allowed, over-long runs allowed) for the next version of a file whose current text is given:
+    the limits, or one fewer than the file holds now when it is already over them (the ratchet)."""
+    now = line_shape(current_text or "")
+    return max(MAX_LINES_PER_FILE, now["lines"] - 1), max(0, now["over"] - 1)
+
+
+def line_problems(path: str, text: str, current_text: str) -> list[str]:
+    """Why this new file text breaks the line rule, in words the player can act on; [] when it is fine."""
+    shape = line_shape(text)
+    lines_allowed, over_allowed = line_allowance(current_text)
+    problems = []
+    if shape["over"] > over_allowed:
+        worst = shape["examples"][0] if shape["examples"] else (0, "")
+        problems.append(f"{path} holds {shape['over']} move sequences longer than {LINE_MAX_PLIES} plies "
+                        f"(allowed now: {over_allowed}); e.g. '{worst[1][:70]}' is {worst[0]} plies: keep the first "
+                        f"{LINE_MAX_PLIES} plies at most, or replace it with the pattern it teaches")
+    if shape["lines"] > lines_allowed:
+        sample = "; ".join(f"'{t[:40]}' ({n} plies)" for n, t in shape["examples"])
+        problems.append(f"{path} holds {shape['lines']} move sequences of {LINE_COUNTED_PLIES}+ plies (allowed now: "
+                        f"{lines_allowed}, limit {MAX_LINES_PER_FILE}): keep only the opening lines you actually play "
+                        f"and turn the rest into patterns, e.g. {sample}")
+    return problems
+
 # Em dash, en dash and horizontal bar (built from code points so this file holds none of them).
 DASHES = re.compile("[ \t]*[" + chr(0x2013) + chr(0x2014) + chr(0x2015) + "][ \t]*")
 FIGURE_DASH = chr(0x2012)
@@ -69,12 +127,14 @@ def atomic_write(path: Path, text: str) -> None:
 # ---------------------------------------------------------------- memory edit validation
 
 
-def validate_edits(edits: object, existing_notes: list[str]) -> tuple[list[dict], list[str]]:
+def validate_edits(edits: object, existing_notes: list[str],
+                   current: dict[str, str] | None = None) -> tuple[list[dict], list[str]]:
     """Check the edits a reflection returned. Returns (accepted, rejected reasons).
 
     Allowed: {"path": "MEMORY.md", "content": str} (replace), {"path": "notes/<topic>.md", "content": str}
     (upsert) and {"path": "notes/<topic>.md", "delete": true}. Anything else is rejected, never repaired:
-    other paths, traversal, oversize content (the agent must keep its files concise), too many note files."""
+    other paths, traversal, oversize content (the agent must keep its files concise), too many note files, and
+    too many or too long move sequences (see line_problems; `current` maps a path to the text it holds now)."""
     accepted: list[dict] = []
     rejected: list[str] = []
     if not isinstance(edits, list):
@@ -113,6 +173,10 @@ def validate_edits(edits: object, existing_notes: list[str]) -> tuple[list[dict]
             target = MEMORY_TARGET_BYTES if path == MEMORY_FILE else int(cap * 0.85)
             rejected.append(f"edit {index}: {path} is {size} bytes, over the {cap}-byte cap: "
                             f"cut at least {size - target} bytes (to about {target})")
+            continue
+        problems = line_problems(path, text, (current or {}).get(path, ""))
+        if problems:
+            rejected.append(f"edit {index}: " + "; ".join(problems))
             continue
         if path != MEMORY_FILE and path not in notes and len(notes) >= MAX_NOTE_FILES:
             rejected.append(f"edit {index}: {path} would be note file {len(notes) + 1}, over the limit of {MAX_NOTE_FILES}")
@@ -285,6 +349,12 @@ class MemoryRepo:
                 continue
         return out
 
+    def current_texts(self, name: str) -> dict[str, str]:
+        """{path: text} of the player's MEMORY.md and notes as they are now (for the line ratchet)."""
+        out = {MEMORY_FILE: self.memory_text(name)}
+        out.update(self.notes_text(name, limit=MAX_NOTE_FILES * 2))
+        return out
+
     def other_memories(self, name: str) -> list[tuple[str, str]]:
         """(folder, MEMORY.md) of every other player folder in the repo, read-only for `name`."""
         own = self.folder_of(name)
@@ -402,7 +472,8 @@ class MemoryRepo:
                                                                 "players": learning_rows(state)}
             data["last_written"] = dict(last_written)
             self.write_json("tournaments/learning.json", data)
-            self.write_file("tournaments/learning.md", learning_markdown(data, state["id"], self.folders))
+            shapes = {name: line_shape(self.memory_text(name)) for name in self.folders}
+            self.write_file("tournaments/learning.md", learning_markdown(data, state["id"], self.folders, shapes))
 
     def record_cache_stats(self, state: dict) -> None:
         """Per player: this tournament and all tournaments together (cumulative json, rendered md)."""
@@ -478,7 +549,8 @@ def learning_rows(state: dict) -> dict[str, dict]:
     return rows
 
 
-def learning_markdown(data: dict, current: str, folders: dict[str, str]) -> str:
+def learning_markdown(data: dict, current: str, folders: dict[str, str],
+                      shapes: dict[str, dict] | None = None) -> str:
     totals: dict[str, dict] = {}
     for entry in (data.get("tournaments") or {}).values():
         for name, row in (entry.get("players") or {}).items():
@@ -491,7 +563,10 @@ def learning_markdown(data: dict, current: str, folders: dict[str, str]) -> str:
              "- Read in prompt: games where every move request carried the player's MEMORY.md (fingerprint sent by the engine).",
              "- Read latest: games that started with the exact MEMORY.md the player wrote after its previous game.",
              "- Memory / note updates: reflections that changed MEMORY.md / a notes file. Rejected: edits over a cap or "
-             "outside the player's folder (the player gets one retry to shorten them).", ""]
+             "outside the player's folder (the player gets one retry to shorten them).",
+             f"- Lines: runs of {LINE_COUNTED_PLIES}+ consecutive moves in MEMORY.md (at most {MAX_LINES_PER_FILE}, none "
+             f"longer than {LINE_MAX_PLIES} plies; a file over the limit must lose one line per reflection). "
+             "Memory is for patterns, not long move sequences.", ""]
     folder_line = ", ".join(f"{name}: `agents/{folder}/`" for name, folder in sorted(folders.items()))
     if folder_line:
         lines += ["Folders: " + folder_line, ""]
@@ -503,6 +578,12 @@ def learning_markdown(data: dict, current: str, folders: dict[str, str]) -> str:
         for name, r in sorted(rows.items()):
             lines.append(f"| {name} | {r['games']} | {r['read_in_prompt']} | {r['read_latest']} | {r['reflections']} | "
                          f"{r['memory_updates']} | {r['note_updates']} | {r['rejected']} | {r['retries']} | {r['errors']} |")
+        lines.append("")
+    if shapes:
+        lines += ["## Memory shape now", "", "| Player | Lines in MEMORY.md | Longest run (plies) | Over the ply cap |",
+                  "| --- | ---: | ---: | ---: |"]
+        for name, shape in sorted(shapes.items()):
+            lines.append(f"| {name} | {shape['lines']} | {shape['longest']} | {shape['over']} |")
         lines.append("")
     return "\n".join(lines)
 

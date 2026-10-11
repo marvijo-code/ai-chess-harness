@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engines" / "llm-ch
 import play_llm_swiss as swiss  # noqa: E402
 from ai_chess_memory import (GitPusher, MemoryRepo, MEMORY_MAX_BYTES, MEMORY_TARGET_BYTES, MAX_NOTE_FILES,  # noqa: E402
                              NOTE_MAX_BYTES,
-                             LADDER_WINS_TO_STEP, ensure_repo, game_markdown, ladder_depth, ladder_entry, ladder_step, parse_reflection, player_folders, slugify,
+                             LADDER_WINS_TO_STEP, LINE_COUNTED_PLIES, LINE_MAX_PLIES, MAX_LINES_PER_FILE, ensure_repo, game_markdown, ladder_depth, ladder_entry, ladder_step, line_allowance, line_shape, parse_reflection, player_folders, slugify,
                              text_sha, validate_edits)
 from play_llm_series import LlmEngine, iso_now, parse_info, parse_note, parse_usage, write_text_retry  # noqa: E402
 
@@ -133,6 +133,11 @@ def reflection_prompt(player: str, state: dict, game: dict, memory: str, notes: 
             own_marks.append(f"ply {move['ply']} {move['san']}{mark}")
     opp_marks = [f"ply {m['ply']} {m['san']}{marks[str(m['ply'])]}" for m in game.get("moves") or []
                  if marks.get(str(m.get("ply"))) and m.get("side") != side]
+    shape = line_shape(memory)
+    lines_allowed, over_allowed = line_allowance(memory)
+    line_status = (f"Your MEMORY.md now holds {shape['lines']} such lines (longest {shape['longest']} plies); "
+                   f"the new version may hold at most {lines_allowed} lines and {over_allowed} longer than "
+                   f"{LINE_MAX_PLIES} plies.")
     parts = [
         f"You are {player}. Your game just ended: you {score} as {side.capitalize()} against {opponent} "
         f"({game.get('result')}, {game.get('termination')}). Tournament #{state.get('number')} ({state['id']}), "
@@ -150,6 +155,12 @@ def reflection_prompt(player: str, state: dict, game: dict, memory: str, notes: 
         "Write only what helps your chess: openings that worked or failed, recurring tactical misses, time use, "
         "how specific opponents play. No praise, no filler. You may adopt a lesson from another player's memory "
         "when it is good chess; write it in your own words in your own files.",
+        "Learn like a human player, not like a database. Keep patterns: the check you skipped and the sign that "
+        "was on the board, the kind of position you misjudge, how each opponent plays, how you spend your clock, "
+        "which openings suit you. Do not store long move sequences: a lost game teaches a check, not a line. "
+        f"A line (a run of consecutive moves) may be at most {LINE_MAX_PLIES} plies long, and each file may hold "
+        f"at most {MAX_LINES_PER_FILE} lines of {LINE_COUNTED_PLIES}+ plies: keep only the opening moves you "
+        f"actually play. {line_status}",
         "",
         "Reply with ONLY this JSON object:",
         '{"summary": "<one or two sentences: what you learned from this game>", "edits": ['
@@ -257,7 +268,7 @@ def reflect(player: dict, state: dict, game: dict, repo: MemoryRepo, cfg: dict, 
                          if isinstance(e, dict) and isinstance(e.get("path"), str) and "content" in e}
                 notes_now = set(repo.note_paths(name)) | {e["path"] for e in accepted if not e.get("delete")}
                 notes_now -= {e["path"] for e in accepted if e.get("delete")}
-                more, rejected = validate_edits(edits, sorted(notes_now))
+                more, rejected = validate_edits(edits, sorted(notes_now), repo.current_texts(name))
                 accepted += more
             out["attempts"].append({"bytes": sizes, "rejected": len(rejected), "error": "" if data is not None else why})
             if data is not None and not rejected:
@@ -275,7 +286,8 @@ def reflect(player: dict, state: dict, game: dict, repo: MemoryRepo, cfg: dict, 
                               + "\n".join(problems) + "\n"
                               "Reply again with ONLY the JSON object. Resend only the files that were rejected (or all "
                               "of them if the JSON did not parse). Count bytes: cut at least the amount stated, by "
-                              "merging or dropping your weakest lessons; do not only shorten words.")
+                              "merging or dropping your weakest lessons; do not only shorten words. Too many or too "
+                              "long move sequences: cut each named line to the pattern it teaches.")
         out["seconds"] = round(time.monotonic() - started, 1)
         out["rejected"] = rejected
         out["applied"] = repo.apply_edits(name, accepted)
