@@ -256,6 +256,151 @@ class WavTest(unittest.TestCase):
         self.assertEqual(c._done_ply.get("r1b1"), 1, "the moment is not retried (no second call for it)")
 
 
+class Refused(Exception):
+    """Stands in for aiohttp's WSServerHandshakeError (it carries the HTTP status)."""
+
+    def __init__(self, status):
+        super().__init__(f"{status}, message='Invalid response status'")
+        self.status = status
+
+
+class VoiceRetryTest(unittest.TestCase):
+    """2026-10-11: the voice answered 403 for two days and every failed voice cost a new text call."""
+
+    def host(self, state, voice):
+        logs = []
+        c, _ = make(state)
+        c.log = logs.append
+        c.gating = False
+        c._events_done.add("opening")
+        c.tts_backend = voice
+        return c, logs
+
+    @staticmethod
+    def text_calls(c):
+        return [b for p, b in c.http.calls if p == "/chat/completions"]
+
+    def test_a_failed_voice_is_tried_again_with_the_same_text(self):
+        spoken, waits = [], []
+
+        def flaky(text):
+            spoken.append(text)
+            if len(spoken) < 3:
+                raise OSError("handshake refused")
+            return b"\x00\x00" * 24000
+
+        c, _logs = self.host(live_state(moves=1), flaky)
+        c.sleep = waits.append
+        clip = c.tick()
+        self.assertEqual(len(self.text_calls(c)), 1, "the line is written once")
+        self.assertEqual(spoken, [clip["text"]] * 3, "only the voice is tried again, with the same text")
+        self.assertEqual(waits, list(lc.VOICE_RETRY_WAITS))
+        self.assertEqual(c._voice_drops, 0)
+
+    def test_a_dead_voice_never_buys_a_second_closing_line(self):
+        tries = []
+
+        def dead(text):
+            tries.append(text)
+            raise Refused(403)
+
+        state = live_state(moves=4)
+        state["games"]["r1b1"].update(status="finished", result="1-0", termination="checkmate")
+        c, logs = self.host(state, dead)
+        for _ in range(6):
+            self.assertIsNone(c.tick())
+            c._backoff_until = 0   # the pause after a dropped line is over
+        self.assertEqual(len(self.text_calls(c)), 1, "one text call for the result, however often the voice fails")
+        self.assertEqual(len(tries), lc.VOICE_TRIES)
+        self.assertEqual(len(set(tries)), 1)
+        self.assertEqual(c.clips_all(0), [])
+        self.assertEqual(sum("line stays silent" in m for m in logs), 1)
+
+    def test_a_voice_outage_pauses_the_host_longer_each_time(self):
+        def dead(_text):
+            raise Refused(403)
+
+        c, _logs = self.host(live_state(moves=1), dead)
+        pauses = []
+        for plies in (1, 2, 3):
+            c.state_path.write_text(json.dumps(live_state(moves=plies)), encoding="utf-8")
+            before = time.time()
+            self.assertIsNone(c.tick())
+            pauses.append(round(c._backoff_until - before))
+            calls = len(self.text_calls(c))
+            self.assertIsNone(c.tick(), "paused: no call while the voice is down")
+            self.assertEqual(len(self.text_calls(c)), calls)
+            c._backoff_until = 0
+        self.assertEqual(pauses, [30, 60, 120])
+        c.tts_backend = c.http.tts
+        c.state_path.write_text(json.dumps(live_state(moves=4)), encoding="utf-8")
+        self.assertIsNotNone(c.tick(), "the voice is back: the next line is spoken")
+        self.assertEqual(c._voice_drops, 0)
+
+    def test_a_metered_voice_is_not_called_twice_for_one_line(self):
+        c, _ = make(live_state(moves=1), route="codex", tts="openrouter", allow_openrouter=True)
+        c.gating = False
+        c._events_done.add("opening")
+        c.tts_backend = None
+        calls = []
+
+        def http(path, body):
+            calls.append(path)
+            raise OSError("down")
+
+        c.http = http
+        self.assertIsNone(c.tick())
+        self.assertEqual(calls, ["/audio/speech"])
+
+
+class EdgeEndpointTest(unittest.TestCase):
+    OLD, NEW = None, "wss://new.example/websocket/v1?key=k"
+
+    def setUp(self):
+        lc._edge_endpoint = 0
+        self.addCleanup(setattr, lc, "_edge_endpoint", 0)
+
+    def test_a_refused_handshake_moves_to_the_other_host_and_stays_there(self):
+        asked = []
+
+        def fetch(_text, _voice, _rate, _timeout, wss_url):
+            asked.append(wss_url)
+            if wss_url is self.OLD:
+                raise Refused(403)
+            return b"mp3"
+
+        hosts = [self.OLD, self.NEW]
+        self.assertEqual(lc.edge_tts_mp3("hi", "v", fetch=fetch, endpoints=hosts), b"mp3")
+        self.assertEqual(lc.edge_tts_mp3("hi", "v", fetch=fetch, endpoints=hosts), b"mp3")
+        self.assertEqual(asked, [self.OLD, self.NEW, self.NEW], "the host that works is remembered")
+
+    def test_both_hosts_refusing_raises_the_refusal(self):
+        def fetch(*_args):
+            raise Refused(403)
+
+        with self.assertRaises(Refused):
+            lc.edge_tts_mp3("hi", "v", fetch=fetch, endpoints=[self.OLD, self.NEW])
+
+    def test_other_errors_do_not_switch_hosts(self):
+        asked = []
+
+        def fetch(_text, _voice, _rate, _timeout, wss_url):
+            asked.append(wss_url)
+            raise TimeoutError("slow")
+
+        with self.assertRaises(TimeoutError):
+            lc.edge_tts_mp3("hi", "v", fetch=fetch, endpoints=[self.OLD, self.NEW])
+        self.assertEqual(asked, [self.OLD])
+        self.assertEqual(lc._edge_endpoint, 0)
+
+    def test_the_new_host_is_microsofts_and_can_be_pinned(self):
+        self.assertEqual(lc.edge_endpoints({"COMMENTARY_EDGE_WSS_URL": " wss://pinned.example/x "}),
+                         ["wss://pinned.example/x"])
+        self.assertTrue(lc.EDGE_FALLBACK_WSS.startswith("wss://api.msedgeservices.com/"))
+        hosts = lc.edge_endpoints({})
+        self.assertIsNone(hosts[0], "the address the installed edge-tts ships with is tried first")
+
+
 class LineTest(unittest.TestCase):
     def test_long_passages_end_on_a_whole_sentence(self):
         text = ("Welcome to the arena. " * 40).strip()

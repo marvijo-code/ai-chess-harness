@@ -47,6 +47,7 @@ def fake(c):
     c.http = FakeHttp()
     c.text_backend = c.http.text
     c.tts_backend = c.http.tts
+    c.sleep = lambda _s: None
     c.runner = no_cli
     return c.http
 

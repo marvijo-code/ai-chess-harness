@@ -130,6 +130,20 @@ clips by `seq`, never drops a new clip. When the viewer starts before the runner
 the commentary starts as soon as the first state appears. The launcher turns commentary on by
 default with `COMMENTARY_ROUTE=codex` (codex subscription text, free edge-tts voice, no metered API).
 
+Voice outage of 2026-10-10 (silent for about 32 hours, last clip 1093): Microsoft moved the Edge
+read-aloud websocket from `speech.platform.bing.com` to `api.msedgeservices.com` and the old host
+answered every handshake with 403 outside North America (edge-tts issue 490; edge-tts 7.2.8 was
+already the newest, the VPS clock was exact, and the laptop got the same 403). The commentary now
+tries the address the installed edge-tts ships with, moves to the new Microsoft host on a refused
+handshake and remembers the one that works; `COMMENTARY_EDGE_WSS_URL` pins an address without a
+code change. Same voice, same free service. If both hosts refuse (Microsoft starts to demand its
+new token there too), upgrade edge-tts first: `pip install --user --break-system-packages -U edge-tts`.
+
+A failed voice never costs a second text call: the written line is voiced again (3 tries, 2 s and
+6 s apart), then dropped, and the host pauses 30 s, 60 s, 120 s ... up to 15 min for each dropped
+line in a row. Before this fix a finished game whose closing line could not be voiced was written
+again on every pass for 3 minutes, which used up the hourly cap of 90 calls.
+
 ## Stockfish ladder
 
 Owner rule (2026-10-11): "not lose and win 2 times without losing". Every AI player has its OWN depth.
