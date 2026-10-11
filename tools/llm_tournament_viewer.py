@@ -586,6 +586,38 @@ body.stream .hdr-links, body.stream .extras, body.stream .archive-bar { display:
   .hosted-banner { padding: 4px 12px; font-size: 12px; flex-wrap: nowrap; } .hosted-banner .hear { margin-left: 2px; white-space: nowrap; }
   main { padding: 10px 12px; }
 }
+/* ---- phones: a player's name breaks between words only, never inside one (owner 2026-10-11: "DeepSee / k V4.1
+   Flash", "Stockfis / h 19"). The name's column is never narrower than its longest word (min-content), so the
+   row gives way before a word does. In a board's player bar the status ("thinking 0:07") gets its own line under
+   the name; in the round cards the board label gets its own line above the two players; the bracket's two
+   semifinals stack; the standings table scrolls sideways inside its card instead of widening the page. ---- */
+@media (max-width: 700px) {
+  .nb { white-space: nowrap; }
+  .pbar .name, .rc-m .pl, .rc-r .n, .bk-name, .pair .w, .pair .b, .lb-n { overflow-wrap: break-word; word-break: normal; }
+  .bk-p { grid-template-columns: 20px minmax(min-content, 1fr) auto; }
+  .pair { grid-template-columns: minmax(min-content, 1fr) 62px minmax(min-content, 1fr); }
+  .lb-r { grid-template-columns: 20px minmax(min-content, 1fr) 30px 46px; }
+  #standings { overflow-x: auto; }
+  .pbar { flex-wrap: wrap; gap: 1px 8px; }
+  .pbar .name { flex: 1 1 0; min-width: min-content; }
+  .pbar .ladder-tag { white-space: nowrap; }
+  .pbar .think { order: 1; flex: 0 0 100%; min-width: 0; text-align: left; padding-left: 22px; line-height: 15px; }
+  .pbar.live .think { min-height: 15px; }   /* a live game keeps the line, so the board does not jump on every move */
+  .pbar:not(.live) .think:empty { display: none; }
+  .rc-m { grid-template-columns: minmax(min-content, 1fr) auto minmax(min-content, 1fr); }
+  .rc-m .bd { grid-column: 1 / -1; white-space: nowrap; }
+  .rc-m .how { grid-column: 1 / -1; margin-top: 0; }
+  .rc-r { grid-template-columns: 30px minmax(min-content, 1fr) 76px 74px; }
+}
+@media (max-width: 520px) {
+  .pbar .name { font-size: 15px; }
+  .pbar .clock { font-size: 16px; min-width: 56px; padding: 4px 6px; }
+  .rc-m { gap: 4px 8px; padding: 8px 12px; font-size: 15px; }
+  .rc-m .vs { min-width: 28px; }
+  .rc-r { grid-template-columns: 20px minmax(min-content, 1fr) 58px 52px; gap: 6px; font-size: 14px; }
+  .bk-semis { grid-template-columns: minmax(0, 1fr); }
+  .pair { grid-template-columns: minmax(min-content, 1fr) 46px minmax(min-content, 1fr); }
+}
 </style>
 </head>
 <body>
@@ -820,10 +852,12 @@ function logo(name) {
 // piece, so the logo never sits alone on a line and a long first word can still break inside a narrow cell.
 function pn(name) {
   const mark = logo(name);
-  if (!mark) return esc(name);
+  if (!mark) return nbw(name);
   const text = String(name ?? "");
-  return `<span class="pl1">${mark}${esc(text.slice(0, 2))}</span>${esc(text.slice(2))}`;
+  return `<span class="pl1">${mark}${esc(text.slice(0, 2))}</span>${nbw(text.slice(2))}`;
 }
+// A word with a hyphen ("GPT-6.1") is one piece on phones: .nb is nowrap at 700 px and narrower, nothing elsewhere.
+function nbw(text) { return esc(text).replace(/[^\s-]*-\S*/g, m => `<span class="nb">${m}</span>`); }
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function clock(ms) { ms = Math.max(0, Math.floor((ms || 0) / 1000)); const m = Math.floor(ms / 60), s = ms % 60; return `${m}:${String(s).padStart(2, "0")}`; }
 // Write only when the markup changed, so unchanged parts keep their DOM, scroll and hover state.
@@ -952,7 +986,8 @@ function updateBar(el, game, side, now) {
   const waiting = live && game.waiting && game.waiting.side === side;
   const thinking = waiting ? "waiting for usage limit" : ticking ? `thinking ${clock(think)}` : (moving ? "starting..." : "");
   el.classList.toggle("to-move", moving);
-  setHTML(el, `<span class="dot ${side[0]}"></span>${logo(name)}<span class="name" title="${esc(route(name))}">${esc(name)}${ladderTag(name, game)}</span>`
+  el.classList.toggle("live", live);
+  setHTML(el, `<span class="dot ${side[0]}"></span>${logo(name)}<span class="name" title="${esc(route(name))}">${nbw(name)}${ladderTag(name, game)}</span>`
     + `<span class="elo">${s.elo ? Math.round(s.elo) : ""}</span><span class="think">${thinking}</span><span class="clock">${clock(clk)}</span>`);
 }
 function keepVisible(box, el) {
@@ -1889,7 +1924,7 @@ function showRoundCard(mode, rnd) {
       const score = res === "1/2-1/2" ? "&frac12;-&frac12;" : esc(res);
       const how = String(g.termination || "").replace(/^.*?\b(lost on time|checkmate|stalemate|forfeit\w*|resign\w*|draw by [a-z ]+|threefold repetition|insufficient material|fifty-move rule|invalid replies)\b.*$/i, "$1");
       return `<div class="rc-m" style="--i:${i}"><span class="bd">Board ${esc(p.board)}</span>`
-        + `<span class="pl ${ww ? "won" : bw ? "lost" : ""}">${esc(p.white)}</span><span class="vs res">${score}</span><span class="pl b ${bw ? "won" : ww ? "lost" : ""}">${esc(p.black)}</span>`
+        + `<span class="pl ${ww ? "won" : bw ? "lost" : ""}">${nbw(p.white)}</span><span class="vs res">${score}</span><span class="pl b ${bw ? "won" : ww ? "lost" : ""}">${nbw(p.black)}</span>`
         + (how ? `<span class="how">${esc(how)}</span>` : "") + `</div>`;
     }).join("");
     const nx = rrRounds().find(r => r.round === rnd.round + 1);
