@@ -32,6 +32,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import aichess_logos  # noqa: E402
 TOOLS_DIR = Path(__file__).resolve().parent
 LIVE_DIR = ROOT / "out" / "live"
 VIEWER_VERSION = str(int(Path(__file__).stat().st_mtime))
@@ -509,6 +513,47 @@ body.stream .card.focused .lb-side, body.stream .card.focused .lb-under, body.st
 a.chip.pub { text-decoration: none; }
 .chip.pub.live { color: var(--ok); border-color: rgba(52, 199, 123, .45); }
 .chip.pub.off { color: var(--warn); border-color: rgba(245, 185, 66, .45); }
+/* ---- maker logos, livestream link, earlier tournaments, what each AI has learnt ---- */
+.pl1 { white-space: nowrap; }
+.plogo { display: inline-block; width: 1.05em; height: 1.05em; vertical-align: -.17em; margin-right: .36em; flex: none; color: var(--text); border-radius: 3px; overflow: hidden; }
+.hdr-links { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-left: auto; min-width: 0; }
+.hdr-links [hidden], .extras[hidden], .archive-bar[hidden] { display: none !important; }
+a.chip, button.chip { text-decoration: none; font: inherit; font-size: 13px; cursor: pointer; }
+.hdr-links .chip { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
+.hdr-links .chip:hover, .hdr-links .chip:focus-within { border-color: var(--accent); }
+.chip.yt svg { width: 19px; height: 14px; flex: none; }
+.chip.tsel { padding-right: 5px; }
+.chip.tsel span { color: var(--muted); }
+.chip.tsel select { background: transparent; color: var(--text); border: 0; outline: 0; font: inherit; font-size: 13px; max-width: 260px; cursor: pointer; }
+.chip.tsel select option { background: var(--panel); color: var(--text); }
+.archive-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 12px; padding: 7px 16px; border-bottom: 1px solid rgba(245, 185, 66, .4);
+  background: rgba(245, 185, 66, .09); color: #ffd479; font-size: 13.5px; line-height: 1.35; text-align: center; overflow-wrap: anywhere; }
+.archive-bar b { color: var(--text); }
+.extras { padding: 0 22px 22px; }
+.learnt > summary { cursor: pointer; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.learnt[open] > summary { margin-bottom: 10px; }
+.learnt-intro { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+.learnt-intro a, .lm-foot a { color: var(--accent); }
+.lm { border-top: 1px solid var(--line); }
+.lm > summary { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; padding: 10px 2px; cursor: pointer; font-weight: 600; list-style: none; }
+.lm > summary::-webkit-details-marker { display: none; }
+.lm > summary::before { content: ""; width: 6px; height: 6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; flex: none; margin: 0 6px 0 2px; }
+.lm[open] > summary::before { transform: rotate(45deg); }
+.lm > summary .nm { min-width: 0; overflow-wrap: anywhere; }
+.lm > summary .meta { color: var(--muted); font-weight: 400; font-size: 12.5px; margin-left: auto; }
+.lm-body { padding: 0 4px 14px 22px; font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; max-width: 1100px; }
+.lm-body h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; color: #ffd479; margin: 14px 0 6px; }
+.lm-body h3:first-child { margin-top: 2px; }
+.lm-body ul { margin: 0 0 6px; padding-left: 18px; }
+.lm-body li { margin: 3px 0; }
+.lm-body p { margin: 6px 0; }
+.lm-body code { background: var(--panel-2); border-radius: 4px; padding: 0 4px; font-size: .92em; }
+.lm-foot { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+body.no-think .thinking { display: none; }
+body.stream .hdr-links, body.stream .extras, body.stream .archive-bar { display: none !important; }
+@media (max-width: 520px) {
+  .extras { padding: 0 16px 16px; } .hdr-links { margin-left: 0; } .chip.tsel select { max-width: 200px; } .lm-body { padding-left: 8px; }
+}
 @media (max-width: 520px) {
   main { padding: 12px 16px; } header { padding: 12px 16px; }
   .boards { grid-template-columns: minmax(0, 1fr); }
@@ -519,10 +564,17 @@ a.chip.pub { text-decoration: none; }
 </style>
 </head>
 <body>
+<!--LOGO-SPRITE-->
 <header>
   <h1 id="title">AI Chess Swiss</h1>
   <div class="chips" id="chips"></div>
+  <div class="hdr-links" id="hdrLinks">
+    <a class="chip yt" id="liveLink" href="#" target="_blank" rel="noopener" hidden title="Open the YouTube livestream of this tournament"><svg viewBox="0 0 24 17" aria-hidden="true"><path fill="#f00" d="M23.5 2.65A3.02 3.02 0 0 0 21.38.5C19.5 0 12 0 12 0S4.5 0 2.62.5A3.02 3.02 0 0 0 .5 2.65C0 4.53 0 8.46 0 8.46s0 3.93.5 5.81a3.02 3.02 0 0 0 2.12 2.14c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 0 0 2.12-2.14c.5-1.88.5-5.81.5-5.81s0-3.93-.5-5.81z"/><path fill="#fff" d="M9.55 12.03V4.89l6.27 3.57z"/></svg>Watch the livestream</a>
+    <label class="chip tsel" id="tourPick" hidden title="Watch an earlier tournament: every game can be replayed move by move"><span>Tournament</span><select id="tourSelect" aria-label="Choose a tournament to watch"></select></label>
+    <button type="button" class="chip learn" id="learntBtn" hidden title="Each AI keeps a memory file between games: open it here">What each AI has learnt</button>
+  </div>
 </header>
+<div class="archive-bar" id="archiveBar" hidden role="status"></div>
 <div class="ticker" id="ticker" aria-label="Standings"></div>
 <main>
   <section class="boards" id="boards"><div class="empty card">Waiting for the tournament to start...</div></section>
@@ -534,6 +586,9 @@ a.chip.pub { text-decoration: none; }
     <div class="card"><h2>Rules</h2><ul class="rules" id="rules"></ul></div>
   </aside>
 </main>
+<section class="extras" id="extras" hidden>
+  <details class="card learnt" id="learnt"><summary>What each AI has learnt</summary><p class="learnt-intro" id="learntIntro"></p><div id="learntList"></div></details>
+</section>
 <div class="lapse" id="lapse" hidden role="status" aria-live="off"></div>
 <div class="champ-overlay" id="champOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="champName"><canvas id="confetti"></canvas><div class="champ-card" id="champCard"></div></div>
 <script>
@@ -560,6 +615,13 @@ let selected = null;          // game id pinned by a click (replay); null = foll
 let replayPly = null;         // ply shown for the selected game (null = last)
 let focusId = null;           // game shown alone and large (#focus=<id>)
 const params = new URLSearchParams(location.search);
+// An earlier tournament picked from the header list (or opened by ?id=): null = the live one. Such a state
+// carries "archived": it is loaded once, shown as it ended, with no commentary, no auto-focus and no shows.
+let archiveId = params.get("id") || null;
+let archiveMissing = false;   // the picked tournament is not in the archive (404)
+let tourList = null;          // /api/tournaments: {current, tournaments: [{id, number, title, champion, ...}]}
+let liveNumber = null;        // the live tournament's number (for the list's first row)
+function isArchive() { return !!(archiveId && data && data.id === archiveId && data.archived); }
 function store(key, value) { try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (e) { /* storage blocked */ } return null; }
 let analysisOn = store("swissAnalysis") !== "off";
 let soundOn = store("swissMoveSound") !== "off";
@@ -605,7 +667,7 @@ function setAutoFocus(on) {
 function setFocus(id, opts) {
   const auto = !!(opts && opts.auto);
   if (!auto) {
-    if (autoFocus) { autoFocus = false; store("swissAutoFocus", "off"); }
+    if (autoFocus && !isArchive()) { autoFocus = false; store("swissAutoFocus", "off"); }   // browsing history keeps the live setting
     focusPinned = !!id;
   }
   if (id === focusId) { render(); return; }
@@ -620,6 +682,8 @@ function setFocus(id, opts) {
   }
 }
 function onHistory() {
+  const wanted = new URLSearchParams(location.search).get("id") || null;
+  if (wanted !== archiveId) setArchive(wanted, false);   // back / forward between the live and an earlier tournament
   const before = focusId;
   readHash();
   if (focusId === before) return;
@@ -666,7 +730,7 @@ function evalFor(game, ply, total) {
   const have = replayEval[key];
   if ((!have || ((have.depth || 0) < 20 && !have.over)) && Date.now() - replayFetchAt > 700) {
     replayFetchAt = Date.now();
-    fetch(`${API_BASE}/api/analyze?game=${encodeURIComponent(game.id)}&ply=${ply}`, { cache: "no-store" })
+    fetch(`${API_BASE}/api/analyze?game=${encodeURIComponent(game.id)}&ply=${ply}${archiveId ? `&id=${encodeURIComponent(archiveId)}` : ""}`, { cache: "no-store" })
       .then(r => r.ok ? r.json() : null).then(j => {
         if (j && j.enabled === false) { analyzeOff = true; return; }
         if (j && !j.pending) replayEval[key] = j;
@@ -675,6 +739,55 @@ function evalFor(game, ply, total) {
   return have || null;
 }
 
+// ---- maker logos: who made each model. The sprite sits at the top of <body>; a name that matches no
+// rule gets no logo (nothing is made up). The model id counts too, the route does not: DeepSeek served
+// by another company's plan is still DeepSeek's model.
+const MAKER_LABEL = __MAKER_LABELS__;
+// MAKER-OF-START
+const MAKER_RULES = [
+  [/stockfish/i, "stockfish"],
+  [/claude|sonnet|opus|haiku|fable|anthropic/i, "anthropic"],
+  [/deepseek/i, "deepseek"],
+  [/gemini|gemma|google/i, "google"],
+  [/\bglm|zhipu|z\.ai/i, "zai"],
+  [/grok|\bxai\b/i, "xai"],
+  [/qwen|tongyi/i, "qwen"],
+  [/kimi|moonshot/i, "moonshot"],
+  [/minimax/i, "minimax"],
+  [/mimo|xiaomi/i, "xiaomi"],
+  [/mistral|codestral|devstral|magistral/i, "mistral"],
+  [/llama|\bmeta\b/i, "meta"],
+  [/gpt|openai|codex|\bo[134]\b/i, "openai"],
+];
+function makerKey(text) {
+  const hit = MAKER_RULES.find(r => r[0].test(text));
+  return hit ? hit[1] : "";
+}
+// MAKER-OF-END
+const makerCache = {};
+function makerOf(name) {
+  if (!name) return "";
+  const p = data && (data.players || []).find(x => x.name === name);
+  const hay = `${name} ${p && p.model ? p.model : ""}`;
+  if (makerCache[hay] === undefined) {
+    const key = makerKey(hay);
+    makerCache[hay] = key && document.getElementById("lg-" + key) ? key : "";
+  }
+  return makerCache[hay];
+}
+function logo(name) {
+  const k = makerOf(name);
+  if (!k) return "";
+  const label = esc(MAKER_LABEL[k] || k);
+  return `<svg class="plogo" role="img" aria-label="${label}"><title>${label}</title><use href="#lg-${k}"/></svg>`;
+}
+// A player's name with its maker's logo in front. The logo never sits alone on a line: it stays with the first word.
+function pn(name) {
+  const mark = logo(name);
+  if (!mark) return esc(name);
+  const text = String(name ?? ""), cut = text.indexOf(" ");
+  return `<span class="pl1">${mark}${esc(cut < 0 ? text : text.slice(0, cut))}</span>${cut < 0 ? "" : esc(text.slice(cut))}`;
+}
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function clock(ms) { ms = Math.max(0, Math.floor((ms || 0) / 1000)); const m = Math.floor(ms / 60), s = ms % 60; return `${m}:${String(s).padStart(2, "0")}`; }
 // Write only when the markup changed, so unchanged parts keep their DOM, scroll and hover state.
@@ -738,12 +851,12 @@ function renderAgents() {
   if (!names.length && !benched.length) return;
   const pctTxt = v => (v === null || v === undefined) ? "" : `${(v * 100).toFixed(1)}%`;
   const when = iso => { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }); };
-  const benchRows = benched.map(b => `<div class="ag"><span class="ag-n">${esc(b.name)}</span><span class="ag-c">sits out</span>`
+  const benchRows = benched.map(b => `<div class="ag"><span class="ag-n">${pn(b.name)}</span><span class="ag-c">sits out</span>`
     + `<span class="ag-note" title="${esc(b.reason || "")}">benched: ${esc(b.kind || "preflight failed")}${b.resets_at ? ", resets " + esc(when(b.resets_at)) : ""}</span></div>`).join("");
   setHTML(document.getElementById("agents"), benchRows + names.map(n => {
     const c = cache[n] || {}, note = notes[n];
     const hit = c.warm_hit_rate !== null && c.warm_hit_rate !== undefined ? c.warm_hit_rate : c.hit_rate;
-    return `<div class="ag"><span class="ag-n">${esc(n)}</span><span class="ag-c" title="Cached input tokens / all input tokens (without each game's first 3 moves)">${hit !== undefined && hit !== null ? "cache " + pctTxt(hit) : ""}</span>`
+    return `<div class="ag"><span class="ag-n">${pn(n)}</span><span class="ag-c" title="Cached input tokens / all input tokens (without each game's first 3 moves)">${hit !== undefined && hit !== null ? "cache " + pctTxt(hit) : ""}</span>`
       + (note ? `<span class="ag-note" title="${esc(note.game)} ply ${esc(note.ply)}">${esc(note.note)}</span>` : "") + `</div>`;
   }).join(""));
 }
@@ -795,7 +908,7 @@ function updateBar(el, game, side, now) {
   const waiting = live && game.waiting && game.waiting.side === side;
   const thinking = waiting ? "waiting for usage limit" : ticking ? `thinking ${clock(think)}` : (moving ? "starting..." : "");
   el.classList.toggle("to-move", moving);
-  setHTML(el, `<span class="dot ${side[0]}"></span><span class="name" title="${esc(route(name))}">${esc(name)}${ladderTag(name, game)}</span>`
+  setHTML(el, `<span class="dot ${side[0]}"></span><span class="name" title="${esc(route(name))}">${pn(name)}${ladderTag(name, game)}</span>`
     + `<span class="elo">${s.elo ? Math.round(s.elo) : ""}</span><span class="think">${thinking}</span><span class="clock">${clock(clk)}</span>`);
 }
 function keepVisible(box, el) {
@@ -889,8 +1002,9 @@ function paintThinking(c, chunk) {
 async function fetchThinking(c) {
   const t = c.think;
   if (t.inflight || t.ply < 1) return;
+  if (HOSTED && isArchive()) return;   // the relay keeps the thinking text of the live tournament only
   t.inflight = true;
-  const q = params.get("id") ? `&id=${encodeURIComponent(params.get("id"))}` : "";
+  const q = archiveId ? `&id=${encodeURIComponent(archiveId)}` : "";
   try {
     const res = await fetch(`${API_BASE}/api/thinking?game=${encodeURIComponent(c.id)}&ply=${t.ply}&since=${t.since}${q}`, { cache: "no-store" });
     const j = res.ok ? await res.json() : null;
@@ -1053,7 +1167,11 @@ function fitStream() {
 }
 function render() {
   if (STREAM) requestAnimationFrame(fitStream);
+  renderLinks();
+  renderArchiveBar();
   if (!data || !data.id) return;
+  document.body.classList.toggle("archive", isArchive());
+  document.body.classList.toggle("no-think", HOSTED && isArchive());
   document.getElementById("title").textContent = data.title || "AI Chess Swiss";
   document.title = (focusId && data.games && data.games[focusId] ? `${data.games[focusId].white} vs ${data.games[focusId].black} - ` : "") + (data.title || "AI Chess Swiss");
   const cfg = data.config || {};
@@ -1067,7 +1185,7 @@ function render() {
     `<span class="chip"><b>${cfg.maxAttempts}</b> tries per move, then forfeit</span>`,
     fmt ? `<span class="chip">Round robin, top <b>${koSize}</b> to the knockouts, Elo start <b>${cfg.startElo}</b></span>`
       : `<span class="chip">Swiss, Elo start <b>${cfg.startElo}</b>, K=${cfg.eloK}</span>`,
-    `<span class="chip btn ${autoFocus ? "on" : ""}" data-toggle-autofocus title="${autoFocus ? `One live game: the camera stays on it. Several: it moves between them, ${Math.round(FOCUS_MIN_MS / 1000)} to ${Math.round(FOCUS_MAX_MS / 1000)} s each, following the commentary. Click a board yourself to stay on it.` : "Click to let the camera follow the live games and the commentary automatically"}">Auto-focus: <b>${autoFocus ? "on" : "off"}</b>${autoFocus && focusId && autoReason ? ` - ${esc(autoReason)}` : ""}</span>`,
+    isArchive() ? "" : `<span class="chip btn ${autoFocus ? "on" : ""}" data-toggle-autofocus title="${autoFocus ? `One live game: the camera stays on it. Several: it moves between them, ${Math.round(FOCUS_MIN_MS / 1000)} to ${Math.round(FOCUS_MAX_MS / 1000)} s each, following the commentary. Click a board yourself to stay on it.` : "Click to let the camera follow the live games and the commentary automatically"}">Auto-focus: <b>${autoFocus ? "on" : "off"}</b>${autoFocus && focusId && autoReason ? ` - ${esc(autoReason)}` : ""}</span>`,
     data.analysis_engine ? `<span class="chip btn ${analysisOn ? "on" : ""}" data-toggle-analysis title="Viewer-only engine analysis; the AI players never see it">${esc(data.analysis_engine)} analysis: <b>${analysisOn ? "on" : "off"}</b></span>` : "",
     `<span class="chip btn ${soundOn ? "on" : ""}" data-toggle-sound title="A short click whenever a new move appears on a visible board">Move sound: <b>${soundOn ? "on" : "off"}</b></span>`,
     data.commentary ? `<span class="chip btn ${commentaryOn ? (needGesture ? "wait" : "on") : ""}" data-toggle-commentary title="Spoken commentary: it moves between the leaders and the most interesting games; in focus mode it stays on the focused board">Commentary: <b>${commentaryOn ? (needGesture ? "click to start" : "on") : "muted"}</b></span>` : "",
@@ -1081,7 +1199,7 @@ function render() {
   renderBracket();
   const rows = (data.standings || []).map(r => {
     const d = r.elo_delta || 0;
-    return `<tr class="${r.rank === 1 && (r.played || 0) > 0 ? "rank1" : ""}"><td>${r.rank}</td><td class="player">${esc(r.name)}${ladderTag(r.name)}<span class="route">${esc(route(r.name))}</span></td>`
+    return `<tr class="${r.rank === 1 && (r.played || 0) > 0 ? "rank1" : ""}"><td>${r.rank}</td><td class="player">${pn(r.name)}${ladderTag(r.name)}<span class="route">${esc(route(r.name))}</span></td>`
       + `<td class="num"><b>${r.points}</b></td><td class="num">${Math.round(r.elo)} <span class="${d > 0 ? "up" : d < 0 ? "down" : ""}">${Math.round(d) ? (d > 0 ? "+" : "") + Math.round(d) : ""}</span></td>`
       + `<td class="num">${r.wins}/${r.draws}/${r.losses}</td><td class="num">${r.forfeits}</td><td class="num">${r.flags}</td><td class="num">${r.invalid_attempts}</td></tr>`;
   }).join("");
@@ -1092,7 +1210,7 @@ function render() {
       const g = games[p.game_id] || {};
       const res = g.status === "live" ? `<span class="r live">LIVE</span>` : `<span class="r">${esc(g.result && g.result !== "*" ? g.result.replace("1/2-1/2", "½-½") : "-")}</span>`;
       const lbl = p.label ? `<span class="lbl">${esc(p.label)}${p.armageddon ? `<span class="a">ARMAGEDDON</span>` : ""}</span>` : "";
-      return `<div class="pair ${selected === p.game_id ? "sel" : ""}" data-pick="${esc(p.game_id)}">${lbl}<span class="w">${esc(p.white)}</span>${res}<span class="b">${esc(p.black)}</span>`
+      return `<div class="pair ${selected === p.game_id ? "sel" : ""}" data-pick="${esc(p.game_id)}">${lbl}<span class="w">${pn(p.white)}</span>${res}<span class="b">${pn(p.black)}</span>`
         + (g.termination ? `<span class="why">${esc(g.termination)}</span>` : "") + `</div>`;
     }).join("");
     const title = r.label || (fmt && !r.stage ? `Round ${r.round} of ${fmt.rr_rounds || cfg.rounds}` : `Round ${r.round}`);
@@ -1142,7 +1260,7 @@ function crownSvg(cls, uid, dim) {
 }
 function stageChip(cfg) {
   const k = ko(), st = stageOf(), f = fmtInfo();
-  if (k && k.champion) return `<span class="chip stage ko champ btn" data-show-champion title="Show the champion moment again">${crownSvg("ico", "chip")}Champion: <b>${esc(k.champion)}</b></span>`;
+  if (k && k.champion) return `<span class="chip stage ko champ btn" data-show-champion title="Show the champion moment again">${crownSvg("ico", "chip")}Champion: <b>${pn(k.champion)}</b></span>`;
   if (f) {
     const rnd = (data.rounds || []).find(r => r.round === data.current_round);
     const armaLive = rnd && (rnd.pairings || []).some(p => p.armageddon && ((data.games || {})[p.game_id] || {}).status === "live");
@@ -1169,7 +1287,7 @@ function bkRow(name, seed, tbd, m, games) {
     const sc = g.result === "1/2-1/2" ? "½" : ((g.result === "1-0") === (g.white === name) ? "1" : "0");
     return `<span class="${isArmageddon(g) ? "a" : ""}" title="${isArmageddon(g) ? "Armageddon decider" : "Game"} with ${colour}">${sc}</span>`;
   }).join("");
-  return `<div class="bk-p ${win ? "win" : ""} ${out ? "out" : ""}"><span class="bk-seed" title="Seed">${seed || "-"}</span><span class="bk-name">${esc(name)}</span><span class="bk-res">${res}</span></div>`;
+  return `<div class="bk-p ${win ? "win" : ""} ${out ? "out" : ""}"><span class="bk-seed" title="Seed">${seed || "-"}</span><span class="bk-name">${pn(name)}</span><span class="bk-res">${res}</span></div>`;
 }
 // o: { label, a, b, aSeed, bSeed, aTbd, bTbd, preview, cls }
 function bkMatchHtml(m, o) {
@@ -1259,7 +1377,7 @@ function miniMatch(m, o, curId) {
     tbd = String(tbd || "").replace(/^(Winner|Loser) of Semifinal (\d)$/, (x, w, n) => `${w}, semi ${n}`);
     if (!name) return `<div class="mb-p"><span class="bk-seed">${seed || "-"}</span><span class="mb-n tbd">${esc(tbd)}</span></div>`;
     const win = m && m.winner === name, out = m && m.winner && m.winner !== name;
-    return `<div class="mb-p ${win ? "win" : ""} ${out ? "out" : ""}"><span class="bk-seed">${seed || "-"}</span><span class="mb-n">${esc(name)}</span></div>`;
+    return `<div class="mb-p ${win ? "win" : ""} ${out ? "out" : ""}"><span class="bk-seed">${seed || "-"}</span><span class="mb-n">${pn(name)}</span></div>`;
   };
   const cls = ["mb-m", o.label === "Third place" ? "third" : "", live ? "live" : "", armaLive ? "arma" : "", m && m.winner ? "done" : "", here ? "here" : "", click ? "click" : ""].filter(Boolean).join(" ");
   const attrs = click ? ` data-bk-game="${esc(shown.id)}" title="${live ? "Watch this game" : "Show this game"}"` : "";
@@ -1282,7 +1400,7 @@ function renderTicker() {
   const f = fmtInfo(), size = f ? (f.ko_size || (data.config || {}).knockoutSize || 4) : 0;
   const fg = focusId && data.games ? data.games[focusId] : null;
   const html = rows.length ? `<span class="tk-h">Standings</span>` + rows.map((r, i) =>
-    `<span class="tk${size && i < size ? " zone" : ""}${fg && (r.name === fg.white || r.name === fg.black) ? " me" : ""}"><i>${r.rank || i + 1}</i>${esc(r.name)}<b>${esc(r.points ?? 0)}</b></span>`).join("") : "";
+    `<span class="tk${size && i < size ? " zone" : ""}${fg && (r.name === fg.white || r.name === fg.black) ? " me" : ""}"><i>${r.rank || i + 1}</i>${pn(r.name)}<b>${esc(r.points ?? 0)}</b></span>`).join("") : "";
   setHTML(document.getElementById("ticker"), html);
 }
 
@@ -1304,7 +1422,7 @@ function leaderboardHtml(game) {
     const seed = seeds[r.name] ? `<span class="sd" title="Knockout seed ${seeds[r.name]}">S${seeds[r.name]}</span>` : "";
     const crown = k && k.champion === r.name ? crownSvg("cr", "lb" + i) : "";
     html += `<div class="lb-r ${side ? "me" : ""} ${size && i < size ? "zone" : ""}"${side ? ` title="Playing ${side === "w" ? "White" : "Black"} in this game"` : ""}>`
-      + `<span class="lb-k">${r.rank || i + 1}</span><span class="lb-n">${side ? `<span class="dot ${side}"></span>` : ""}${esc(r.name)}${ladderTag(r.name)}${seed}${crown}</span>`
+      + `<span class="lb-k">${r.rank || i + 1}</span><span class="lb-n">${side ? `<span class="dot ${side}"></span>` : ""}${pn(r.name)}${ladderTag(r.name)}${seed}${crown}</span>`
       + `<span class="lb-p">${esc(r.points ?? 0)}</span><span class="lb-e">${r.elo ? Math.round(r.elo) : ""}<i class="${d > 0 ? "up" : d < 0 ? "down" : ""}">${d ? (d > 0 ? "+" : "") + d : ""}</i></span></div>`;
     if (size && i === size - 1 && rows.length > size) html += `<div class="lb-cut">&uarr; knockout zone</div>`;
   });
@@ -1365,6 +1483,7 @@ function boardEvent(game) {
   return san.includes("#") ? "checkmate" : san.includes("+") ? "check" : san.includes("x") ? "capture" : "";
 }
 function autoTick() {
+  if (isArchive()) return;
   if (!autoFocus || !data || !data.games || tour || (focusId && focusPinned)) return;
   const now = Date.now(), games = data.games;
   const live = Object.values(games).filter(g => g.status === "live")
@@ -1430,7 +1549,7 @@ function showIntro() {
   const fmtHtml = steps.map(([cls, t], i) => (i ? `<span class="arr" style="--i:${i * 2 - 1}">&rarr;</span>` : "") + `<span class="${cls}" style="--i:${i * 2}">${esc(t)}</span>`).join("");
   const grid = names.map((nm, i) => {
     const dx = (i % 2 ? 1 : -1) * (30 + (i * 17) % 40), dy = ((i * 37) % 70) - 35, r = ((i * 53) % 50) - 25;
-    return `<div class="intro-p" style="--i:${i};--dx:${dx}vw;--dy:${dy}vh;--r:${r}deg">${esc(nm)}</div>`;
+    return `<div class="intro-p" style="--i:${i};--dx:${dx}vw;--dy:${dy}vh;--r:${r}deg">${pn(nm)}</div>`;
   }).join("");
   const el = document.createElement("div");
   el.className = "intro";
@@ -1573,6 +1692,7 @@ function lastUpdateText() {
 function renderBanner() {
   const el = HOSTED ? document.getElementById("hostedBanner") : null;
   if (!el) return;
+  el.style.display = archiveId && (!data || isArchive()) ? "none" : "";   // an earlier tournament has its own bar
   let cls, msg;
   const k = data && data.id ? ko() : null;
   const champ = (k && k.champion) || (data && data.winner) || "";
@@ -1655,7 +1775,7 @@ function fmtClock(ms) { const s = Math.round((ms || 0) / 1000); return `${Math.f
 function showKoCard(stage, ms) {
   const k = ko(), cfg = data.config || {};
   const seed = n => (k.seeds || []).find(x => x.name === n) || {};
-  const pl = n => `${esc(n)}<small>${seed(n).seed ? `Seed ${esc(seed(n).seed)} - ${esc(seed(n).points)} pts` : ""}</small>`;
+  const pl = n => `${pn(n)}<small>${seed(n).seed ? `Seed ${esc(seed(n).seed)} - ${esc(seed(n).points)} pts` : ""}</small>`;
   const rows = ms.map((m, i) => `<div class="rc-m${m.id === "final" ? " star" : ""}" style="--i:${i}">`
     + (m.id === "final" ? `<span class="tag">For the crown</span>` : "")
     + `<span class="bd">${esc(m.label || m.id)}</span><span class="pl">${pl(m.a)}</span><span class="vs">vs</span><span class="pl b">${pl(m.b)}</span></div>`).join("");
@@ -1686,7 +1806,7 @@ function showKoCard(stage, ms) {
 function rcPlayer(name, extra = "") {
   const r = standingRow(name);
   const meta = r.rank ? `#${r.rank} - ${r.points ?? 0} pt${r.points === 1 ? "" : "s"}` : "";
-  return `${esc(name)}${meta || extra ? `<small>${esc(meta)}${extra}</small>` : ""}`;
+  return `${pn(name)}${meta || extra ? `<small>${esc(meta)}${extra}</small>` : ""}`;
 }
 function rcTable(changed) {
   const rows = (data.standings || []).slice().sort((a, b) => (a.rank || 99) - (b.rank || 99));
@@ -1694,7 +1814,7 @@ function rcTable(changed) {
   let html = `<div class="rc-r head"><span class="k">#</span><span>Player</span><span class="p">Pts</span><span class="wdl">W-D-L</span></div>`;
   rows.forEach((r, i) => {
     const gain = changed ? changed.get(r.name) : 0;
-    html += `<div class="rc-r${size && i < size ? " zone" : ""}"><span class="k">${r.rank || i + 1}</span><span class="n">${esc(r.name)}</span>`
+    html += `<div class="rc-r${size && i < size ? " zone" : ""}"><span class="k">${r.rank || i + 1}</span><span class="n">${pn(r.name)}</span>`
       + `<span class="p">${esc(r.points ?? 0)}${gain ? `<span class="gain" title="This round">+${gain === 0.5 ? "&frac12;" : esc(gain)}</span>` : ""}</span><span class="wdl">${r.wins || 0}-${r.draws || 0}-${r.losses || 0}</span></div>`;
     if (size && i === size - 1 && rows.length > size) html += `<div class="rc-cut">top ${size} reach the knockouts</div>`;
   });
@@ -1802,10 +1922,10 @@ function champHtml(k) {
   }
   return crownSvg("champ-crown", "big")
     + `<div class="champ-kicker">${esc(data.title || "AI Chess")}</div>`
-    + `<div class="champ-name" id="champName">${esc(k.champion)}</div><div class="champ-sub">is the champion</div>`
+    + `<div class="champ-name" id="champName">${pn(k.champion)}</div><div class="champ-sub">is the champion</div>`
     + (seed ? `<div class="champ-seed">Seed ${seed.seed} after the round robin${seed.points !== undefined && seed.points !== null ? `, ${seed.points} points` : ""}</div>` : "")
-    + `<div class="podium">${k.runner_up ? `<div class="silver"><div class="lbl">Runner-up</div><div class="nm">${esc(k.runner_up)}</div></div>` : ""}`
-    + `${k.third ? `<div class="bronze"><div class="lbl">Third place</div><div class="nm">${esc(k.third)}</div></div>` : ""}</div>`
+    + `<div class="podium">${k.runner_up ? `<div class="silver"><div class="lbl">Runner-up</div><div class="nm">${pn(k.runner_up)}</div></div>` : ""}`
+    + `${k.third ? `<div class="bronze"><div class="lbl">Third place</div><div class="nm">${pn(k.third)}</div></div>` : ""}</div>`
     + (line ? `<p class="champ-line">${esc(line)}</p>` : "")
     + `<div class="champ-count" aria-live="polite"><span id="champCountText">Back to the games in ${Math.round(CHAMP_AUTOCLOSE_MS / 1000)} s</span>`
     + `<i class="champ-count-bar"><b id="champCountBar"></b></i></div>`
@@ -2050,7 +2170,7 @@ function playNextClip() {
 clipAudio.addEventListener("ended", clipDone);
 clipAudio.addEventListener("error", () => { if (clipPlaying) clipDone(); });
 async function pollCommentary() {
-  if (!data || !data.commentary || !commentaryOn) return;
+  if (!data || !data.commentary || !commentaryOn || isArchive()) return;
   try {
     const res = await fetch(`${API_BASE}/api/commentary?after=${lastSeq}`, { cache: "no-store" });
     if (!res.ok) return;
@@ -2171,16 +2291,181 @@ function newTournament() {
   focusSince = 0; focusLiveAt = 0; shownAt = {}; moveSeen = {};
   autoReason = "";
 }
-async function poll() {
+// ---- livestream link, earlier tournaments, what each AI has learnt --------------------------------
+function renderLinks() {
+  const link = document.getElementById("liveLink");
+  const url = data && typeof data.live_url === "string" && /^https:\/\//.test(data.live_url) ? data.live_url : "";
+  if (url && link.getAttribute("href") !== url) link.setAttribute("href", url);
+  if (url || data) link.hidden = !url;
+  renderTourPick();
+}
+function tourLabel(t) {
+  const n = t.number ? `#${t.number}` : (t.title || t.id);
+  const d = t.updated_epoch_ms ? new Date(t.updated_epoch_ms) : null;
+  const when = d && !isNaN(d) ? d.toLocaleDateString([], { day: "numeric", month: "short" }) : "";
+  const res = t.champion ? `won by ${t.champion}` : (t.finished ? "finished" : "not finished");
+  return `${n} - ${res}${when ? ` - ${when}` : ""}`;
+}
+function renderTourPick() {
+  const box = document.getElementById("tourPick"), sel = document.getElementById("tourSelect");
+  const cur = tourList ? tourList.current : null;
+  const rows = tourList ? (tourList.tournaments || []).filter(t => t && t.id && t.id !== cur && (t.games || 0) > 0) : [];
+  box.hidden = !rows.length && !archiveId;
+  if (data && data.id && !data.archived && data.number) liveNumber = data.number;
+  const sig = JSON.stringify([cur, liveNumber, archiveId, rows.map(t => [t.id, t.champion, t.finished, t.updated_epoch_ms])]);
+  if (sel._sig === sig || document.activeElement === sel) return;   // never rebuilt while the list is open
+  sel._sig = sig;
+  const extra = archiveId && archiveId !== cur && !rows.some(t => t.id === archiveId) ? [{ id: archiveId, title: archiveId, finished: true }] : [];
+  sel.innerHTML = `<option value="">Live now${liveNumber ? ` - #${esc(liveNumber)}` : ""}</option>`
+    + extra.concat(rows).map(t => `<option value="${esc(t.id)}">${esc(tourLabel(t))}</option>`).join("");
+  sel.value = archiveId && archiveId !== cur ? archiveId : "";
+}
+function renderArchiveBar() {
+  const el = document.getElementById("archiveBar");
+  let msg = "";
+  if (archiveId && archiveMissing) msg = "That tournament is not in the archive.";
+  else if (archiveId && (!data || data.id !== archiveId)) msg = "Loading the tournament...";
+  else if (isArchive()) {
+    const k = ko(), champ = (k && k.champion) || data.winner || "";
+    msg = `Earlier tournament: <b>${esc(data.title || data.id)}</b>${champ ? ` - champion <b>${pn(champ)}</b>` : (data.finished ? "" : " - not finished")}`
+      + ` - last move ${esc(lastUpdateText())}. Pick any game under Rounds to replay it.`;
+  }
+  if (!msg) { el.hidden = true; return; }
+  setHTML(el, `<span>${msg}</span><button type="button" class="linkbtn small" data-live-now>Back to the live tournament</button>`);
+  el.hidden = false;
+}
+// Show another tournament without a page reload: id null = the live one. push adds a history entry.
+function setArchive(id, push) {
+  id = id || null;
+  if (id === archiveId) return;
+  archiveId = id;
+  archiveMissing = false;
+  if (push) {
+    const sp = new URLSearchParams(location.search);
+    if (id) sp.set("id", id); else sp.delete("id");
+    const qs = sp.toString();
+    try { history.pushState(null, "", location.pathname + (qs ? `?${qs}` : "")); } catch (e) { /* ignore */ }
+  }
+  newTournament();   // game ids repeat in every tournament: drop the boards on screen
+  commentaryQueue.length = 0;
+  stopClip();
+  for (const k of Object.keys(replayEval)) delete replayEval[k];
+  for (const k of Object.keys(moveCounts)) delete moveCounts[k];
+  data = null;
+  const wait = document.createElement("div");
+  wait.className = "empty card";
+  wait.textContent = id ? "Loading the tournament..." : "Back to the live tournament...";
+  document.getElementById("boards").replaceChildren(wait);
+  document.body.classList.remove("archive", "no-think");
+  render();
+  renderBanner();
+  window.scrollTo(0, 0);
+  poll();
+}
+async function pollTournaments() {
   try {
-    let q = params.get("id") ? `?id=${encodeURIComponent(params.get("id"))}` : "";
+    const res = await fetch(`${API_BASE}/api/tournaments`, { cache: "no-store" });
+    if (!res.ok) return;
+    const j = await res.json();
+    if (j && Array.isArray(j.tournaments)) { tourList = j; renderTourPick(); }
+  } catch (e) { /* the list is a bonus: keep the last one */ }
+}
+// MEMORY-MD-START
+// A memory file is plain Markdown written by a model: headings, bullets and paragraphs only, all escaped.
+function memoryHtml(text) {
+  const safe = t => String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const inline = t => safe(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  let html = "", list = false;
+  const close = () => { if (list) { html += "</ul>"; list = false; } };
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) { close(); continue; }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    const b = line.match(/^[-*]\s+(.*)$/);
+    if (h) { close(); if (h[1].length > 1) html += `<h3>${inline(h[2])}</h3>`; }   // the "# Chess memory" title repeats the row
+    else if (b) { if (!list) { html += "<ul>"; list = true; } html += `<li>${inline(b[1])}</li>`; }
+    else { close(); html += `<p>${inline(line)}</p>`; }
+  }
+  close();
+  return html;
+}
+// MEMORY-MD-END
+let memoryData = null;        // /api/memory: {repo_url, players: [{name, folder, text, bytes, updated_epoch_ms, notes, games, url}]}
+let memoryAt = 0;
+function agoText(ms) {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 90) return "just now";
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  if (s < 129600) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+function renderMemory() {
+  const rows = memoryData && Array.isArray(memoryData.players) ? memoryData.players.filter(p => p && p.folder && p.text) : [];
+  document.getElementById("extras").hidden = !rows.length;
+  document.getElementById("learntBtn").hidden = !rows.length;
+  if (!rows.length) return;
+  const repo = memoryData.repo_url && /^https:\/\//.test(memoryData.repo_url) ? memoryData.repo_url : "";
+  setHTML(document.getElementById("learntIntro"), "After every game each AI rewrites its own memory file, and it reads that file again before every move of the next game. "
+    + "It can read the other AIs' files too, but it can only write its own."
+    + (repo ? ` Every file, note and game review is public: <a href="${esc(repo)}" target="_blank" rel="noopener">open the memory repository</a>.` : ""));
+  const list = document.getElementById("learntList");
+  const seen = new Set();
+  for (const p of rows) {
+    seen.add(p.folder);
+    let el = list.querySelector(`details[data-folder="${CSS.escape(p.folder)}"]`);
+    if (!el) {
+      el = document.createElement("details");
+      el.className = "lm";
+      el.dataset.folder = p.folder;
+      el.innerHTML = `<summary></summary><div class="lm-body"></div>`;
+      list.appendChild(el);
+    }
+    const bits = [`${(p.bytes / 1000).toFixed(1)} KB`, p.updated_epoch_ms ? `updated ${agoText(p.updated_epoch_ms)}` : "",
+      p.games ? `${p.games} game review${p.games === 1 ? "" : "s"}` : "", p.notes ? `${p.notes} note${p.notes === 1 ? "" : "s"}` : "",
+      p.playing === false ? "not in this tournament" : ""].filter(Boolean).join(" - ");
+    setHTML(el.firstElementChild, `<span class="nm">${pn(p.name)}</span><span class="meta">${esc(bits)}</span>`);
+    const url = p.url && /^https:\/\//.test(p.url) ? p.url : "";
+    setHTML(el.lastElementChild, memoryHtml(p.text)
+      + (url ? `<div class="lm-foot"><a href="${esc(url)}" target="_blank" rel="noopener">All of its notes and game reviews</a></div>` : ""));
+  }
+  list.querySelectorAll("details[data-folder]").forEach(el => { if (!seen.has(el.dataset.folder)) el.remove(); });
+}
+async function pollMemory() {
+  try {
+    const res = await fetch(`${API_BASE}/api/memory`, { cache: "no-store" });
+    if (!res.ok) return;
+    const j = await res.json();
+    if (j && Array.isArray(j.players)) { memoryData = j; memoryAt = Date.now(); renderMemory(); }
+  } catch (e) { /* keep what is shown */ }
+}
+if (!STREAM) {
+  document.getElementById("tourSelect").addEventListener("change", ev => { const id = ev.target.value || null; ev.target.blur(); setArchive(id, true); });
+  document.getElementById("learntBtn").addEventListener("click", () => {
+    const box = document.getElementById("learnt");
+    box.open = true;
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  document.addEventListener("click", ev => { if (ev.target.closest("[data-live-now]")) setArchive(null, true); });
+  pollTournaments();
+  setInterval(pollTournaments, 60000);
+  pollMemory();
+  setInterval(pollMemory, 120000);   // a file changes once per game
+}
+async function poll() {
+  const want = archiveId;
+  if (want && isArchive()) return;   // an earlier tournament never changes: it is loaded once
+  try {
+    let q = want ? `?id=${encodeURIComponent(want)}` : "";
     // Hosted: ask only for a newer state; the answer is a tiny {"unchanged": true} when nothing moved.
     if (HOSTED && data && data.updated_epoch_ms) q += `${q ? "&" : "?"}since=${encodeURIComponent(data.updated_epoch_ms)}`;
     const res = await fetch(`${API_BASE}/api/tournament${q}`, { cache: "no-store" });
     const sentAt = Date.now();
+    if (want !== archiveId) return;   // another tournament was picked while this answer was on its way
+    if (want && res.status === 404) { archiveMissing = true; renderArchiveBar(); return; }
     if (HOSTED && !res.ok) { feedFailed = true; renderBanner(); return; }
     if (res.ok) {
       const got = await res.json();
+      if (want !== archiveId) return;
       if (HOSTED && got && got.unchanged) {
         feedFailed = false;
         if (!data) return;
@@ -2195,6 +2480,13 @@ async function poll() {
       feedFailed = false;
       if (data.server_now_ms) serverSkewMs = data.server_now_ms - Math.round((sentAt + Date.now()) / 2);
       polls++;
+      if (isArchive()) {   // history: just the boards, the tables and the replays
+        const k = ko();
+        if (k && k.champion) champSeen = k.champion;
+        render();
+        renderBanner();
+        return;
+      }
       soundForNewMoves();
       render();
       autoTick();
@@ -2214,11 +2506,13 @@ async function poll() {
 (function watchHeader() {
   const hdr = document.querySelector("header"), tick = document.getElementById("ticker");
   const ban = document.getElementById("hostedBanner");   // hosted page only
+  const arch = document.getElementById("archiveBar");
   const set = () => {
-    document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight + tick.offsetHeight + (ban ? ban.offsetHeight : 0) - 60) + "px");
-    document.documentElement.style.setProperty("--chrome-h", (hdr.offsetHeight + tick.offsetHeight + (ban ? ban.offsetHeight : 0)) + "px");
+    const bars = (ban ? ban.offsetHeight : 0) + arch.offsetHeight;
+    document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight + tick.offsetHeight + bars - 60) + "px");
+    document.documentElement.style.setProperty("--chrome-h", (hdr.offsetHeight + tick.offsetHeight + bars) + "px");
   };
-  try { const ro = new ResizeObserver(set); ro.observe(hdr); ro.observe(tick); if (ban) ro.observe(ban); } catch (e) { window.addEventListener("resize", set); }
+  try { const ro = new ResizeObserver(set); ro.observe(hdr); ro.observe(tick); ro.observe(arch); if (ban) ro.observe(ban); } catch (e) { window.addEventListener("resize", set); }
   set();
 })();
 poll();
@@ -2231,6 +2525,9 @@ if (HOSTED) setInterval(renderBanner, 1000);   // the age grows between answers,
 </html>
 """
 
+
+# The maker logos: one hidden sprite at the top of <body>, and the tooltip names for the page script.
+PAGE = PAGE.replace("<!--LOGO-SPRITE-->", aichess_logos.sprite()).replace("__MAKER_LABELS__", json.dumps(aichess_logos.LABELS))
 
 DEFAULT_ENGINE = ROOT / "out" / "engines" / "stockfish-19" / "stockfish" / "stockfish-windows-x86-64-universal.exe"
 
@@ -2775,6 +3072,151 @@ def pointer_state(pointer: Path, cache: dict | None = None) -> Path | None:
     return path
 
 
+# ---- earlier tournaments (every <id>-tournament.json in the live dir) and what each AI has learnt ----
+TOURNAMENT_LIST_TTL_S = 20
+ARCHIVE_STALE_S = 600           # an ?id= state that is finished, or this old, is served as an archive (no engine work)
+_summary_cache: dict[Path, tuple[int, dict]] = {}
+_list_cache: dict = {"at": 0.0, "dir": None, "rows": []}
+_archive_marks: dict = {}       # one entry: {"key": (state path, mtimes), "marks": {...}}
+_memory_cache: dict = {"at": 0.0, "key": None, "payload": None}
+
+
+def tournament_summary(state: dict) -> dict:
+    """The small public row for the "Earlier tournaments" list."""
+    ko = state.get("knockout") if isinstance(state.get("knockout"), dict) else {}
+    champion = ko.get("champion") or state.get("winner") or ""
+    games = state.get("games") if isinstance(state.get("games"), dict) else {}
+    return {
+        "id": state.get("id"),
+        "number": state.get("number"),
+        "title": str(state.get("title") or ""),
+        "finished": bool(state.get("finished")),
+        "champion": champion if isinstance(champion, str) else "",
+        "players": [p["name"] for p in state.get("players") or [] if isinstance(p, dict) and p.get("name")],
+        "games": sum(1 for g in games.values() if isinstance(g, dict) and g.get("status") != "live" and g.get("moves")),
+        "rounds": len(state.get("rounds") or []),
+        "created_at": str(state.get("created_at") or ""),
+        "updated_at": str(state.get("updated_at") or ""),
+        "updated_epoch_ms": state.get("updated_epoch_ms"),
+    }
+
+
+def list_tournaments(live_dir: Path, now: float | None = None) -> list[dict]:
+    """A summary of every tournament state file, newest first. Each file is parsed again only when it changed."""
+    now = time.time() if now is None else now
+    live_dir = Path(live_dir)
+    if _list_cache["dir"] == live_dir and now - _list_cache["at"] < TOURNAMENT_LIST_TTL_S:
+        return _list_cache["rows"]
+    rows = []
+    for path in live_dir.glob("*-tournament.json"):
+        try:
+            mtime = path.stat().st_mtime_ns
+            hit = _summary_cache.get(path)
+            if hit is None or hit[0] != mtime:
+                state = json.loads(path.read_bytes())
+                if not isinstance(state, dict) or not safe_id(str(state.get("id") or "")):
+                    continue
+                hit = (mtime, tournament_summary(state))
+                _summary_cache[path] = hit
+        except (OSError, ValueError):
+            continue        # mid-write or unreadable: it is back on the next pass
+        rows.append(hit[1])
+    rows.sort(key=lambda r: (r["number"] if isinstance(r.get("number"), (int, float)) else -1, r.get("updated_epoch_ms") or 0),
+              reverse=True)
+    _list_cache.update(at=now, dir=live_dir, rows=rows)
+    return rows
+
+
+def archived_annotations(state_path: Path, state: dict) -> dict[str, dict[str, str]]:
+    """Move marks of an earlier tournament from its saved sidecar: no engine, nothing queued."""
+    state_path = Path(state_path)
+    side = annotations_path(state_path)
+    try:
+        key = (state_path, state_path.stat().st_mtime_ns, side.stat().st_mtime_ns)
+        if _archive_marks.get("key") == key:
+            return _archive_marks["marks"]
+        known = json.loads(side.read_text(encoding="utf-8")).get("positions") or {}
+        import chess
+    except (OSError, ValueError, AttributeError, ImportError):
+        return {}
+    marks: dict[str, dict[str, str]] = {}
+    for gid, game in (state.get("games") or {}).items():
+        board = chess.Board()
+        ucis, fens = [], [board.fen()]
+        for move in game.get("moves") or []:
+            uci = move.get("uci") if isinstance(move, dict) else None
+            if not uci:
+                continue
+            try:
+                board.push_uci(uci)
+            except ValueError:
+                break
+            ucis.append(uci)
+            fens.append(board.fen())
+        marks[gid] = annotate_plies(ucis, [known.get(f) for f in fens])
+    _archive_marks.clear()
+    _archive_marks.update(key=key, marks=marks)
+    return marks
+
+
+def memory_repo_url(remote: str | None) -> str:
+    """https://github.com/<owner>/<repo> from a GitHub remote (also an ssh alias like git@github-x:owner/repo.git)."""
+    m = re.search(r"github[^:/]*[:/]+([\w.-]+/[\w.-]+?)(?:\.git)?/?$", remote or "")
+    return f"https://github.com/{m.group(1)}" if m else ""
+
+
+def memory_payload(repo: Path | None, state: dict | None, url: str = "", now: float | None = None) -> dict:
+    """What each AI has learnt: its MEMORY.md from the agent memory repository (read only).
+
+    {"repo_url", "players": [{"name", "folder", "text", "bytes", "updated_epoch_ms", "notes", "games", "url"}]}.
+    The folder is the model family (player config memoryFolder, else the name slug); a folder with no player in
+    this tournament is listed under its folder name. No repository = an empty list.
+    """
+    now = time.time() if now is None else now
+    state = state if isinstance(state, dict) else {}
+    forever = (state.get("config") or {}).get("forever") or {}
+    repo = Path(repo) if repo else (Path(forever["memoryRepo"]) if forever.get("memoryRepo") else None)
+    url = url or memory_repo_url(forever.get("memoryRemote"))
+    agents = repo / "agents" if repo else None
+    if agents is None or not agents.is_dir():
+        return {"repo_url": url, "players": []}
+    names: dict[str, list[str]] = {}
+    for player in state.get("players") or []:
+        if isinstance(player, dict) and player.get("name") and player.get("provider") != "uci":
+            folder = re.sub(r"[^a-z0-9]+", "-", str(player.get("memoryFolder") or player["name"]).lower()).strip("-") or "player"
+            names.setdefault(folder, []).append(player["name"])
+    key = (str(agents), tuple(sorted((f, tuple(n)) for f, n in names.items())), url)
+    if _memory_cache["key"] == key and now - _memory_cache["at"] < 15:
+        return _memory_cache["payload"]
+    players = []
+    for folder in sorted(agents.iterdir(), key=lambda d: d.name):
+        memory = folder / "MEMORY.md"
+        if not folder.is_dir() or not safe_id(folder.name) or not memory.is_file():
+            continue
+        try:
+            text = memory.read_text(encoding="utf-8", errors="replace")
+            mtime = memory.stat().st_mtime
+        except OSError:
+            continue
+        count = lambda sub: sum(1 for f in (folder / sub).glob("*.md")) if (folder / sub).is_dir() else 0   # noqa: E731
+        players.append({
+            "name": " / ".join(names.get(folder.name) or [folder.name]),
+            "playing": folder.name in names,
+            "folder": folder.name,
+            "text": text[:20000],
+            "bytes": len(text.encode("utf-8")),
+            "updated_epoch_ms": int(mtime * 1000),
+            "notes": count("notes"),
+            "games": count("games"),
+            "url": f"{url}/tree/main/agents/{folder.name}" if url else "",
+        })
+    players.sort(key=lambda row: (not row["playing"], row["name"].lower()))
+    payload = {"repo_url": url, "players": players}
+    _memory_cache.update(at=now, key=key, payload=payload)
+    return payload
+
+
+DEFAULT_LIVE_URL = "https://www.youtube.com/@EtymologyExplanations/live"   # the channel's always-current stream link
 DEFAULT_BYLINE = "By Marvijo"   # owner 2026-10-08: write "- By Marvijo" after "Chess Tournament but with ..."
 
 
@@ -2788,6 +3230,9 @@ def with_byline(title: str, byline: str) -> str:
 class Handler(BaseHTTPRequestHandler):
     state_path: Path | None = None
     follow: Path | None = None
+    memory_repo: Path | None = None
+    memory_url = ""
+    live_url = DEFAULT_LIVE_URL
     stream_layout = False
     byline = DEFAULT_BYLINE
     _follow_cache: dict = {}
@@ -2884,7 +3329,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
         elif url.path == "/api/tournament":
             wanted = (parse_qs(url.query).get("id") or [""])[0]
-            path = self.live_dir / f"{wanted}-tournament.json" if wanted else self.current_state()
+            if wanted and not safe_id(wanted):
+                self._send(400, b'{"error":"bad tournament id"}', "application/json")
+                return
+            current = self.current_state()
+            path = self.live_dir / f"{wanted}-tournament.json" if wanted else current
             if not path or not path.exists():
                 self._send(404, b'{"error":"no tournament state yet"}', "application/json")
                 return
@@ -2903,6 +3352,19 @@ class Handler(BaseHTTPRequestHandler):
             now = time.time()
             state["state_age_s"] = round(now - (state.get("updated_epoch_ms") or 0) / 1000, 1)   # paused = old
             state["server_now_ms"] = int(now * 1000)
+            if self.live_url:
+                state["live_url"] = self.live_url
+            # An earlier tournament picked by ?id=: served as it ended, with its saved move marks. No engine
+            # work, no commentary and no publish chip, so watching history never slows the live games down.
+            other = bool(wanted) and (current is None or Path(current).resolve() != path.resolve())
+            if other and (state.get("finished") or state["state_age_s"] > ARCHIVE_STALE_S):
+                state["archived"] = True
+                state["annotations"] = archived_annotations(path, state)
+                if state["annotations"] and self.annotator is not None:
+                    state["annotation_engine"] = self.annotator.name
+                state["commentary"] = False
+                self._json(state)
+                return
             if self.analyzer is not None:
                 live = {gid: g.get("fen") for gid, g in (state.get("games") or {}).items()
                         if g.get("status") == "live" and g.get("fen")}
@@ -2923,13 +3385,25 @@ class Handler(BaseHTTPRequestHandler):
             if publish is not None:
                 state["publish"] = publish
             self._json(state)
+        elif url.path == "/api/tournaments":
+            current = self.current_state()
+            self._json({"current": state_id(current) if current and Path(current).exists() else None,
+                        "tournaments": list_tournaments(self.live_dir)})
+        elif url.path == "/api/memory":
+            current = self.current_state()
+            try:
+                state = json.loads(Path(current).read_bytes()) if current else {}
+            except (OSError, ValueError):
+                state = {}
+            self._json(memory_payload(self.memory_repo, state, self.memory_url))
         elif url.path == "/api/analyze":
             # Replay position: ?game=<id>&ply=<n>. Answers from cache and queues deeper work.
             query = parse_qs(url.query)
             if self.analyzer is None:
                 self._send(200, b'{"enabled":false}', "application/json")
                 return
-            path = self.current_state()
+            wanted = (query.get("id") or [""])[0]   # a replay position of an earlier tournament
+            path = self.live_dir / f"{wanted}-tournament.json" if safe_id(wanted) else self.current_state()
             try:
                 state = json.loads(path.read_bytes()) if path else {}
                 game = state["games"][query["game"][0]]
@@ -3006,8 +3480,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stream-layout", action="store_true", help="serve the 1920x1080 stream layout at / (same as ?stream=1)")
     parser.add_argument("--byline", default=os.environ.get("AICHESS_BYLINE", DEFAULT_BYLINE),
                         help=f'shown after the tournament title, e.g. "... #1 - {DEFAULT_BYLINE}" ("" = none; env AICHESS_BYLINE)')
+    parser.add_argument("--live-url", default=os.environ.get("AICHESS_LIVE_URL", DEFAULT_LIVE_URL),
+                        help='the "Watch the livestream" link on the page ("" = no link; env AICHESS_LIVE_URL)')
+    parser.add_argument("--memory-repo", type=Path, default=os.environ.get("AICHESS_MEMORY_REPO") or None,
+                        help="agent memory repository for the \"What each AI has learnt\" panel "
+                             "(default: forever.memoryRepo in the tournament state; env AICHESS_MEMORY_REPO)")
+    parser.add_argument("--memory-url", default=os.environ.get("AICHESS_MEMORY_URL", ""),
+                        help="public web address of that repository (default: from forever.memoryRemote; env AICHESS_MEMORY_URL)")
     args = parser.parse_args(argv)
     Handler.byline = args.byline.strip()
+    Handler.memory_repo = Path(args.memory_repo).resolve() if args.memory_repo else None
+    Handler.memory_url = args.memory_url.strip().rstrip("/")
+    Handler.live_url = args.live_url.strip()
     Handler.state_path = args.state.resolve() if args.state else None
     Handler.follow = args.follow.resolve() if args.follow else None
     Handler.stream_layout = bool(args.stream_layout)

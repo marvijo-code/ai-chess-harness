@@ -8,6 +8,9 @@ its server-side proxy) can show the tournament live.
 
   PUBLIC  (0.0.0.0:8780, GET/HEAD only)
     /api/tournament[?since=<updated_epoch_ms>]   latest state (gzip when accepted)
+    /api/tournament?id=<id>                     one earlier tournament from the archive
+    /api/tournaments                            {"current": id, "tournaments": [summary, ...]} newest first
+    /api/memory                                 each AI's MEMORY.md (what it has learnt)
     /api/commentary?after=N[&game=ID]           commentary clip metadata
     /api/commentary/audio/clip-N.wav            clip audio (immutable)
     /api/thinking?game=&ply=&since=             thinking tail of one move
@@ -16,7 +19,10 @@ its server-side proxy) can show the tournament live.
     /healthz                                    relay health numbers
   INGEST  (127.0.0.1:8781, POST, header X-Ingest-Token)
     /ingest/state  /ingest/clip-audio/clip-N.wav  /ingest/clips  /ingest/thinking  /ingest/version
+    /ingest/archive  {"summary": {...}, "state": {...}}  one earlier tournament (idempotent by id)
+    /ingest/memory   the local viewer's /api/memory body
     GET /healthz (same numbers, so the pusher can ask through its ssh tunnel)
+    GET /ingest/archive-index  {id: updated_epoch_ms} of every archived tournament
 
 Python standard library only. All time math uses this machine's clock: the laptop clock
 is never compared with it.
@@ -54,6 +60,10 @@ THINK_CHUNK = 60_000                 # same read limit as the local viewer
 THINK_MAX_PLY = 1000
 VOLATILE = ("state_age_s", "server_now_ms", "hosted", "relay_received_epoch_ms")
 LOG_ROTATE_BYTES = 20 * 1024 * 1024
+ARCHIVE_KEEP = 300                   # earlier tournaments kept (oldest pruned beyond this)
+MAX_MEMORY_JSON = 2 * 1024 * 1024    # the /api/memory body
+SUMMARY_KEYS = ("id", "number", "title", "finished", "champion", "players", "games", "rounds",
+                "created_at", "updated_at", "updated_epoch_ms")
 
 
 # ---------------------------------------------------------------- helpers
@@ -175,8 +185,11 @@ class Store:
         self.wavs: dict[str, int] = {}      # name -> bytes
         self.thinking: dict[str, dict[int, dict]] = {}   # game -> ply -> {base, data, received}
         self.version = "relay"
+        self.archive: dict[str, dict] = {}  # tournament id -> summary
+        self.memory: bytes | None = None    # the /api/memory JSON body
         (self.dir / "clips").mkdir(parents=True, exist_ok=True)
         (self.dir / "thinking").mkdir(parents=True, exist_ok=True)
+        (self.dir / "archive").mkdir(parents=True, exist_ok=True)
         self._load()
 
     # ----- loading
@@ -218,6 +231,19 @@ class Store:
         try:
             self.version = json.loads((self.dir / "version.json").read_text("utf-8"))["version"]
         except (OSError, ValueError, KeyError):
+            pass
+        try:
+            index = json.loads((self.dir / "archive" / "index.json").read_text("utf-8"))
+            for tid, summary in index.items():
+                if SAFE_ID.fullmatch(tid) and isinstance(summary, dict) and (self.dir / "archive" / f"{tid}.json.gz").is_file():
+                    self.archive[tid] = summary
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError, AttributeError) as exc:
+            self.log(f"archive reload failed: {exc}")
+        try:
+            self.memory = (self.dir / "memory.json").read_bytes()
+        except OSError:
             pass
 
     # ----- state
@@ -281,6 +307,106 @@ class Store:
         lead = compressor.compress(prefix) + compressor.flush(zlib.Z_SYNC_FLUSH)
         crc = zlib.crc32(st["tail"], zlib.crc32(prefix))
         return 200, gzip_member(lead + st["deflate"], crc, len(prefix) + len(st["tail"])), True
+
+    # ----- earlier tournaments
+
+    @staticmethod
+    def _summary(raw, tid: str) -> dict:
+        """Only the known summary fields, each small (the list is public and grows with every tournament)."""
+        out: dict = {"id": tid}
+        for key in SUMMARY_KEYS[1:]:
+            value = (raw or {}).get(key)
+            if key == "players":
+                if isinstance(value, list):
+                    out[key] = [str(v)[:80] for v in value[:32]]
+            elif isinstance(value, (bool, int, float)):
+                out[key] = value
+            elif isinstance(value, str):
+                out[key] = value[:200]
+        return out
+
+    def ingest_archive(self, raw: bytes) -> dict:
+        if raw[:2] == b"\x1f\x8b":
+            raw = bounded_gunzip(raw, MAX_STATE_JSON)
+        obj = json.loads(raw)
+        state = obj.get("state") if isinstance(obj, dict) else None
+        if not isinstance(state, dict) or not SAFE_ID.fullmatch(str(state.get("id") or "")):
+            raise ValueError("archive payload has no state with a plain id")
+        tid = state["id"]
+        for key in VOLATILE:
+            state.pop(key, None)
+        strip_key(state, "pgn_path")
+        state["hosted"] = True
+        state["archived"] = True
+        body = json.dumps(state, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        summary = self._summary(obj.get("summary") if isinstance(obj.get("summary"), dict) else state, tid)
+        atomic_write(self.dir / "archive" / f"{tid}.json.gz", gzip.compress(body, 6))
+        with self.lock:
+            self.archive[tid] = summary
+            pruned = self._prune_archive()
+            index = dict(self.archive)
+        atomic_write(self.dir / "archive" / "index.json", json.dumps(index, ensure_ascii=False).encode("utf-8"))
+        return {"ok": True, "id": tid, "updated_epoch_ms": summary.get("updated_epoch_ms"), "bytes": len(body),
+                "archived": len(index), "pruned": pruned}
+
+    @staticmethod
+    def _archive_order(summary: dict) -> tuple:
+        number = summary.get("number")
+        return (number if isinstance(number, (int, float)) else -1, summary.get("updated_epoch_ms") or 0, summary.get("id") or "")
+
+    def _prune_archive(self) -> int:
+        """Caller holds the lock. Drops the oldest tournaments beyond ARCHIVE_KEEP."""
+        extra = sorted(self.archive.values(), key=self._archive_order)[: max(0, len(self.archive) - ARCHIVE_KEEP)]
+        for summary in extra:
+            self.archive.pop(summary["id"], None)
+            try:
+                (self.dir / "archive" / f"{summary['id']}.json.gz").unlink()
+            except OSError:
+                pass
+        return len(extra)
+
+    def archive_index(self) -> dict:
+        with self.lock:
+            return {tid: summary.get("updated_epoch_ms") for tid, summary in self.archive.items()}
+
+    def tournaments(self) -> dict:
+        st = self.state
+        with self.lock:
+            rows = sorted(self.archive.values(), key=self._archive_order, reverse=True)
+        current = st["id"] if st else None
+        return {"current": current, "tournaments": [row for row in rows if row.get("id") != current]}
+
+    def archive_response(self, tid: str, want_gzip: bool) -> tuple[int, bytes, bool]:
+        """(status, body, gzipped) for one archived tournament."""
+        with self.lock:
+            known = tid in self.archive
+        if not known or not SAFE_ID.fullmatch(tid):
+            return 404, b'{"error":"no such tournament in the archive"}', False
+        try:
+            packed = (self.dir / "archive" / f"{tid}.json.gz").read_bytes()
+        except OSError:
+            return 404, b'{"error":"no such tournament in the archive"}', False
+        if want_gzip:
+            return 200, packed, True
+        return 200, gzip.decompress(packed), False
+
+    # ----- what each AI has learnt
+
+    def ingest_memory(self, raw: bytes) -> dict:
+        if raw[:2] == b"\x1f\x8b":
+            raw = bounded_gunzip(raw, MAX_MEMORY_JSON)
+        if len(raw) > MAX_MEMORY_JSON:
+            raise ValueError("memory payload too large")
+        obj = json.loads(raw)
+        if not isinstance(obj, dict) or not isinstance(obj.get("players"), list):
+            raise ValueError("memory payload has no players list")
+        body = json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        self.memory = body
+        atomic_write(self.dir / "memory.json", body)
+        return {"ok": True, "players": len(obj["players"]), "bytes": len(body)}
+
+    def memory_response(self) -> bytes:
+        return self.memory or b'{"players":[]}'
 
     # ----- clips
 
@@ -454,7 +580,8 @@ class Store:
             free = None
         return {"ok": True, "state_age_s": self.state_age(), "state_updated_epoch_ms": st["updated"] if st else None,
                 "tournament_id": st["id"] if st else None, "last_clip_seq": last, "clips": n,
-                "clip_wavs": len(self.wavs), "disk_mb": round(used / (1024 * 1024), 1), "disk_free_mb": free}
+                "clip_wavs": len(self.wavs), "archived": len(self.archive), "memory_bytes": len(self.memory or b""),
+                "disk_mb": round(used / (1024 * 1024), 1), "disk_free_mb": free}
 
 
 # ---------------------------------------------------------------- HTTP
@@ -509,8 +636,13 @@ class PublicHandler(BaseHandler):
         store = self.store
         if path == "/api/tournament":
             since = (query.get("since") or [None])[0]
+            wanted = (query.get("id") or [""])[0]
             gz_ok = "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
-            code, body, gz = store.state_response(since, gz_ok)
+            current = store.state["id"] if store.state else None
+            if wanted and wanted != current:
+                code, body, gz = store.archive_response(wanted, gz_ok)
+            else:
+                code, body, gz = store.state_response(since, gz_ok)
             headers = {"Vary": "Accept-Encoding"}
             if gz:
                 headers["Content-Encoding"] = "gzip"
@@ -552,6 +684,10 @@ class PublicHandler(BaseHandler):
             self._json(store.read_thinking(game, ply, since))
         elif path == "/api/analyze":
             self._json({"enabled": False})
+        elif path == "/api/tournaments":
+            self._json(store.tournaments())
+        elif path == "/api/memory":
+            self._send(200, store.memory_response(), "application/json")
         elif path == "/api/viewer-version":
             self._json({"version": store.version})
         elif path == "/healthz":
@@ -564,8 +700,11 @@ class IngestHandler(BaseHandler):
     token: bytes = b""
 
     def do_GET(self) -> None:  # noqa: N802
-        if urlparse(self.path).path == "/healthz":
+        path = urlparse(self.path).path
+        if path == "/healthz":
             self._json(self.store.health())
+        elif path == "/ingest/archive-index":
+            self._json(self.store.archive_index())
         else:
             self._not_found()
 
@@ -606,6 +745,10 @@ class IngestHandler(BaseHandler):
                 result = store.ingest_thinking(json.loads(self._plain(body)))
             elif path == "/ingest/version":
                 result = store.set_version((json.loads(self._plain(body)) or {}).get("version"))
+            elif path == "/ingest/archive":
+                result = store.ingest_archive(body)
+            elif path == "/ingest/memory":
+                result = store.ingest_memory(body)
             else:
                 self._not_found()
                 return
@@ -618,7 +761,7 @@ class IngestHandler(BaseHandler):
             self.log(f"ingest {path} {length}B storage error: {exc}")
             return
         self._json(result)
-        brief = {k: v for k, v in result.items() if k in ("id", "updated_epoch_ms", "name", "added", "last_clip_seq", "game", "ply", "size", "pruned", "version")}
+        brief = {k: v for k, v in result.items() if k in ("id", "updated_epoch_ms", "name", "added", "last_clip_seq", "game", "ply", "size", "pruned", "version", "archived", "players", "bytes")}
         self.log(f"ingest {path} {length}B ok {json.dumps(brief)}")
 
     @staticmethod

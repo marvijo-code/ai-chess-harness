@@ -51,6 +51,12 @@ Same shapes as the local viewer, so the hosted page can reuse the viewer code.
   Served from the stored tail (newest 64 KB per move); asking for older bytes returns what is kept,
   flagged `truncated`.
 - `GET /api/analyze` - `{"enabled": false}`.
+- `GET /api/tournaments` - `{"current": <live id>, "tournaments": [summary, ...]}`, newest first, without the live one.
+  A summary is `{id, number, title, finished, champion, players, games, rounds, created_at, updated_at, updated_epoch_ms}`.
+- `GET /api/tournament?id=<id>` - one earlier tournament from the archive, as it ended, with `"archived": true`
+  (gzip when accepted). The live id gives the live state; an unknown id is 404.
+- `GET /api/memory` - what each AI has learnt: `{"repo_url", "players": [{name, folder, text, bytes, updated_epoch_ms, notes, games, url, playing}]}`
+  (`text` is the agent's `MEMORY.md`). `{"players": []}` until the pusher sent one.
 - `GET /api/viewer-version` - the version the pusher sent, or `"relay"`.
 - `GET /healthz` - `ok`, `state_age_s`, `state_updated_epoch_ms`, `tournament_id`, `last_clip_seq`,
   `clips`, `clip_wavs`, `disk_mb` (relay data), `disk_free_mb`.
@@ -67,6 +73,10 @@ Every POST needs header `X-Ingest-Token` (compared with `hmac.compare_digest`). 
 - `/ingest/clips` - JSON list of clips as the local `/api/commentary` returned them. Idempotent by `seq`.
 - `/ingest/thinking` - `{game, ply, size, text, from}`.
 - `/ingest/version` - `{version}`.
+- `/ingest/archive` - `{"summary": {...}, "state": {...}}`, gzip or plain: one earlier tournament. Idempotent by `state.id`
+  (a second post replaces the first). Only the known summary fields are kept.
+- `/ingest/memory` - the local viewer's `/api/memory` body, at most 2 MB.
+- `GET /ingest/archive-index` - `{id: updated_epoch_ms}` of every archived tournament (the pusher reads it once after a start).
 - `GET /healthz` - same as public; the pusher reads it through the tunnel after a restart.
 
 ## The pusher
@@ -79,7 +89,13 @@ Every second it reads the local viewer and posts what changed:
   uploads the whole archive;
 - thinking: for each live board's current ply when the size changed, at most every 2 s per board,
   plus the final text of the move that just ended;
-- viewer version: once a minute when it changed.
+- viewer version: once a minute when it changed;
+- earlier tournaments: every 20 s it reads the local `/api/tournaments` and sends each one that is not the live one and
+  that the relay does not hold yet (or holds with an older `updated_epoch_ms`), at most 2 per pass, each with its
+  Stockfish scores (`eval_track`). So a tournament is in the public archive about 20 s after the next one starts;
+- agent memory: once a minute it reads the local `/api/memory` and sends it when it changed.
+
+A relay or a viewer without these paths is skipped: the live state is never held up by them.
 
 Both ends may go down: it backs off (1 s doubling to 30 s) and never crashes. Every 2 s it writes
 `<live dir>\<tournament id>-publish-status.json`:
@@ -131,5 +147,28 @@ No host name or address is written into the repository.
 - Clip metadata: the newest 5000 kept.
 - Thinking: newest 64 KB per move, newest 40 moves per game, 100 MB in total.
 - State: one gzipped copy (`state.json.gz`).
+- Archive: one gzipped state per earlier tournament (`archive/<id>.json.gz`, about 100 KB each) plus `archive/index.json`;
+  the newest 300 are kept. Agent memory: one file (`memory.json`).
 - Files are written atomically (temporary file, then rename). After a restart the relay reloads
   everything from `data/`. If a disk write fails, state, clips metadata and thinking stay served from memory.
+
+## The page: earlier tournaments, logos, livestream link, what each AI has learnt
+
+All four live in the viewer page (`tools/llm_tournament_viewer.py`), so the local viewer and marvijo.com/ai-chess get them
+together (re-export the page after any change, see `tools/aichess_export_page.py`). The stream layout (`?stream=1`) hides
+the three header controls and the panel; it keeps the logos.
+
+- **Earlier tournaments.** The header list "Tournament" has "Live now" and every earlier tournament (`/api/tournaments`).
+  Picking one loads `/api/tournament?id=<id>` once and shows it as it ended: boards of the last round, tables, bracket and
+  every game under Rounds, replayable move by move with the saved move marks and engine scores. No page reload; the address
+  gets `?id=<id>` (a link to it works, Back and Forward work). No commentary, no auto-focus and no round shows there. On the
+  hosted page the thinking text is hidden for earlier tournaments (the relay keeps it for the live one only).
+  The local viewer serves any `<id>-tournament.json` in its live dir this way; nothing is sent to the engine.
+- **Maker logos** (`tools/aichess_logos.py`, one hidden SVG sprite). A logo sits in front of every player name. The maker
+  comes from the player's name and model id (`MAKER_RULES` in the page), never from the route: DeepSeek on another
+  company's plan is still DeepSeek's model. A name that matches no rule gets no logo.
+- **Livestream link.** `live_url` in `/api/tournament` (viewer `--live-url`, env `AICHESS_LIVE_URL`, `""` = no link).
+- **What each AI has learnt.** A collapsed panel under the boards, one collapsible row per model family with its
+  `MEMORY.md` (`/api/memory`). The viewer reads the agent memory repository: `--memory-repo` (env `AICHESS_MEMORY_REPO`),
+  else `forever.memoryRepo` in the tournament state; the public link comes from `--memory-url` (env `AICHESS_MEMORY_URL`),
+  else from `forever.memoryRemote`.

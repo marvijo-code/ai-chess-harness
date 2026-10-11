@@ -313,3 +313,96 @@ def test_eval_track_fills_in_later_and_never_blocks_the_state(tmp_path):
     http.state["updated_epoch_ms"] = 3
     p.cycle()
     assert last_state(http)["eval_track"]["r1b2"]["cp"] == [None, 20]
+
+
+# ---------------------------------------------------------------- earlier tournaments and agent memory
+
+class ArchiveHttp(FakeHttp):
+    """The fake viewer also lists three tournaments (t-1 is live) and serves the agents' memory."""
+
+    def __init__(self):
+        super().__init__()
+        self.listing = {"current": "t-1", "tournaments": [
+            {"id": "t-1", "number": 3, "games": 1, "updated_epoch_ms": 30},
+            {"id": "t-old-2", "number": 2, "games": 9, "updated_epoch_ms": 20},
+            {"id": "t-old-1", "number": 1, "games": 9, "updated_epoch_ms": 10},
+            {"id": "t-empty", "number": 0, "games": 0, "updated_epoch_ms": 5}]}
+        self.memory = {"players": [{"name": "A", "folder": "a", "text": "lesson"}]}
+        self.relay_index: dict | None = {}
+
+    def get(self, url, timeout=10):
+        if url == RELAY + "/ingest/archive-index":
+            self.gets.append(url)
+            if self.relay_down:
+                raise ConnectionRefusedError()
+            return (404, b"not found") if self.relay_index is None else (200, json.dumps(self.relay_index).encode())
+        if url == LOCAL + "/api/tournaments" and not self.local_down:
+            return 200, json.dumps(self.listing).encode()
+        if url == LOCAL + "/api/memory" and not self.local_down:
+            return 200, json.dumps(self.memory).encode()
+        if url.startswith(LOCAL + "/api/tournament?id=") and not self.local_down:
+            tid = url.split("=")[1]
+            return 200, json.dumps({"id": tid, "archived": True, "games": {}, "updated_epoch_ms": 1}).encode()
+        return super().get(url, timeout)
+
+    def archived(self) -> list[str]:
+        return [json.loads(gzip.decompress(body))["state"]["id"] for path, body, _ in self.posts if path == "/ingest/archive"]
+
+
+def test_archive_sends_every_earlier_tournament_once_a_few_per_pass(tmp_path, monkeypatch):
+    monkeypatch.setattr(push, "ARCHIVE_PER_PASS", 1)
+    http = ArchiveHttp()
+    pusher, _, mono, _ = make(tmp_path, http)
+    pusher.cycle()
+    assert http.archived() == ["t-old-2"]                     # newest first, never the live one, never an empty one
+    sent = json.loads(gzip.decompress([b for p, b, _ in http.posts if p == "/ingest/archive"][0]))
+    assert sent["summary"]["number"] == 2 and sent["state"]["id"] == "t-old-2"
+    mono.now += 1
+    pusher.cycle()
+    assert http.archived() == ["t-old-2"]                     # a backlog is looked at again after 3 s, not every cycle
+    mono.now += 3
+    pusher.cycle()
+    assert http.archived() == ["t-old-2", "t-old-1"]
+    mono.now += push.ARCHIVE_EVERY + 1
+    pusher.cycle()
+    assert http.archived() == ["t-old-2", "t-old-1"]          # nothing new: nothing sent
+    http.listing["tournaments"][2]["updated_epoch_ms"] = 11   # late move marks changed t-old-1
+    mono.now += push.ARCHIVE_EVERY + 1
+    pusher.cycle()
+    assert http.archived() == ["t-old-2", "t-old-1", "t-old-1"]
+
+
+def test_archive_skips_what_the_relay_already_holds(tmp_path):
+    http = ArchiveHttp()
+    http.relay_index = {"t-old-2": 20, "t-old-1": 9}
+    pusher, _, _, _ = make(tmp_path, http)
+    pusher.cycle()
+    assert http.archived() == ["t-old-1"]
+
+
+def test_an_older_relay_or_viewer_never_stalls_the_live_state(tmp_path):
+    http = ArchiveHttp()
+    http.relay_index = None                                   # relay without the archive paths
+    pusher, _, mono, _ = make(tmp_path, http)
+    pusher.cycle()
+    assert http.archived() == [] and http.paths("/ingest/memory") == [] and http.paths("/ingest/state") == ["/ingest/state"]
+    assert pusher.relay_up and pusher.status()["ok"]
+    plain = FakeHttp()                                        # viewer without /api/tournaments and /api/memory
+    pusher, _, _, _ = make(tmp_path / "b", plain)
+    pusher.cycle()
+    assert plain.paths("/ingest/archive") == [] and plain.paths("/ingest/memory") == [] and pusher.status()["ok"]
+
+
+def test_memory_is_pushed_when_it_changes(tmp_path):
+    http = ArchiveHttp()
+    pusher, _, mono, _ = make(tmp_path, http)
+    pusher.cycle()
+    assert len(http.paths("/ingest/memory")) == 1
+    assert json.loads(gzip.decompress([b for p, b, _ in http.posts if p == "/ingest/memory"][0])) == http.memory
+    mono.now += push.MEMORY_EVERY + 1
+    pusher.cycle()
+    assert len(http.paths("/ingest/memory")) == 1
+    http.memory["players"][0]["text"] = "a new lesson"
+    mono.now += push.MEMORY_EVERY + 1
+    pusher.cycle()
+    assert len(http.paths("/ingest/memory")) == 2
