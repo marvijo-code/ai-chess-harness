@@ -102,6 +102,8 @@ body.stream .side > .card, body.stream .boards { transform-origin: top left; }
 .pbar { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 10px; background: var(--panel-2); margin: 6px 0; min-width: 0; }
 .pbar .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; border: 1px solid #666; }
 .pbar .dot.w { background: #fff; } .pbar .dot.b { background: #111; }
+.pbar > .plogo { margin: 0 -4px 0 -2px; font-size: 16px; }   /* its own flex item: the name wraps beside it, never under it */
+.pbar .ladder-tag { white-space: normal; }
 .pbar .name { font-weight: 600; flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
 .pbar .elo { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .pbar .clock { font: 600 18px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 4px 8px; border-radius: 6px; background: #0b0d10; min-width: 64px; text-align: center; }
@@ -783,12 +785,13 @@ function logo(name) {
   const label = esc(MAKER_LABEL[k] || k);
   return `<svg class="plogo" role="img" aria-label="${label}"><title>${label}</title><use href="#lg-${k}"/></svg>`;
 }
-// A player's name with its maker's logo in front. The logo never sits alone on a line: it stays with the first word.
+// A player's name with its maker's logo in front. The logo and the first two letters are one unbreakable
+// piece, so the logo never sits alone on a line and a long first word can still break inside a narrow cell.
 function pn(name) {
   const mark = logo(name);
   if (!mark) return esc(name);
-  const text = String(name ?? ""), cut = text.indexOf(" ");
-  return `<span class="pl1">${mark}${esc(cut < 0 ? text : text.slice(0, cut))}</span>${cut < 0 ? "" : esc(text.slice(cut))}`;
+  const text = String(name ?? "");
+  return `<span class="pl1">${mark}${esc(text.slice(0, 2))}</span>${esc(text.slice(2))}`;
 }
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function clock(ms) { ms = Math.max(0, Math.floor((ms || 0) / 1000)); const m = Math.floor(ms / 60), s = ms % 60; return `${m}:${String(s).padStart(2, "0")}`; }
@@ -910,7 +913,7 @@ function updateBar(el, game, side, now) {
   const waiting = live && game.waiting && game.waiting.side === side;
   const thinking = waiting ? "waiting for usage limit" : ticking ? `thinking ${clock(think)}` : (moving ? "starting..." : "");
   el.classList.toggle("to-move", moving);
-  setHTML(el, `<span class="dot ${side[0]}"></span><span class="name" title="${esc(route(name))}">${pn(name)}${ladderTag(name, game)}</span>`
+  setHTML(el, `<span class="dot ${side[0]}"></span>${logo(name)}<span class="name" title="${esc(route(name))}">${esc(name)}${ladderTag(name, game)}</span>`
     + `<span class="elo">${s.elo ? Math.round(s.elo) : ""}</span><span class="think">${thinking}</span><span class="clock">${clock(clk)}</span>`);
 }
 function keepVisible(box, el) {
