@@ -118,7 +118,7 @@ class MemoryEditTest(unittest.TestCase):
     def test_memory_cap_and_note_count(self):
         accepted, rejected = mem.validate_edits([{"path": "MEMORY.md", "content": "z" * (mem.MEMORY_MAX_BYTES + 10)}], [])
         self.assertEqual(accepted, [])
-        self.assertIn("6144-byte cap", rejected[0])
+        self.assertIn(f"{mem.MEMORY_MAX_BYTES}-byte cap", rejected[0])
         existing = [f"notes/n{i}.md" for i in range(mem.MAX_NOTE_FILES)]
         accepted, rejected = mem.validate_edits([{"path": "notes/n0.md", "content": "update"},
                                                  {"path": "notes/new.md", "content": "one too many"}], existing)
@@ -187,7 +187,7 @@ class MemoryEditTest(unittest.TestCase):
         self.assertEqual(out["read_others"], ["deepseek", "gpt"])
         self.assertEqual(len(prompts), 2)
         self.assertIn("YOUR REPLY WAS NOT FULLY ACCEPTED", prompts[1])
-        self.assertIn("over the 6144-byte cap", prompts[1])
+        self.assertIn(f"over the {mem.MEMORY_MAX_BYTES}-byte cap", prompts[1])
         self.assertIn("outside your own folder", prompts[1])
         self.assertEqual(out["retries"], 1)
         self.assertEqual(sorted(out["applied"]), ["MEMORY.md", "notes/c-file.md"])
