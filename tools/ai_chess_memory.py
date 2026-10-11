@@ -32,8 +32,8 @@ import time
 from pathlib import Path
 
 MEMORY_FILE = "MEMORY.md"
-MEMORY_MAX_BYTES = 6144
-MEMORY_TARGET_BYTES = 5200  # what the prompt asks for: models undercount bytes
+MEMORY_MAX_BYTES = 16384
+MEMORY_TARGET_BYTES = 14000  # what the prompt asks for: models undercount bytes
 NOTE_MAX_BYTES = 4096
 MAX_NOTE_FILES = 8
 MAX_EDITS = 6

@@ -144,7 +144,7 @@ default with `COMMENTARY_ROUTE=codex` (codex subscription text, free edge-tts vo
 ## Agent memory (github.com/marvijo-code/ai-chess-agent-memory)
 
 ```
-agents/<folder>/MEMORY.md                    index + key lessons, at most 6144 bytes
+agents/<folder>/MEMORY.md                    index + key lessons, at most 16384 bytes (raised from 6144 on 2026-10-11: all three files were full and rewrites were being rejected)
 agents/<folder>/notes/<topic>.md             optional, at most 4096 bytes each, at most 8 files
 agents/<folder>/games/<tournament>-<game>.md result, my notes, memory read + changes, input tokens, PGN
 ladder.json
