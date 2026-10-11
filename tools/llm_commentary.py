@@ -21,6 +21,8 @@ Routes (2026-10-08, owner: run the commentary 24/7 on the VPS with no metered sp
     Microsoft moved the read-aloud websocket to a new host on 2026-10-10 and the old one answers
     403 since: both hosts are tried and the one that works is remembered (COMMENTARY_EDGE_WSS_URL
     pins one). COMMENTARY_TTS=openrouter (needs the same opt-in) is the old metered Gemini voice.
+    COMMENTARY_TTS=fish is the no-cost Fish Audio voice on OpenRouter (OPENROUTER_API_KEY, a model id that
+    ends in :free only, COMMENTARY_FISH_VOICE = the Fish voice id); the edge voice speaks while Fish is down.
   * Pacing: at most COMMENTARY_CALLS_PER_HOUR text calls (default 90) in any hour, spread by a
     small token bucket; thinking filler and routine updates stop at 75% of the cap so the big
     moments (results, recaps, previews) keep room. Subscription spend is 0: calls are counted.
@@ -149,7 +151,13 @@ UNAVAILABLE_BACKOFF_SECONDS = 900   # plan limit or lost login: stop calling for
 ERROR_BACKOFF_SECONDS = 30
 
 # ---- voice ----------------------------------------------------------------------------------------
-TTS_ROUTES = ("edge", "openrouter", "off")
+TTS_ROUTES = ("edge", "fish", "openrouter", "off")
+# fish: the no-cost Fish Audio variant on OpenRouter (owner pick 2026-10-12). It can never spend: a model id
+# that does not end in ":free" is refused. Without a voice id the model takes a new speaker for every call
+# (measured: one sentence five times, median pitch 102 to 168 Hz; with an id 94 to 105 Hz), so the id is
+# required. The free variant has no uptime promise: while it fails the free edge voice speaks, never silence.
+FISH_MODEL = "fish-audio/s2.1-pro-free:free"
+FISH_DOWN_SECONDS = 600   # after a failed Fish call the edge voice speaks this long, then Fish is tried again
 # en-US-GuyNeural: the energetic, clear US newscaster voice, and fast to voice. Measured 2026-10-08 on the VPS
 # with 3 fresh ~16 s lines each: Guy took 0.18x the clip length to voice (1.3-5.1 s), RyanNeural 0.16x (clear
 # but calmer, British), AndrewMultilingualNeural 0.66x (8-14 s: the most natural, but too slow for live play).
@@ -586,6 +594,14 @@ def resolve_settings(route: str | None = None, model: str | None = None, effort:
     for what, value in (("text", route), ("voice", tts)):
         if value == "openrouter" and not allow:
             raise ValueError(f"the {what} route openrouter is metered; set COMMENTARY_ALLOW_OPENROUTER=1 to opt in")
+    fish_model = (env.get("COMMENTARY_FISH_MODEL") or FISH_MODEL).strip()
+    fish_voice = (env.get("COMMENTARY_FISH_VOICE") or "").strip()
+    if tts == "fish":
+        if not fish_model.endswith(":free"):
+            raise ValueError(f"the fish voice only takes a free model (an id that ends in :free), not {fish_model!r}")
+        if not fish_voice:
+            raise ValueError("the fish voice needs COMMENTARY_FISH_VOICE (a Fish Audio voice id): "
+                             "without it every line gets another speaker")
     try:
         cap = int(calls_per_hour if calls_per_hour is not None else env.get("COMMENTARY_CALLS_PER_HOUR") or DEFAULT_CALLS_PER_HOUR)
     except ValueError:
@@ -598,6 +614,7 @@ def resolve_settings(route: str | None = None, model: str | None = None, effort:
             "effort": (effort or env.get("COMMENTARY_EFFORT") or DEFAULT_EFFORT).strip().lower(),
             "tts": tts, "voice": voice or env.get("COMMENTARY_VOICE") or EDGE_VOICE,
             "rate": env.get("COMMENTARY_VOICE_RATE") or EDGE_RATE, "allow_openrouter": allow,
+            "fish_model": fish_model, "fish_voice": fish_voice,
             "calls_per_hour": max(1, cap), "burst": max(1, burst)}
 
 
@@ -870,6 +887,7 @@ class Commentator:
         self.tts_backend = None   # (text) -> pcm bytes; replaces the voice in tests
         self.sleep = self._stop.wait   # the wait between two voice tries; replaceable in tests
         self._voice_drops = 0     # lines dropped in a row because the voice failed
+        self._fish_down_until = 0.0   # fish voice: the edge voice speaks until this time
         self._reset_memory()
         self.tournament = saved.get("tournament")
         self._restore(saved)
@@ -957,7 +975,9 @@ class Commentator:
             self.log(f"commentary off: {problem}")
             return False
         threading.Thread(target=self._loop, daemon=True).start()
-        voice = f"edge-tts {self.voice}" if self.tts == "edge" else ("OpenRouter " + TTS_MODEL if self.tts == "openrouter" else "no voice")
+        voice = {"edge": f"edge-tts {self.voice}", "openrouter": "OpenRouter " + TTS_MODEL,
+                 "fish": f"Fish {self.settings['fish_model']} voice {self.settings['fish_voice']} "
+                         f"(edge-tts {self.voice} while Fish is down)"}.get(self.tts, "no voice")
         spend = f", budget ${self.budget_usd:.2f}, spent ${self.spent_usd:.4f}" if self._metered() else ", spend 0 (subscription)"
         self.log(f"commentary: on ({self.route} {self.model} effort {self.effort} + {voice}, "
                  f"cap {self.pacer.per_hour} calls/hour{spend})")
@@ -971,9 +991,9 @@ class Commentator:
             return f"{self.route} CLI not found (install it or set COMMENTARY_{self.route.upper()}_BIN)"
         if self.route == "opencode-go" and not _key("OPENCODE_GO_API_KEY"):
             return "OPENCODE_GO_API_KEY is not set"
-        if "openrouter" in (self.route, self.tts) and not _key():
+        if ("openrouter" in (self.route, self.tts) or self.tts == "fish") and not _key():
             return "OPENROUTER_API_KEY is not set"
-        if self.tts == "edge":
+        if self.tts in ("edge", "fish"):
             return voice_ready()
         return ""
 
@@ -1569,9 +1589,9 @@ class Commentator:
     def _voice(self, text: str) -> tuple[bytes, str | None] | None:
         """Voice a line that is already written. A failed voice is tried again with the same text, never with a
         new text call. None = the line is dropped; each dropped line in a row pauses the host for longer."""
-        if self.tts_backend is None and self.tts not in ("edge", "openrouter"):
+        if self.tts_backend is None and self.tts not in ("edge", "fish", "openrouter"):
             return None   # voice off
-        free = self.tts_backend is not None or self.tts == "edge"
+        free = self.tts_backend is not None or self.tts in ("edge", "fish")
         tries = VOICE_TRIES if free else 1   # a metered voice is never called twice for one line
         started = time.monotonic()
         attempt = 0
@@ -1598,6 +1618,8 @@ class Commentator:
                 pcm, generation_id = self.tts_backend(text), None
             elif self.tts == "edge":
                 pcm, generation_id = mp3_to_pcm(edge_tts_mp3(text, self.voice, self.settings["rate"])), None
+            elif self.tts == "fish":
+                pcm, generation_id = self._fish_or_edge(text), None
             elif self.tts == "openrouter":
                 # Only the line itself is spoken; the delivery style goes in `instructions` (2026-10-06).
                 body = {"model": TTS_MODEL, "input": text, "instructions": TTS_STYLE, "voice": TTS_VOICE,
@@ -1613,6 +1635,22 @@ class Commentator:
             self.log("commentary: voice try returned no audio")
             return None
         return pcm, generation_id
+
+    def _fish_or_edge(self, text: str) -> bytes:
+        """The Fish voice. While Fish is down (rate limit, outage, free variant gone) the free edge voice speaks."""
+        if time.time() >= self._fish_down_until:
+            try:
+                mp3, _headers = self.http("/audio/speech", {"model": self.settings["fish_model"], "input": text,
+                                                             "voice": self.settings["fish_voice"],
+                                                             "response_format": "mp3"})
+                if not mp3:
+                    raise RuntimeError("no audio came back")
+                return mp3_to_pcm(mp3)
+            except Exception as exc:
+                self._fish_down_until = time.time() + FISH_DOWN_SECONDS
+                self.log(f"commentary: Fish voice failed ({type(exc).__name__}: {str(exc)[:160]}); "
+                         f"edge-tts {self.voice} speaks for {FISH_DOWN_SECONDS}s")
+        return mp3_to_pcm(edge_tts_mp3(text, self.voice, self.settings["rate"]))
 
     def _generation_cost(self, generation_id: str | None) -> float:
         if not generation_id:

@@ -353,6 +353,63 @@ class VoiceRetryTest(unittest.TestCase):
         self.assertEqual(calls, ["/audio/speech"])
 
 
+class FishVoiceTest(unittest.TestCase):
+    """The no-cost Fish voice on OpenRouter: free models only, one fixed speaker, edge voice while it is down."""
+
+    ENV = {"COMMENTARY_TTS": "fish", "COMMENTARY_FISH_VOICE": "abc123"}
+
+    def host(self):
+        with mock.patch.dict(os.environ, {**CLEAN_ENV, **self.ENV}, clear=True):
+            c, _ = make(live_state(moves=1), route="codex")
+        c.tts_backend = None
+        return c
+
+    def test_it_needs_a_voice_id_and_a_free_model_but_no_opt_in(self):
+        got = lc.resolve_settings(env=self.ENV)
+        self.assertEqual((got["tts"], got["fish_model"], got["fish_voice"]), ("fish", lc.FISH_MODEL, "abc123"))
+        self.assertFalse(got["allow_openrouter"])
+        with self.assertRaises(ValueError):
+            lc.resolve_settings(env={"COMMENTARY_TTS": "fish"})
+        with self.assertRaises(ValueError):
+            lc.resolve_settings(env={**self.ENV, "COMMENTARY_FISH_MODEL": "fish-audio/s2.1-pro"})
+
+    def test_it_is_not_metered_and_asks_for_the_fixed_voice_as_mp3(self):
+        c = self.host()
+        self.assertFalse(c._metered())
+        asked = []
+
+        def http(path, body):
+            asked.append((path, body))
+            return b"mp3", {}
+
+        c.http = http
+        with mock.patch.object(lc, "mp3_to_pcm", lambda mp3: b"pcm:" + mp3), \
+                mock.patch.object(lc, "edge_tts_mp3", side_effect=AssertionError("edge must not speak")):
+            self.assertEqual(c._speak("Knight takes."), (b"pcm:mp3", None))
+        self.assertEqual(asked, [("/audio/speech", {"model": lc.FISH_MODEL, "input": "Knight takes.",
+                                                    "voice": "abc123", "response_format": "mp3"})])
+
+    def test_while_fish_is_down_the_edge_voice_speaks_and_fish_is_left_alone(self):
+        c = self.host()
+        calls = []
+
+        def http(path, _body):
+            calls.append(path)
+            raise OSError("429 rate limited")
+
+        c.http = http
+        now = [1000.0]
+        with mock.patch.object(lc, "mp3_to_pcm", lambda mp3: b"pcm:" + mp3), \
+                mock.patch.object(lc, "edge_tts_mp3", lambda text, voice, rate: b"edge"), \
+                mock.patch.object(lc.time, "time", lambda: now[0]):
+            self.assertEqual(c._speak("One."), (b"pcm:edge", None), "the line is spoken, not dropped")
+            self.assertEqual(c._speak("Two."), (b"pcm:edge", None))
+            self.assertEqual(len(calls), 1, "no second Fish call inside the pause")
+            now[0] += lc.FISH_DOWN_SECONDS + 1
+            c.http = lambda path, body: (b"fish", {})
+            self.assertEqual(c._speak("Three."), (b"pcm:fish", None), "Fish is tried again after the pause")
+
+
 class EdgeEndpointTest(unittest.TestCase):
     OLD, NEW = None, "wss://new.example/websocket/v1?key=k"
 
