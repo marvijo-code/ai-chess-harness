@@ -118,6 +118,71 @@ class LocalPageTest(unittest.TestCase):
         self.assertIn("const p = !HOSTED && data ? data.publish : null;", page)
 
 
+class PhoneNameWrapTest(unittest.TestCase):
+    """On a phone a player's name breaks between words only (owner 2026-10-11: "DeepSee / k V4.1 Flash")."""
+
+    def setUp(self):
+        self.page = viewer.PAGE
+        self.css = self.page[self.page.index("<style>"):self.page.index("</style>")]
+        marker = "/* ---- phones: a player's name breaks between words only"
+        self.assertEqual(self.css.count(marker), 1)
+        self.phone = self.css[self.css.index(marker):]
+
+    def block(self, width):
+        start = self.phone.index(f"@media (max-width: {width}px) {{")
+        return self.phone[start:self.phone.index("\n}", start)]
+
+    def test_the_phone_rules_are_last_and_only_for_phones(self):
+        # nothing after them can win over them, and no rule in them is outside a phone media query
+        self.assertEqual(re.findall(r"@media \(max-width: (\d+)px\)", self.phone), ["700", "520"])
+        outside = re.sub(r"@media \(max-width: \d+px\) \{.*?\n\}", "", self.phone, flags=re.S)
+        self.assertEqual(re.sub(r"/\*.*?\*/", "", outside, flags=re.S).strip(), "")
+        self.assertNotIn("body.stream", self.phone)
+
+    def test_names_break_between_words_only(self):
+        phone = self.block(700)
+        names = ".pbar .name, .rc-m .pl, .rc-r .n, .bk-name, .pair .w, .pair .b, .lb-n"
+        self.assertIn(names + " { overflow-wrap: break-word; word-break: normal; }", phone)
+        self.assertNotIn("anywhere", self.phone)
+        # every name column keeps the room of its longest word
+        self.assertIn(".pbar .name { flex: 1 1 0; min-width: min-content; }", phone)
+        for row in (".rc-m", ".rc-r", ".bk-p", ".pair", ".lb-r"):
+            self.assertRegex(phone, re.escape(row) + r" \{ grid-template-columns: [^}]*minmax\(min-content, 1fr\)")
+        self.assertIn(".rc-r { grid-template-columns: 20px minmax(min-content, 1fr) 58px 52px;", self.block(520))
+        self.assertIn(".pair { grid-template-columns: minmax(min-content, 1fr) 46px minmax(min-content, 1fr); }", self.block(520))
+
+    def test_the_status_line_sits_under_the_name_and_nothing_overlaps(self):
+        phone = self.block(700)
+        self.assertIn(".pbar { flex-wrap: wrap;", phone)
+        self.assertIn(".pbar .think { order: 1; flex: 0 0 100%; min-width: 0;", phone)
+        # a live game keeps the line (the board does not jump on every move), a finished game drops it
+        self.assertIn(".pbar.live .think { min-height: 15px; }", phone)
+        self.assertIn(".pbar:not(.live) .think:empty { display: none; }", phone)
+        self.assertIn('el.classList.toggle("live", live);', self.page)
+        # the board label of a round card gets its own line, the bracket's semifinals stack
+        self.assertIn(".rc-m .bd { grid-column: 1 / -1; white-space: nowrap; }", phone)
+        self.assertIn(".bk-semis { grid-template-columns: minmax(0, 1fr); }", self.block(520))
+        # the standings table scrolls inside its card instead of widening the page
+        self.assertIn("#standings { overflow-x: auto; }", phone)
+
+    def test_a_word_with_a_hyphen_stays_whole_on_phones_only(self):
+        self.assertIn(".nb { white-space: nowrap; }", self.block(700))
+        self.assertEqual(self.css.count(".nb {"), 1)
+        self.assertIn('function nbw(text) { return esc(text).replace(/[^\\s-]*-\\S*/g, m => `<span class="nb">${m}</span>`); }', self.page)
+        self.assertIn('<span class="name" title="${esc(route(name))}">${nbw(name)}${ladderTag(name, game)}</span>', self.page)
+        self.assertIn("</span>${nbw(text.slice(2))}`;", self.page)
+
+    def test_wide_screens_keep_their_rules(self):
+        wide = self.css[:self.css.index("/* ---- phones: a player's name breaks between words only")]
+        self.assertIn(".pbar { display: flex; align-items: center; gap: 10px;", wide)
+        self.assertIn(".pbar .name { font-weight: 600; flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }", wide)
+        self.assertIn(".pbar .think { font-size: 12px; color: var(--accent); min-width: 88px; text-align: right;", wide)
+        self.assertIn(".rc-m { display: grid; grid-template-columns: minmax(76px, 6.4em) minmax(0, 1fr) auto minmax(0, 1fr);", wide)
+
+    def test_the_hosted_page_carries_the_same_rules(self):
+        self.assertIn(self.phone, exporter.build_page())
+
+
 class PublishStatusTest(unittest.TestCase):
     def serve(self, publish=None, raw=None):
         tmp = tempfile.TemporaryDirectory()
