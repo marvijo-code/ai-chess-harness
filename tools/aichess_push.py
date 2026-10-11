@@ -44,6 +44,9 @@ CLIPS_PER_CYCLE = 4
 STATUS_EVERY = 2.0
 VERSION_EVERY = 60.0
 AUDIO_MISSING_TRIES = 3
+ARCHIVE_EVERY = 20.0          # look for earlier tournaments the relay does not hold yet
+ARCHIVE_PER_PASS = 2          # at most this many per look, so a first catch-up never stalls the live state
+MEMORY_EVERY = 60.0           # the agents' MEMORY.md files change once per game
 
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -240,6 +243,11 @@ class Pusher:
         self.board_ply: dict[str, int] = {}
         self.version = None
         self.version_at = -1e9
+        self.archive_at = -1e9
+        self.archived: dict[str, object] | None = None   # relay's {tournament id: updated_epoch_ms}; None = ask it
+        self.archive_pushed = 0
+        self.memory_at = -1e9
+        self.memory_fp: str | None = None
         self.status_at = -1e9
         self.error = ""
         self.state_pushes = 0
@@ -328,6 +336,8 @@ class Pusher:
                     self._push_clips()
                     self._push_thinking()
                     self._push_version()
+                    self._push_archive()
+                    self._push_memory()
             except EndpointDown:
                 pass
         if self.local_up and self.relay_up and not self._cycle_err:
@@ -461,6 +471,86 @@ class Pusher:
             result = self._relay_post("/ingest/version", json.dumps({"version": version}).encode())
             if not result.get("rejected"):
                 self.version = version
+
+    # ----- earlier tournaments and agent memory
+
+    def _relay_get_json(self, path: str) -> dict:
+        try:
+            code, body = self.http.get(self.relay + path, 10)
+        except (OSError, ValueError) as exc:
+            self._relay_failed(f"relay unreachable: {exc.__class__.__name__}")
+            raise EndpointDown() from exc
+        if code == 404:
+            return {"missing": True}       # an older relay without this path: skip, never stall the live state
+        if code != 200:
+            self._relay_failed(f"relay HTTP {code} on {path}")
+            raise EndpointDown()
+        return json.loads(body or b"{}")
+
+    def _push_archive(self) -> None:
+        """Copy every tournament that is not the live one to the relay's archive, a few per pass.
+
+        The local viewer lists them (/api/tournaments); one is sent when the relay does not hold it or holds
+        an older update. Each goes with its Stockfish scores (eval_track), like the live state.
+        """
+        if self.mono() - self.archive_at < ARCHIVE_EVERY:
+            return
+        self.archive_at = self.mono()
+        raw = self._local_get("/api/tournaments")
+        listing = json.loads(raw) if raw else {}
+        rows = listing.get("tournaments") if isinstance(listing, dict) else None
+        if not isinstance(rows, list):
+            return                          # an older viewer without the list
+        if self.archived is None:
+            index = self._relay_get_json("/ingest/archive-index")
+            if index.get("missing"):
+                return
+            self.archived = index
+        current = listing.get("current") or self.tid
+        sent = 0
+        for row in rows:
+            tid = row.get("id") if isinstance(row, dict) else None
+            if not tid or tid == current or not row.get("games"):
+                continue
+            if tid in self.archived and self.archived[tid] == row.get("updated_epoch_ms"):
+                continue
+            body = self._local_get(f"/api/tournament?id={tid}", timeout=30)
+            if not body:
+                continue
+            state = json.loads(body)
+            if state.get("id") != tid:
+                continue
+            try:
+                track = EvalTrack().build(state, self.live_dir / f"{tid}-annotations.json")
+            except Exception as exc:        # scores are a bonus
+                self.log(f"archive eval track skipped for {tid}: {exc.__class__.__name__}")
+                track = {}
+            if track:
+                state["eval_track"] = track
+            packed = gzip.compress(json.dumps({"summary": row, "state": state}, separators=(",", ":")).encode("utf-8"), 6)
+            result = self._relay_post("/ingest/archive", packed, "application/json", {"Content-Encoding": "gzip"})
+            self.archived[tid] = row.get("updated_epoch_ms")   # a rejected one is not retried every pass
+            if not result.get("rejected"):
+                self.archive_pushed += 1
+                self.log(f"archived {tid} ({len(packed)} bytes gz)")
+            sent += 1
+            if sent >= ARCHIVE_PER_PASS:
+                self.archive_at = self.mono() - ARCHIVE_EVERY + 3   # more may wait: look again in 3 s
+                break
+
+    def _push_memory(self) -> None:
+        if self.archived is None or self.mono() - self.memory_at < MEMORY_EVERY:
+            return                          # None: the relay has not shown yet that it knows the new paths
+        self.memory_at = self.mono()
+        raw = self._local_get("/api/memory")
+        if not raw:
+            return                          # an older viewer without the panel
+        fp = hashlib.sha256(raw).hexdigest()
+        if fp == self.memory_fp:
+            return
+        result = self._relay_post("/ingest/memory", gzip.compress(raw, 6), "application/json", {"Content-Encoding": "gzip"})
+        if not result.get("rejected"):
+            self.memory_fp = fp
 
     # ----- status file
 

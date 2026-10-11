@@ -325,3 +325,90 @@ def test_disk_write_failure_still_serves_from_memory(rl, monkeypatch):
     assert rl.ingest("/ingest/clips", json.dumps([{"seq": 1, "text": "x"}]).encode())[0] == 200
     assert rl.ingest("/ingest/clip-audio/clip-1.wav", wav(10))[0] == 500          # audio needs the disk
     assert any("persist failed" in line for line in rl.logs)
+
+
+# ---------------------------------------------------------------- earlier tournaments and agent memory
+
+def archive_payload(tid: str, number: int, updated: int = 500, **summary) -> bytes:
+    state = state_payload(updated=updated, id=tid, number=number, finished=True, commentary=True)
+    row = {"id": tid, "number": number, "title": f"Cup #{number}", "finished": True, "champion": "A", "players": ["A", "B"],
+           "games": 3, "rounds": 2, "updated_epoch_ms": updated, "secret": "dropped"}
+    row.update(summary)
+    return gzip.compress(json.dumps({"summary": row, "state": state}).encode())
+
+
+def test_archive_roundtrip_list_and_fetch(rl):
+    rl.ingest("/ingest/state", json.dumps(state_payload(updated=900, id="cup-0003")).encode())
+    for number in (1, 2):
+        status, _, body = rl.ingest("/ingest/archive", archive_payload(f"cup-000{number}", number), headers={"Content-Encoding": "gzip"})
+        assert status == 200 and json.loads(body)["archived"] == number
+    status, listing = rl.get_json("/api/tournaments")
+    assert status == 200 and listing["current"] == "cup-0003"
+    assert [t["id"] for t in listing["tournaments"]] == ["cup-0002", "cup-0001"]          # newest first
+    assert listing["tournaments"][0]["champion"] == "A" and "secret" not in listing["tournaments"][0]
+    status, headers, body = rl.get("/api/tournament?id=cup-0001", {"Accept-Encoding": "gzip"})
+    assert status == 200 and headers.get("Content-Encoding") == "gzip"
+    old = json.loads(gzip.decompress(body))
+    assert old["id"] == "cup-0001" and old["archived"] is True and old["hosted"] is True
+    assert "state_age_s" not in old and "pgn_path" not in json.dumps(old)
+    status, headers, body = rl.get("/api/tournament?id=cup-0002")
+    assert status == 200 and "Content-Encoding" not in headers and json.loads(body)["id"] == "cup-0002"
+
+
+def test_archive_unknown_id_is_404_and_the_live_id_gives_the_live_state(rl):
+    rl.ingest("/ingest/state", json.dumps(state_payload(updated=900, id="cup-0003")).encode())
+    assert rl.get("/api/tournament?id=cup-0009")[0] == 404
+    assert rl.get("/api/tournament?id=..%2Fstate")[0] == 404
+    status, data = rl.get_json("/api/tournament?id=cup-0003")
+    assert status == 200 and data["id"] == "cup-0003" and "archived" not in data and data["hosted"] is True
+    assert rl.get_json("/api/tournament?id=cup-0003&since=900")[1]["unchanged"] is True
+
+
+def test_archive_refuses_bad_payloads_and_is_idempotent(rl):
+    assert rl.ingest("/ingest/archive", json.dumps({"state": {"id": "../x"}}).encode())[0] == 400
+    assert rl.ingest("/ingest/archive", json.dumps({"summary": {}}).encode())[0] == 400
+    for updated in (500, 700):
+        assert rl.ingest("/ingest/archive", archive_payload("cup-0001", 1, updated=updated))[0] == 200
+    listing = rl.get_json("/api/tournaments")[1]["tournaments"]
+    assert len(listing) == 1 and listing[0]["updated_epoch_ms"] == 700
+    status, _, body = rl.request(rl.ing_port, "GET", "/ingest/archive-index")
+    assert status == 200 and json.loads(body) == {"cup-0001": 700}
+    assert rl.get("/ingest/archive-index")[0] == 404                 # never on the public port
+    assert rl.request(rl.pub_port, "POST", "/ingest/archive", archive_payload("cup-0002", 2), {"X-Ingest-Token": TOKEN})[0] == 404
+
+
+def test_archive_keeps_only_the_newest(rl, monkeypatch):
+    monkeypatch.setattr(relay, "ARCHIVE_KEEP", 2)
+    for number in (1, 2, 3):
+        rl.ingest("/ingest/archive", archive_payload(f"cup-000{number}", number))
+    assert [t["id"] for t in rl.get_json("/api/tournaments")[1]["tournaments"]] == ["cup-0003", "cup-0002"]
+    assert rl.get("/api/tournament?id=cup-0001")[0] == 404
+    assert not (rl.store.dir / "archive" / "cup-0001.json.gz").exists()
+
+
+def test_memory_roundtrip_and_limits(rl, monkeypatch):
+    assert rl.get_json("/api/memory") == (200, {"players": []})
+    payload = {"repo_url": "https://example.test/repo", "players": [{"name": "A", "folder": "a", "text": "# Chess memory\n- x"}]}
+    assert rl.ingest("/ingest/memory", gzip.compress(json.dumps(payload).encode()), headers={"Content-Encoding": "gzip"})[0] == 200
+    assert rl.get_json("/api/memory")[1] == payload
+    assert rl.ingest("/ingest/memory", json.dumps({"players": "no"}).encode())[0] == 400
+    monkeypatch.setattr(relay, "MAX_MEMORY_JSON", 50)
+    assert rl.ingest("/ingest/memory", json.dumps(payload).encode())[0] == 400
+    assert rl.get_json("/api/memory")[1] == payload                    # the last good one stays
+
+
+def test_archive_and_memory_survive_a_restart(tmp_path):
+    data_dir = tmp_path / "data"
+    first = Relay(data_dir)
+    first.ingest("/ingest/archive", archive_payload("cup-0001", 1))
+    first.ingest("/ingest/memory", json.dumps({"players": [{"name": "A"}]}).encode())
+    first.close()
+    second = Relay(data_dir)
+    try:
+        assert [t["id"] for t in second.get_json("/api/tournaments")[1]["tournaments"]] == ["cup-0001"]
+        assert second.get_json("/api/tournament?id=cup-0001")[1]["archived"] is True
+        assert second.get_json("/api/memory")[1] == {"players": [{"name": "A"}]}
+        health = second.get_json("/healthz")[1]
+        assert health["archived"] == 1 and health["memory_bytes"] > 0
+    finally:
+        second.close()
