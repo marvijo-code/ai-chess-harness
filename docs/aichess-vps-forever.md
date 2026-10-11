@@ -139,6 +139,16 @@ handshake and remembers the one that works; `COMMENTARY_EDGE_WSS_URL` pins an ad
 code change. Same voice, same free service. If both hosts refuse (Microsoft starts to demand its
 new token there too), upgrade edge-tts first: `pip install --user --break-system-packages -U edge-tts`.
 
+Fish voice (owner pick 2026-10-12): `COMMENTARY_TTS=fish` speaks with the no-cost Fish Audio model on
+OpenRouter (`fish-audio/s2.1-pro-free:free`). It needs `OPENROUTER_API_KEY` in `~/.config/ai-chess/env`
+and `COMMENTARY_FISH_VOICE` = a voice id from the Fish Audio library; without an id the model takes a
+new speaker for every call (one sentence five times: median pitch 102 to 168 Hz; with an id 94 to
+105 Hz). It cannot spend: a model id that does not end in `:free` is refused at start. The free
+variant has no uptime promise, so while a Fish call fails the edge voice (`COMMENTARY_VOICE`) speaks
+for 10 minutes and then Fish is tried again; the log line is `Fish voice failed`. Fish takes 4 to 8 s
+for a line (edge about 1 s) and sends 44.1 kHz audio, so the route asks for MP3 and decodes it like
+the edge MP3. Back to edge only: remove `COMMENTARY_TTS` and restart `ai-chess-viewer`.
+
 A failed voice never costs a second text call: the written line is voiced again (3 tries, 2 s and
 6 s apart), then dropped, and the host pauses 30 s, 60 s, 120 s ... up to 15 min for each dropped
 line in a row. Before this fix a finished game whose closing line could not be voiced was written
