@@ -683,7 +683,7 @@ function setFocus(id, opts) {
 }
 function onHistory() {
   const wanted = new URLSearchParams(location.search).get("id") || null;
-  if (wanted !== archiveId) setArchive(wanted, false);   // back / forward between the live and an earlier tournament
+  if (wanted !== archiveId) { setArchive(wanted, false); return; }   // back / forward between the live and an earlier tournament
   const before = focusId;
   readHash();
   if (focusId === before) return;
