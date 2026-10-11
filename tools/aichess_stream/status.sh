@@ -27,6 +27,9 @@ import json, sys, time, os
 s = json.load(open(sys.argv[1]))
 print(f"  {s['size']}@{s['fps']} {s['preset']} {s['vbitrate_k']}k -> {s['output']}  music={s['music']}  seeded={s['seeded']}")
 print(f"  chrome {s['chrome_mb']} MB, restarts: chrome {s['chrome_restarts']}, ffmpeg {s['ffmpeg_restarts']}  (status {s['updated']})")
+if s.get("twitch"):
+    n = s.get("rtmp_conns", 0)
+    print(f"  targets: YouTube + Twitch, {n} of 2 connected" + ("" if n >= 2 else "  <- one target is down (Twitch reconnects by itself)"))
 p = {}
 try:
     for line in open(sys.argv[2]):
