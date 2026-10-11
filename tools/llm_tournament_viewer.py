@@ -552,6 +552,7 @@ a.chip, button.chip { text-decoration: none; font: inherit; font-size: 13px; cur
 .lm-body code { background: var(--panel-2); border-radius: 4px; padding: 0 4px; font-size: .92em; }
 .lm-foot { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
 body.no-think .thinking { display: none; }
+body.archive .pbar .think:empty { display: none; }   /* a finished game has no thinking timer: the name gets that room */
 body.stream .hdr-links, body.stream .extras, body.stream .archive-bar { display: none !important; }
 @media (max-width: 520px) {
   .extras { padding: 0 16px 16px; } .hdr-links { margin-left: 0; } .chip.tsel select { max-width: 200px; } .lm-body { padding-left: 8px; }
