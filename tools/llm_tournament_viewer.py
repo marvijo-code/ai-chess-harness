@@ -24,9 +24,11 @@ import json
 import math
 import os
 import re
+import statistics
 import sys
 import threading
 import time
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -330,6 +332,42 @@ body.stream .card.focused .lb-side, body.stream .card.focused .lb-under, body.st
 @keyframes name-in { from { opacity: 0; transform: scale(.6); letter-spacing: .2em; } to { opacity: 1; transform: none; } }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes card-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+/* Waiting screen: no game is live. One card across the boards area with what is next, a countdown and the
+   winners so far; the stream shows it alone (the finished boards are hidden there). */
+.wait { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: clamp(12px, 2.2vh, 24px); text-align: center;
+  padding: clamp(16px, 3vh, 34px) clamp(14px, 3vw, 40px); background: radial-gradient(ellipse at 50% 0%, rgba(91, 157, 255, .14), var(--panel) 64%); }
+.wt-up { width: 100%; min-width: 0; }
+.wt-kicker { text-transform: uppercase; letter-spacing: .3em; color: var(--accent); font-weight: 700; font-size: 13px; }
+.wt-next { font-size: clamp(22px, 3.4vw, 40px); font-weight: 800; line-height: 1.12; margin-top: 4px; overflow-wrap: break-word; }
+.wt-detail { color: var(--muted); font-size: 14px; }
+.wt-lbl { color: var(--muted); font-size: 15px; margin-top: 8px; }
+.wt-time { font-size: clamp(54px, 11vw, 120px); font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.wt-time.txt { font-size: clamp(28px, 6vw, 60px); color: var(--ok); letter-spacing: 0; }
+.wt-bar { width: min(520px, 100%); height: 6px; margin: 10px auto 0; border-radius: 99px; background: rgba(91, 157, 255, .18); overflow: hidden; }
+.wt-bar i { display: block; height: 100%; background: var(--accent); transition: width .5s linear; }
+.wt-note { color: var(--muted); font-size: 14px; max-width: 660px; margin: 10px auto 0; }
+.wt-win { width: min(860px, 100%); min-width: 0; padding: 12px 16px; border-radius: 14px; background: rgba(245, 185, 66, .08); border: 1px solid rgba(245, 185, 66, .5); }
+.wt-wt { display: flex; align-items: center; justify-content: center; gap: 8px; text-transform: uppercase; letter-spacing: .14em; color: #ffd479; font-weight: 700; font-size: 13px; }
+.wt-wt svg { width: 28px; height: auto; flex: none; }
+.wt-rows { display: grid; gap: 6px; margin-top: 8px; }
+.wt-row { font-size: clamp(15px, 2vw, 20px); overflow-wrap: break-word; }
+.wt-row b { color: #ffd479; font-weight: 700; }
+.wt-row .v { color: var(--muted); font-size: .8em; margin: 0 .4em; }
+.wt-row .tag { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; }
+.wt-champ { font-size: clamp(26px, 5vw, 54px); font-weight: 800; line-height: 1.1; margin-top: 6px; overflow-wrap: break-word;
+  background: linear-gradient(180deg, #fff6d2 0%, #f5b942 62%, #c98a1a 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.wt-lead { color: var(--muted); font-size: 14px; margin-top: 8px; overflow-wrap: break-word; }
+.wt-lead b { color: var(--text); }
+.wt-follow { color: var(--muted); font-size: 15px; }
+body.stream.waiting .boards { display: flex; }
+body.stream.waiting .boards > .card[data-game] { display: none; }
+body.stream .wait { flex: 1 1 auto; min-width: 0; height: 100%; justify-content: center; gap: 40px; }
+body.stream .wt-kicker { font-size: 20px; } body.stream .wt-next { font-size: 64px; } body.stream .wt-detail { font-size: 22px; }
+body.stream .wt-lbl { font-size: 26px; margin-top: 18px; } body.stream .wt-time { font-size: 230px; } body.stream .wt-time.txt { font-size: 96px; }
+body.stream .wt-bar { width: 760px; height: 10px; margin-top: 18px; } body.stream .wt-note { font-size: 21px; max-width: 980px; margin-top: 18px; }
+body.stream .wt-win { width: min(1080px, 100%); padding: 22px 28px; } body.stream .wt-wt { font-size: 19px; } body.stream .wt-wt svg { width: 40px; }
+body.stream .wt-rows { gap: 10px; margin-top: 14px; } body.stream .wt-row { font-size: 32px; } body.stream .wt-row .tag { font-size: 15px; }
+body.stream .wt-champ { font-size: 76px; } body.stream .wt-lead { font-size: 22px; margin-top: 14px; } body.stream .wt-follow { font-size: 22px; }
 /* Opening hook: a 6 second title card over the page. */
 .intro { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: clamp(12px, 3vh, 30px);
   padding: 24px 16px 44px; overflow: hidden; cursor: pointer; background: radial-gradient(ellipse at 50% 28%, #1c2945 0%, #11151c 48%, #0b0d10 100%);
@@ -1213,12 +1251,16 @@ function renderBoards() {
   const boards = document.getElementById("boards");
   document.body.classList.toggle("focus-mode", !!focusId);
   const shown = shownGames();
-  const sig = shown.map(g => g.id).join(",") + "|" + (focusId || "");
+  const wait = waitNow();   // no game is live: the waiting card sits above the finished boards (alone on the stream)
+  document.body.classList.toggle("waiting", !!wait);
+  if (wait) setHTML(waitCard(), waitHtml(wait));
+  const sig = shown.map(g => g.id).join(",") + "|" + (focusId || "") + (wait ? "|wait" : "");
   if (boards._sig !== sig) {
     boards._sig = sig;
     let nodes;
-    if (shown.length) {
+    if (shown.length || wait) {
       nodes = shown.map(g => cardFor(g.id).el);
+      if (wait) nodes.unshift(waitCard());
     } else {
       const empty = document.createElement("div");
       empty.className = "empty card";
@@ -1974,6 +2016,143 @@ function hideRoundCard() {
   director({ k: "rcard", a: "hide", mode: rcardMode, round: rcardRound });
   el.classList.add("leaving");
   setTimeout(() => el.remove(), 380);
+}
+
+// ---- waiting screen: no game is live (between rounds, before a decider, between tournaments) ------
+// Owner 2026-10-12: "add a screen to show the countdown when waiting for the next round, with current
+// winners banner". The next game starts when the AIs have written their notes on the last one, so no
+// exact start time exists. The countdown is the usual length of such a wait (wait_stats from the viewer:
+// the median over the newest tournaments) and it is worded "about"; past it the screen says "any moment
+// now" and shows how long the wait has been. With no measured wait it shows only the time waited.
+// WAIT-PLAN-START
+const WAIT_LONG_FACTOR = 3;      // waited this many times the usual length: say "longer than usual"
+function waitMatchDecided(m, games) {
+  for (const id of m.games || []) {
+    const g = games[id] || {};
+    if (g.result === "1-0" || g.result === "0-1" || (g.result === "1/2-1/2" && g.armageddon)) return true;
+  }
+  return false;
+}
+function waitRoundDone(r, games) {
+  const ps = (r && r.pairings) || [];
+  return ps.length > 0 && ps.every(p => (games[p.game_id] || {}).status === "finished");
+}
+// What starts next: { what: "game" | "crown" | "tournament", label, detail }.
+function waitNext(d) {
+  const games = d.games || {}, cfg = d.config || {};
+  const k = d.knockout && typeof d.knockout === "object" ? d.knockout : null;
+  const f = d.format && typeof d.format === "object" ? d.format : null;
+  if (d.finished) return { what: "tournament", label: d.number ? `Tournament #${Number(d.number) + 1}` : "The next tournament", detail: "" };
+  if (k && (d.stage === "semifinals" || d.stage === "final")) {
+    const ms = (k.matches || []).filter(m => m.stage === d.stage);
+    const open = ms.filter(m => !m.winner && !waitMatchDecided(m, games));
+    const drawn = open.filter(m => (m.games || []).length > 0);   // its game is over and nobody won
+    if (drawn.length) return { what: "game", label: "Armageddon decider", detail: drawn.map(m => m.label).join(" and ") };
+    if (open.length || !ms.length) return { what: "game", label: d.stage === "semifinals" ? "The Semifinals" : "The Final", detail: "" };
+    return d.stage === "semifinals" ? { what: "game", label: "The Final", detail: "" } : { what: "crown", label: "The champion is crowned", detail: "" };
+  }
+  const total = Number((f && f.rr_rounds) || cfg.rounds) || 0, cur = Number(d.current_round) || 0;
+  const of = n => total ? `Round ${n} of ${total}` : `Round ${n}`;
+  if (!waitRoundDone((d.rounds || []).find(r => r.round === cur), games)) return { what: "game", label: of(cur || 1), detail: "" };
+  if (!total || cur < total) return { what: "game", label: of(cur + 1), detail: "" };
+  if (f) return { what: "game", label: Number(f.ko_size) >= 4 ? "The Semifinals" : "The Final", detail: "" };
+  return { what: "game", label: "The final standings", detail: "" };
+}
+// The winners to show while waiting: the champion after a tournament, else the results of the newest
+// round with a finished game, plus the leader of the table while the round robin runs.
+function waitWinners(d) {
+  const games = d.games || {};
+  const k = d.knockout && typeof d.knockout === "object" ? d.knockout : null;
+  const champion = (k && k.champion) || (d.finished && d.winner) || "";
+  if (d.finished && champion) {
+    return { title: d.number ? `Champion of Tournament #${d.number}` : "Champion", champion, runnerUp: (k && k.runner_up) || "", third: (k && k.third) || "", rows: [], leader: null };
+  }
+  const done = g => g && g.status === "finished" && g.result && g.result !== "*";
+  const rnd = (d.rounds || []).slice().sort((a, b) => b.round - a.round).find(r => (r.pairings || []).some(p => done(games[p.game_id])));
+  const rows = [];
+  for (const p of (rnd && rnd.pairings) || []) {
+    const g = games[p.game_id];
+    if (!done(g)) continue;
+    const tag = p.label || "";
+    if (g.result === "1-0" || g.result === "0-1") rows.push({ tag, winner: g.result === "1-0" ? g.white : g.black, loser: g.result === "1-0" ? g.black : g.white, how: "beat" });
+    else if (g.armageddon) rows.push({ tag, winner: g.black, loser: g.white, how: "held the draw as Black against" });
+    else rows.push({ tag, draw: [g.white, g.black] });
+  }
+  const top = (d.standings || [])[0];
+  const leader = !(k && k.seeds) && top && (top.played || 0) > 0 ? { name: top.name, points: top.points } : null;
+  const won = rows.some(r => r.winner);
+  const name = rnd ? (rnd.label || `Round ${rnd.round}`) : "";
+  return { title: name ? `${name}: ${won ? "winners" : "results"}` : "", champion: "", runnerUp: "", third: "", rows, leader };
+}
+// null while a game is live or before the first game has ended. nowMs is on the server's clock.
+function waitPlan(d, nowMs) {
+  if (!d || !d.id || d.archived) return null;
+  const all = Object.values(d.games || {});
+  if (all.some(g => g.status === "live")) return null;
+  const ends = all.filter(g => g.status === "finished").map(g => Date.parse(g.end || "")).filter(x => !isNaN(x));
+  if (!ends.length) return null;
+  const ws = d.wait_stats && typeof d.wait_stats === "object" ? d.wait_stats : {};
+  const kind = d.finished ? "tournament" : "game";
+  const since = Math.max(...ends, d.finished ? Number(d.updated_epoch_ms) || 0 : 0);
+  const typical = Math.max(0, Number(kind === "tournament" ? ws.tournament_typical_s : ws.game_typical_s) || 0);
+  const elapsed = Math.max(0, Math.floor((nowMs - since) / 1000));
+  return {
+    kind, since, elapsedS: elapsed, typicalS: typical || null,
+    leftS: typical ? Math.max(0, typical - elapsed) : null,
+    pct: typical ? Math.min(100, Math.round(elapsed / typical * 100)) : null,
+    overdue: !!typical && elapsed >= typical,
+    long: typical ? elapsed >= typical * WAIT_LONG_FACTOR : elapsed >= 1800,
+    paused: d.paused ? String(d.paused) : "",
+    next: waitNext(d), winners: waitWinners(d),
+  };
+}
+// WAIT-PLAN-END
+function waitCard() {
+  const boards = document.getElementById("boards");
+  if (!boards._wait) {
+    const el = document.createElement("section");
+    el.className = "wait card";
+    el.id = "waitScreen";
+    el.setAttribute("aria-label", "Waiting for the next game");
+    boards._wait = el;
+  }
+  return boards._wait;
+}
+// A focused board (a viewer's own pick, or a #focus link) keeps the whole screen: no waiting card there.
+function waitNow() { return focusId ? null : waitPlan(data, Date.now() + serverSkewMs); }
+function waitAbout(s) { return s < 90 ? `${Math.round(s / 5) * 5 || 5} s` : `${Math.round(s / 60)} min`; }
+function waitHtml(w) {
+  const nx = w.next, win = w.winners;
+  let lbl, time, cls = "", note;
+  if (w.paused) {
+    lbl = "paused"; time = "a provider is unavailable"; cls = " txt";
+    note = "The game will be replayed as soon as the provider answers again.";
+  } else {
+    if (w.leftS !== null && !w.overdue) { lbl = nx.what === "crown" ? "in about" : "starts in about"; time = fmtClock(w.leftS * 1000); }
+    else if (w.typicalS) { lbl = `waited ${fmtClock(w.elapsedS * 1000)}${w.long ? ", longer than usual" : ""}`; time = "any moment now"; cls = " txt"; }
+    else { lbl = "waited so far"; time = fmtClock(w.elapsedS * 1000); }
+    note = w.kind === "tournament" ? "A short break between tournaments. Every AI gives one real move as a check, then round 1 starts."
+      : nx.what === "crown" ? "The AIs are writing their notes on the last game. Then the champion is crowned."
+      : "The AIs are writing their notes on the last game. The next game starts when they finish.";
+    if (w.typicalS) note += ` The usual wait is about ${waitAbout(w.typicalS)}.`;
+  }
+  const bar = w.pct !== null && !w.paused && !w.overdue ? `<div class="wt-bar"><i style="width:${w.pct}%"></i></div>` : "";
+  const up = `<div class="wt-up"><div class="wt-kicker">Up next</div><div class="wt-next">${esc(nx.label)}</div>`
+    + (nx.detail ? `<div class="wt-detail">${esc(nx.detail)}</div>` : "")
+    + `<div class="wt-lbl">${esc(lbl)}</div><div class="wt-time${cls}">${esc(time)}</div>${bar}<div class="wt-note">${esc(note)}</div></div>`;
+  let banner = "";
+  if (win.champion) {
+    const rest = [win.runnerUp ? `Runner-up: <b>${pn(win.runnerUp)}</b>` : "", win.third ? `Third place: <b>${pn(win.third)}</b>` : ""].filter(Boolean).join(" - ");
+    banner = `<div class="wt-win"><div class="wt-wt">${crownSvg("", "wait")}<span>${esc(win.title)}</span></div><div class="wt-champ">${pn(win.champion)}</div>`
+      + (rest ? `<div class="wt-lead">${rest}</div>` : "") + `</div>`;
+  } else if (win.rows.length) {
+    const rows = win.rows.map(r => `<div class="wt-row">${r.tag ? `<span class="tag">${esc(r.tag)}</span>` : ""}`
+      + (r.winner ? `<b>${pn(r.winner)}</b><span class="v">${esc(r.how)}</span>${pn(r.loser)}` : `${pn(r.draw[0])}<span class="v">drew with</span>${pn(r.draw[1])}`) + `</div>`).join("");
+    banner = `<div class="wt-win"><div class="wt-wt">${crownSvg("", "wait")}<span>${esc(win.title)}</span></div><div class="wt-rows">${rows}</div>`
+      + (win.leader ? `<div class="wt-lead">Leader of the table: <b>${pn(win.leader.name)}</b> - ${esc(win.leader.points)} ${win.leader.points === 1 ? "point" : "points"}</div>` : "") + `</div>`;
+  }
+  const follow = STREAM ? `<div class="wt-follow">Follow the channel so you do not miss the next game</div>` : "";
+  return up + banner + follow;
 }
 
 // ---- champion moment ------------------------------------------------------------------------
@@ -3208,6 +3387,89 @@ def list_tournaments(live_dir: Path, now: float | None = None) -> list[dict]:
     return rows
 
 
+# ---- how long the page waits with no live game (the page's "up next" countdown) ----
+# The next game starts when the AIs have written their notes on the last one, so the runner has no start
+# time to publish. The page counts down the usual length of such a wait instead: the median over the
+# newest tournaments in the live dir, measured from the saved start and end of every game.
+WAIT_STATS_TTL_S = 60
+WAIT_STATS_FILES = 12           # the newest tournaments only: the pace changes with the roster
+WAIT_GAP_MAX_S = 3600           # a longer gap was an outage (provider down, restart), not a wait
+_timing_cache: dict[Path, tuple[int, dict]] = {}
+_wait_cache: dict = {"at": 0.0, "dir": None, "stats": {}}
+
+
+def iso_epoch(text) -> float | None:
+    try:
+        return datetime.fromisoformat(str(text)).timestamp()
+    except ValueError:
+        return None
+
+
+def tournament_timing(state: dict) -> dict:
+    """The gaps with no live game inside one tournament, its first game start and (finished) its last save."""
+    spans = []
+    for game in (state.get("games") or {}).values():
+        if not isinstance(game, dict):
+            continue
+        start = iso_epoch(game.get("start"))
+        end = iso_epoch(game.get("end")) if game.get("status") == "finished" else math.inf
+        if start is not None and end is not None and end >= start:
+            spans.append((start, end))
+    spans.sort()
+    gaps, busy_until = [], None
+    for start, end in spans:
+        if busy_until is not None and busy_until < start:
+            gaps.append(start - busy_until)
+        busy_until = end if busy_until is None else max(busy_until, end)
+    saved = state.get("updated_epoch_ms")
+    return {"number": state.get("number") if isinstance(state.get("number"), int) else None,
+            "gaps": [g for g in gaps if 0 < g <= WAIT_GAP_MAX_S],
+            "first_start": spans[0][0] if spans else None,
+            "finished_at": saved / 1000 if state.get("finished") and isinstance(saved, (int, float)) else None}
+
+
+def wait_stats(live_dir: Path, now: float | None = None) -> dict:
+    """{"game_typical_s", "game_samples", "tournament_typical_s", "tournament_samples"}; a key is absent with no sample."""
+    now = time.time() if now is None else now
+    live_dir = Path(live_dir)
+    if _wait_cache["dir"] == live_dir and now - _wait_cache["at"] < WAIT_STATS_TTL_S:
+        return _wait_cache["stats"]
+    timings = []
+    for path in sorted(live_dir.glob("*-tournament.json"), key=lambda p: p.name)[-WAIT_STATS_FILES:]:
+        try:
+            mtime = path.stat().st_mtime_ns
+            hit = _timing_cache.get(path)
+            if hit is None or hit[0] != mtime:
+                state = json.loads(path.read_bytes())
+                if not isinstance(state, dict):
+                    continue
+                hit = (mtime, tournament_timing(state))
+                _timing_cache[path] = hit
+        except (OSError, ValueError):
+            continue        # mid-write or unreadable: it is back on the next pass
+        timings.append(hit[1])
+    for path in [p for p in _timing_cache if p.parent == live_dir and not p.exists()]:
+        del _timing_cache[path]
+    game_gaps = [gap for t in timings for gap in t["gaps"]]
+    timings = sorted((t for t in timings if t["first_start"] is not None), key=lambda t: t["first_start"])
+    between = []
+    for before, after in zip(timings, timings[1:]):
+        if before["finished_at"] is None:
+            continue
+        if before["number"] is not None and after["number"] is not None and after["number"] != before["number"] + 1:
+            continue
+        gap = after["first_start"] - before["finished_at"]
+        if 0 < gap <= WAIT_GAP_MAX_S:
+            between.append(gap)
+    stats: dict = {}
+    if game_gaps:
+        stats.update(game_typical_s=round(statistics.median(game_gaps)), game_samples=len(game_gaps))
+    if between:
+        stats.update(tournament_typical_s=round(statistics.median(between)), tournament_samples=len(between))
+    _wait_cache.update(at=now, dir=live_dir, stats=stats)
+    return stats
+
+
 def archived_annotations(state_path: Path, state: dict) -> dict[str, dict[str, str]]:
     """Move marks of an earlier tournament from its saved sidecar: no engine, nothing queued."""
     state_path = Path(state_path)
@@ -3460,6 +3722,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 state["annotations"] = {}
             state["commentary"] = self.commentator is not None
+            state["wait_stats"] = wait_stats(self.live_dir, now)
             if self.follow is not None:
                 state["viewer_follow"] = True
             publish = publish_status(self.live_dir, path, now)
