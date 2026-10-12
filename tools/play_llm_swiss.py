@@ -90,8 +90,19 @@ class GameHooks:
     def after_game(self, ts: "TournamentState", game_id: str) -> None:
         pass
 
+    def player_for_game(self, player: dict) -> dict:
+        """The player record the next game of this player runs on (asked once per game, before its engine is
+        taken). A runner may return a copy with another provider and model: a second route while the first
+        one is down. May block while no route is allowed."""
+        return player
+
 
 HOOKS: GameHooks | None = None
+
+
+def route_of(player: dict) -> tuple[str, str]:
+    """(provider, model): what an engine process is bound to."""
+    return str(player.get("provider") or ""), str(player.get("model") or "")
 # At most this many games at the same time (config maxConcurrentGames; None = every board of the round).
 GAME_SLOTS: threading.Semaphore | None = None
 
@@ -924,9 +935,23 @@ def run_tournament(state: dict, cfg: dict, status_path: Path, log) -> int:
 
     def engine_for(name: str) -> LlmEngine:
         with engine_lock:
+            player = players[name]
+            if HOOKS is not None:
+                try:
+                    player = HOOKS.player_for_game(player) or player
+                except Exception as exc:
+                    log(f"{name}: player_for_game hook failed: {type(exc).__name__}: {exc}")
             engine = engines.get(name)
+            if engine is not None and engine.proc.poll() is None and route_of(engine.player) != route_of(player):
+                # another route for this game: the old engine process still talks to the old provider
+                log(f"{name}: route changes from {' '.join(route_of(engine.player))} to {' '.join(route_of(player))}")
+                try:
+                    kill_engine_tree(engine)
+                except Exception:
+                    pass
+                engine = None
             if engine is None or engine.proc.poll() is not None:
-                engine = LlmEngine(players[name], cfg)
+                engine = LlmEngine(player, cfg)
                 engines[name] = engine
             return engine
 
