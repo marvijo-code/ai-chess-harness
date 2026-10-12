@@ -3,13 +3,13 @@
 #
 #   bash tools/aichess_stream/install-services.sh                 # copy stream scripts, write units, daemon-reload
 #   bash tools/aichess_stream/install-services.sh --enable stream # also enable + start the named units
-#   bash tools/aichess_stream/install-services.sh --enable all    # runner, viewer, pusher, stream
+#   bash tools/aichess_stream/install-services.sh --enable all    # runner, viewer, pusher, stream, twitch-gate
 #   bash tools/aichess_stream/install-services.sh --disable all   # stop + disable (units stay installed)
 #
 # What it does (idempotent):
-#   1. copies stream.sh, cdp.py, screenshot.sh, status.sh to ~/.local/lib/ai-chess-stream/ (the stream unit runs
+#   1. copies stream.sh, cdp.py, screenshot.sh, status.sh, twitch_gate.py to ~/.local/lib/ai-chess-stream/ (the stream unit runs
 #      from there, so it does not depend on which branch ~/ai-chess has checked out);
-#   2. writes ai-chess-{runner,viewer,pusher,stream}.service to /etc/systemd/system (user and home filled in);
+#   2. writes ai-chess-{runner,viewer,pusher,stream,twitch-gate}.service to /etc/systemd/system (user and home filled in);
 #   3. creates ~/.config/ai-chess/services.env and stream.env from the examples when missing (never overwrites);
 #   4. systemctl daemon-reload. Without --enable nothing is enabled or started.
 # It never touches other units, tmux sessions or processes (the relay tmux session "aclrelay" stays as it is).
@@ -17,7 +17,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 RUN_USER="${AICHESS_USER:-$(id -un)}"
 RUN_HOME="$(getent passwd "$RUN_USER" | cut -d: -f6)"
-ALL=(runner viewer pusher stream)
+ALL=(runner viewer pusher stream twitch-gate)
 
 ENABLE=(); DISABLE=()
 while [ $# -gt 0 ]; do
@@ -36,7 +36,7 @@ CONF="$RUN_HOME/.config/ai-chess"
 install -d -m 755 -o "$RUN_USER" -g "$RUN_USER" "$LIB" "$RUN_HOME/.local/share/ai-chess-stream" 2>/dev/null \
   || sudo install -d -m 755 -o "$RUN_USER" -g "$RUN_USER" "$LIB" "$RUN_HOME/.local/share/ai-chess-stream"
 install -d -m 700 "$CONF" 2>/dev/null || sudo install -d -m 700 -o "$RUN_USER" -g "$RUN_USER" "$CONF"
-for f in stream.sh cdp.py screenshot.sh status.sh; do
+for f in stream.sh cdp.py screenshot.sh status.sh twitch_gate.py; do
   sed 's/\r$//' "$HERE/$f" >"$LIB/$f.new" && chmod 755 "$LIB/$f.new" && mv "$LIB/$f.new" "$LIB/$f"
 done
 git -C "$HERE" rev-parse --short HEAD 2>/dev/null >"$LIB/VERSION" || echo unknown >"$LIB/VERSION"

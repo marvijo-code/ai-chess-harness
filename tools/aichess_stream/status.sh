@@ -7,7 +7,7 @@ RUN=/run/ai-chess-stream
 [ -d "$RUN" ] || RUN="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ai-chess-stream"
 
 echo "== units"
-for u in runner viewer pusher stream; do
+for u in runner viewer pusher stream twitch-gate; do
   en="$(systemctl is-enabled "ai-chess-$u" 2>/dev/null | head -n1)"; ac="$(systemctl is-active "ai-chess-$u" 2>/dev/null | head -n1)"
   printf '  %-20s %-9s %-9s since %s\n' "ai-chess-$u" "${en:-missing}" "${ac:-unknown}" \
     "$(systemctl show -p ActiveEnterTimestamp --value "ai-chess-$u" 2>/dev/null)"
@@ -29,7 +29,8 @@ print(f"  {s['size']}@{s['fps']} {s['preset']} {s['vbitrate_k']}k -> {s['output'
 print(f"  chrome {s['chrome_mb']} MB, restarts: chrome {s['chrome_restarts']}, ffmpeg {s['ffmpeg_restarts']}  (status {s['updated']})")
 if s.get("twitch"):
     n = s.get("rtmp_conns", 0)
-    print(f"  targets: YouTube + Twitch, {n} of 2 connected" + ("" if n >= 2 else "  <- one target is down (Twitch reconnects by itself)"))
+    second = "Twitch gate" if s.get("twitch_gate") else "Twitch"
+    print(f"  targets: YouTube + {second}, {n} of 2 connected" + ("" if n >= 2 else f"  <- one target is down ({second} reconnects by itself)"))
 p = {}
 try:
     for line in open(sys.argv[2]):
@@ -44,6 +45,9 @@ EOF
 else
   echo "  not running (no $RUN/status.json)"
 fi
+# when Twitch gets the stream (a daily show or 24 hours): the gate's own status line
+GATE_PY="$(dirname "$0")/twitch_gate.py"
+[ -f "$GATE_PY" ] && RUNTIME_DIRECTORY=/run/ai-chess-twitch-gate python3 "$GATE_PY" status 2>/dev/null | head -n1 | sed 's/^/  /'
 
 echo "== cpu (cores, 5 s sample) and memory (RSS MB)"
 group() {  # name, pid list

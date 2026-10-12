@@ -35,6 +35,8 @@
 #   AICHESS_STREAM_OUTPUT     "rtmp" (default), "null" (encode, discard) or a file path (.flv) for tests
 #   AICHESS_STREAM_KEY_FILE   env file with the key           (~/.config/ai-chess/youtube-stream.env)
 #   AICHESS_TWITCH_KEY_FILE   env file with the Twitch key, "" = no Twitch  (~/.config/ai-chess/twitch-stream.env)
+#   AICHESS_TWITCH_GATE       local RTMP address of the Twitch gate (twitch_gate.py), "" = straight to Twitch  ("")
+#                             With a gate the second output goes there; the gate holds the key and the show times.
 #   AICHESS_CHROME            browser binary                  (google-chrome, else Playwright chromium)
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -61,6 +63,7 @@ CHROME_MAX_MB="${AICHESS_CHROME_MAX_MB:-1400}"
 OUTPUT="${AICHESS_STREAM_OUTPUT:-rtmp}"
 KEY_FILE="${AICHESS_STREAM_KEY_FILE:-$HOME/.config/ai-chess/youtube-stream.env}"
 TWITCH_KEY_FILE="${AICHESS_TWITCH_KEY_FILE-$HOME/.config/ai-chess/twitch-stream.env}"
+TWITCH_GATE="${AICHESS_TWITCH_GATE:-}"
 RUN="${RUNTIME_DIRECTORY:-${XDG_RUNTIME_DIR:-/tmp}/ai-chess-stream}"
 STATE_DIR="$HOME/.local/share/ai-chess-stream"
 PROFILE="$STATE_DIR/chrome-profile"
@@ -206,7 +209,10 @@ start_ffmpeg() {
         python3 "$HERE/cdp.py" --port "$CDP_PORT" reload >/dev/null 2>&1 || true
         return 1
       fi
-      if read_twitch_key; then
+      if [ -n "$TWITCH_GATE" ]; then
+        # the gate decides when Twitch gets the stream (a daily show, not 24 hours) and holds the key
+        TWITCH_ON=1; out_args=(-flags +global_header -f tee "$(tee_spec "$YT_URL/$YT_KEY" "$TWITCH_GATE")")
+      elif read_twitch_key; then
         # the tee muxer does not ask the encoders for global headers, and FLV needs them
         TWITCH_ON=1; out_args=(-flags +global_header -f tee "$(tee_spec "$YT_URL/$YT_KEY" "$TW_URL/$TW_KEY")")
       else
@@ -250,7 +256,7 @@ for line in sys.stdin:
     sys.stdout.write(line)' | sed -u 's/^/ffmpeg: /') &
   FF_PID=$!
   FF_STARTED=$(date +%s)
-  log "ffmpeg pid $FF_PID ${W}x${H}@${FPS} ${PRESET} ${VB}k -> $([ "$OUTPUT" = rtmp ] && echo "$YT_URL/<key>$([ "$TWITCH_ON" = 1 ] && echo " + $TW_URL/<key>")" || echo "$OUTPUT") music=$([ -n "${in_music[*]}" ] && echo on || echo off)"
+  log "ffmpeg pid $FF_PID ${W}x${H}@${FPS} ${PRESET} ${VB}k -> $([ "$OUTPUT" = rtmp ] && echo "$YT_URL/<key>$([ "$TWITCH_ON" = 1 ] && { [ -n "$TWITCH_GATE" ] && echo " + Twitch gate $TWITCH_GATE" || echo " + $TW_URL/<key>"; })" || echo "$OUTPUT") music=$([ -n "${in_music[*]}" ] && echo on || echo off)"
 }
 
 MUSIC_PID=""
@@ -276,11 +282,11 @@ start_ffmpeg || true
 LAST_CHECK=0
 
 write_status() {
-  printf '{"updated":"%s","url":"%s","size":"%s","fps":%s,"preset":"%s","vbitrate_k":%s,"output":"%s","music":%s,"xvfb_pid":%s,"pulse_pid":%s,"chrome_pid":%s,"chrome_mb":%s,"chrome_restarts":%s,"ffmpeg_pid":%s,"ffmpeg_restarts":%s,"seeded":%s,"twitch":%s,"rtmp_conns":%s}\n' \
+  printf '{"updated":"%s","url":"%s","size":"%s","fps":%s,"preset":"%s","vbitrate_k":%s,"output":"%s","music":%s,"xvfb_pid":%s,"pulse_pid":%s,"chrome_pid":%s,"chrome_mb":%s,"chrome_restarts":%s,"ffmpeg_pid":%s,"ffmpeg_restarts":%s,"seeded":%s,"twitch":%s,"twitch_gate":%s,"rtmp_conns":%s}\n' \
     "$(date -Is)" "$URL" "$SIZE" "$FPS" "$PRESET" "$VB" "$([ "$OUTPUT" = rtmp ] && echo rtmp || echo "$OUTPUT")" \
     "$(alive "$MUSIC_PID" && echo true || echo false)" \
     "${XVFB_PID:-0}" "${PULSE_PID:-0}" "${CHROME_PID:-0}" "$(chrome_rss_mb)" "$CHROME_RESTARTS" "${FF_PID:-0}" "$FF_RESTARTS" "$SEEDED" \
-    "$([ "$TWITCH_ON" = 1 ] && echo true || echo false)" "${RTMP_CONNS:-0}" \
+    "$([ "$TWITCH_ON" = 1 ] && echo true || echo false)" "$([ -n "$TWITCH_GATE" ] && echo true || echo false)" "${RTMP_CONNS:-0}" \
     >"$RUN/status.json.tmp" && mv "$RUN/status.json.tmp" "$RUN/status.json"
 }
 
@@ -329,7 +335,7 @@ while true; do
     fi
     RTMP_CONNS="$(rtmp_conns)"
     if [ "$TWITCH_ON" = 1 ] && [ "$RTMP_CONNS" != "$LAST_CONNS" ]; then
-      log "rtmp connections: $RTMP_CONNS of 2 (YouTube + Twitch)"
+      log "rtmp connections: $RTMP_CONNS of 2 (YouTube + $([ -n "$TWITCH_GATE" ] && echo "Twitch gate" || echo Twitch))"
     fi
     LAST_CONNS="$RTMP_CONNS"
     write_status
