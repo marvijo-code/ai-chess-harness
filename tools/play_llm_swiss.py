@@ -532,7 +532,10 @@ def _play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: 
 
         def limitwait(wait_s: int, reason: str, side=side, engine=engine) -> None:
             # A usage limit: the clock is stopped (no thinking shown) until the engine asks again.
-            log(f"{game_id}: {engine.name} waits {wait_s}s for a usage limit ({reason[:120]}); clock stopped")
+            due = time.time() + wait_s
+            check = f"{time.strftime('%H:%M', time.gmtime(due + 7200))} SAST ({time.strftime('%H:%M', time.gmtime(due))} UTC)"
+            log(f"{game_id}: {engine.name} waits {wait_s}s for a usage limit, next check at {check} "
+                f"({reason[:120]}); clock stopped")
             with ts.lock:
                 record["thinking"] = None
                 record["waiting"] = {"side": "white" if side == chess.WHITE else "black", "reason": reason[:200],
