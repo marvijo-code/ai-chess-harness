@@ -60,6 +60,26 @@ or, for OpenCode Go, from its usage endpoint. The tournament runs with the rest 
 its reset. A limit DURING a game still waits and retries the same move (see Usage limits).
 With fewer than 4 players the knockout is a final between the top two (no third-place game).
 
+### Subscription first, metered second (owner approval 2026-10-12: R170 a day)
+
+A player may have a second route: `"fallback": {"provider": "openrouter-chat", "model": ..., "maxPrice": ...}`
+in the config (DeepSeek V4.1 Flash and GLM 5.3 Flash). The subscription always comes first:
+
+- **Before every game** of such a player the subscription route gets one real move. It answers = it
+  plays this game. It is down = the metered route plays this game. The next game asks again, so the
+  player is back on its subscription the first game after the reset (log lines start with `ROUTE`).
+- **Daily cap** `forever.meteredDailyBudgetUsd` (10.28 = R170 at R16.53). What was spent today comes
+  from OpenRouter itself (`/key` usage_daily, UTC day), so moves, notes, retries and route checks all
+  count; other use of the same key counts too. `meteredFloorUsd` (0.5) of the account balance is never
+  touched. No answer from OpenRouter = nothing may be spent. 0 = metered routes off.
+- The cap is checked when a game starts. A game that has started is finished, so one day can end at
+  most one game per player over the cap.
+- **Cap used up or account empty, subscription still down:** the game waits and checks both again
+  every `routeRetrySeconds` (600). At a tournament start the player is benched instead when less
+  than `meteredReserveUsd` (1.0) is left, so this wait is rare.
+- The notes call after a game runs on the route that game was played on (`game.route`).
+- Top-ups are the owner's: the runner never buys credits.
+
 ### Alibaba Token Plan route (`alibaba`)
 
 `POST https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/v1/messages` with

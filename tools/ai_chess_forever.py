@@ -44,7 +44,10 @@ POINTER_NAME = "current.json"
 FOREVER_DEFAULTS = {"pauseSeconds": 120, "memoryRepo": str(ROOT / "out" / "ai-chess-agent-memory"), "memoryRemote": None,
                     "push": True, "ladderPlayer": "Stockfish 19", "ladderStartDepth": 4, "reflection": True,
                     "reflectionTimeoutSeconds": 600, "marksWaitSeconds": 60, "rosterCheck": True,
-                    "rosterCheckTimeoutSeconds": 300, "minPlayers": 3, "rosterRetrySeconds": 900}
+                    "rosterCheckTimeoutSeconds": 300, "minPlayers": 3, "rosterRetrySeconds": 900,
+                    # Second, metered route of a player (player["fallback"]): 0 = never used. See MeteredBudget.
+                    "meteredDailyBudgetUsd": 0.0, "meteredFloorUsd": 0.5, "meteredReserveUsd": 1.0,
+                    "routeCheckTimeoutSeconds": 120, "routeRetrySeconds": 600}
 PAUSED_RETRY_SECONDS = 300
 MAX_REFLECTION_RETRIES = 2
 OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
@@ -297,6 +300,101 @@ def reflect(player: dict, state: dict, game: dict, repo: MemoryRepo, cfg: dict, 
     return out
 
 
+# ---------------------------------------------------------------- subscription first, metered second
+
+
+class MeteredBudget:
+    """Daily cap for the metered second routes (owner approval 2026-10-12: R170 a day for DeepSeek and GLM).
+
+    What was spent today comes from OpenRouter itself (`/key` usage_daily of the key in use, UTC day), so every
+    call counts: moves, notes, retries and route checks. Other use of the same key counts as well, which only
+    makes the cap stricter. `/credits` keeps `floor_usd` of the balance untouched, so a game never runs into an
+    empty account. No answer from OpenRouter = nothing may be spent."""
+
+    API = "https://openrouter.ai/api/v1"
+    CACHE_SECONDS = 60
+
+    def __init__(self, daily_usd: float, floor_usd: float = 0.5, fetch=None, clock=time.monotonic) -> None:
+        self.daily_usd = float(daily_usd or 0)
+        self.floor_usd = float(floor_usd or 0)
+        self.fetch = fetch or self._fetch
+        self.clock = clock
+        self._seen: tuple[float, float, str] | None = None   # (when, remaining, note)
+        self._lock = threading.Lock()
+
+    def _fetch(self, path: str) -> dict:
+        import urllib.request
+
+        import subscription_providers as sp
+
+        key = os.environ.get("OPENROUTER_API_KEY") or sp._user_env("OPENROUTER_API_KEY")
+        if not key:
+            raise RuntimeError("OPENROUTER_API_KEY is not set")
+        request = urllib.request.Request(self.API + path, headers={"Authorization": f"Bearer {key}"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return (json.loads(response.read().decode("utf-8")) or {}).get("data") or {}
+
+    def remaining(self) -> float:
+        """USD that may still be spent today (0 = none, also when OpenRouter does not answer)."""
+        with self._lock:
+            now = self.clock()
+            if self._seen and now - self._seen[0] < self.CACHE_SECONDS:
+                return self._seen[1]
+            if self.daily_usd <= 0:
+                left, note = 0.0, "metered routes are off (meteredDailyBudgetUsd 0)"
+            else:
+                try:
+                    key = self.fetch("/key")
+                    credits = self.fetch("/credits")
+                    spent = float(key.get("usage_daily") or 0)
+                    balance = float(credits.get("total_credits") or 0) - float(credits.get("total_usage") or 0)
+                    parts = [self.daily_usd - spent, balance - self.floor_usd]
+                    if key.get("limit_remaining") is not None:
+                        parts.append(float(key["limit_remaining"]))
+                    left = max(0.0, min(parts))
+                    note = f"spent today ${spent:.2f} of ${self.daily_usd:.2f}, account balance ${balance:.2f}"
+                except Exception as exc:
+                    left, note = 0.0, f"OpenRouter did not answer ({type(exc).__name__}: {str(exc)[:120]})"
+            self._seen = (now, left, note)
+            return left
+
+    def note(self) -> str:
+        self.remaining()
+        return self._seen[2] if self._seen else ""
+
+
+BUDGET: MeteredBudget | None = None   # set by main() when the config allows a metered second route
+
+
+def fallback_player(player: dict) -> dict:
+    """The player on its second route: same name, memory and clock, another provider and model."""
+    second = dict(player.get("fallback") or {})
+    out = {k: v for k, v in player.items() if k != "fallback"}
+    out.update(second)
+    out["metered"] = True
+    return out
+
+
+def probe_with_fallback(player: dict, cfg: dict, live_dir: Path, timeout: float, budget: MeteredBudget | None,
+                        prober) -> dict:
+    """Roster check of one player: the subscription route first; when it is down and today's cap leaves
+    room for a tournament, the metered route. The row says which route answered."""
+    row = prober(player, cfg, live_dir, timeout)
+    if row.get("ok") or not player.get("fallback") or budget is None:
+        return row
+    reserve = float(cfg["forever"].get("meteredReserveUsd") or 0)
+    left = budget.remaining()
+    if left < max(reserve, 0.01):
+        row["metered"] = f"second route not used: {budget.note()}"
+        return row
+    second = prober(fallback_player(player), cfg, live_dir, timeout)
+    if second.get("ok"):
+        second.update(metered=True, name=player["name"], primary_reason=row.get("reason", ""))
+        return second
+    row["metered"] = f"second route failed too: {second.get('reason', '')}"[:240]
+    return row
+
+
 # ---------------------------------------------------------------- hooks
 
 
@@ -323,6 +421,43 @@ class ForeverHooks(swiss.GameHooks):
         # sha of each player's MEMORY.md right after its last reflection: its next game must start from it.
         learning = repo.read_json("tournaments/learning.json") or {}
         self.last_written: dict[str, str] = dict(learning.get("last_written") or {})
+        self.prober = None        # (player, cfg, live_dir, timeout) -> row; replaceable in tests
+        self.sleep = time.sleep   # the wait while no route is allowed; replaceable in tests
+
+    def player_for_game(self, player: dict) -> dict:
+        """Asked once before every game. A player with a second route: the subscription is checked with one
+        real move and used when it answers; when it is down the metered route plays this game, as long as
+        today's cap has room. With no route allowed the game waits here and both are checked again."""
+        if not player.get("fallback") or player.get("provider") == "uci" or BUDGET is None:
+            return player
+        fv = self.cfg["forever"]
+        prober = self.prober or probe_player
+        name = player["name"]
+        while True:
+            row = prober(player, self.cfg, self.live_dir, float(fv.get("routeCheckTimeoutSeconds") or 120))
+            if row.get("ok"):
+                log(f"ROUTE {name}: the subscription route {player.get('provider')} answers, it plays this game")
+                return player
+            left = BUDGET.remaining()
+            second = fallback_player(player)
+            if left > 0:
+                log(f"ROUTE {name}: subscription route down ({row.get('kind') or row.get('reason', '')}); "
+                    f"metered route {second.get('provider')} {second.get('model')} plays this game "
+                    f"(${left:.2f} of today's cap left)")
+                return second
+            wait = float(fv.get("routeRetrySeconds") or 600)
+            log(f"ROUTE {name}: subscription route down and no metered money allowed ({BUDGET.note()}); "
+                f"checking both again in {wait:.0f}s")
+            self.sleep(wait)
+
+    @staticmethod
+    def route_player(player: dict, game: dict) -> dict:
+        """The player on the route this game was played on (its notes call uses the same one)."""
+        side = "white" if game.get("white") == player.get("name") else "black"
+        route = (game.get("route") or {}).get(side)
+        if not route or (route.get("provider"), route.get("model")) == (player.get("provider"), player.get("model")):
+            return player
+        return fallback_player(player) if route.get("metered") else dict(player, **route)
 
     def ladder_view(self) -> dict:
         with self.lock:
@@ -354,6 +489,9 @@ class ForeverHooks(swiss.GameHooks):
             write_text_retry(path, json.dumps(context, indent=1))
             engine.send(f"setoption name GameContextFile value {path}")
             with ts.lock:
+                game.setdefault("route", {})[side] = {"provider": engine.player.get("provider"),
+                                                      "model": engine.player.get("model"),
+                                                      "metered": bool(engine.player.get("metered"))}
                 game.setdefault("memory_bytes", {})[side] = len(memory.encode("utf-8"))
                 game.setdefault("memory_read", {})[side] = {
                     "player": engine.name, "folder": self.repo.folder_of(engine.name),
@@ -395,7 +533,8 @@ class ForeverHooks(swiss.GameHooks):
             threads = []
             for name in ai:
                 def run(name=name):
-                    reflections[name] = reflect(players[name], state, game, self.repo, self.cfg, marks, self.client_factory)
+                    reflections[name] = reflect(self.route_player(players[name], game), state, game, self.repo,
+                                                self.cfg, marks, self.client_factory)
                 thread = threading.Thread(target=run, daemon=True)
                 thread.start()
                 threads.append(thread)
@@ -559,7 +698,7 @@ def check_roster(cfg: dict, live_dir: Path, timeout: float | None = None, prober
     prober = prober or probe_player
     players = list(cfg["players"])
     with ThreadPoolExecutor(max_workers=max(1, len(players))) as pool:
-        rows = list(pool.map(lambda pl: prober(pl, cfg, live_dir, timeout), players))
+        rows = list(pool.map(lambda pl: probe_with_fallback(pl, cfg, live_dir, timeout, BUDGET, prober), players))
     playing, benched = [], []
     for player, row in zip(players, rows):
         if row.get("ok"):
@@ -604,7 +743,8 @@ def run_forever(cfg: dict, live_dir: Path, repo: MemoryRepo, pusher: GitPusher |
                 log("roster check: one real move from every player")
                 roster, benched, rows = check_roster(cfg, live_dir)
                 for row in rows:
-                    log("ROSTER " + json.dumps({k: row.get(k) for k in ("name", "ok", "move", "seconds", "kind", "resets_at", "reason")}))
+                    log("ROSTER " + json.dumps({k: row.get(k) for k in ("name", "ok", "route", "metered", "move", "seconds",
+                                                                         "kind", "resets_at", "reason")}))
             need = int(cfg["forever"].get("minPlayers") or 3)
             if len(roster) < need:
                 wait = float(cfg["forever"].get("rosterRetrySeconds") or 900)
@@ -762,6 +902,12 @@ def main(argv: list[str] | None = None) -> int:
     if moved:
         pusher.request("Memory folders by model family: " + "; ".join(moved))
     log(f"memory repo {repo_root} (push {'on' if push else 'off'}), live dir {live_dir}")
+    global BUDGET
+    second = [p["name"] for p in cfg["players"] if p.get("fallback")]
+    if second and float(fv.get("meteredDailyBudgetUsd") or 0) > 0:
+        BUDGET = MeteredBudget(fv["meteredDailyBudgetUsd"], fv.get("meteredFloorUsd"))
+        log(f"metered second route for {', '.join(second)}: at most ${BUDGET.daily_usd:.2f} a day, used only while "
+            f"the subscription route is down ({BUDGET.note()})")
 
     if args.preflight:
         # The same check every new tournament starts with: one real move per enabled player, limits bench.

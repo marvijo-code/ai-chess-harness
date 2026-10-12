@@ -26,7 +26,8 @@
     "ladderStartDepth": 4,
     "reflection": true,
     "reflectionTimeoutSeconds": 600,
-    "marksWaitSeconds": 60
+    "marksWaitSeconds": 60,
+    "meteredDailyBudgetUsd": 10.28
   },
   "players": [
     {"name": "Sonnet 5.5", "memoryFolder": "claude", "provider": "claude", "model": "claude-sonnet-5-5", "effort": "high", "image": false,
@@ -34,9 +35,13 @@
     {"name": "GPT-6.1 Sol", "memoryFolder": "gpt", "provider": "codex", "model": "gpt-6.1-sol", "effort": "high", "image": false,
      "route": "ChatGPT subscription (codex CLI)"},
     {"name": "DeepSeek V4.1 Flash", "memoryFolder": "deepseek", "provider": "alibaba", "model": "deepseek-v4.1-flash", "effort": "high", "image": false,
-     "route": "Alibaba Token Plan subscription (Anthropic wire)"},
+     "route": "Alibaba Token Plan subscription (Anthropic wire)",
+     "fallback": {"provider": "openrouter-chat", "model": "deepseek/deepseek-v4.1-flash", "maxPrice": {"prompt": 0.35, "completion": 1.4},
+                  "route": "OpenRouter, metered: only while the subscription is down, inside the daily cap"}},
     {"name": "GLM 5.3 Flash", "memoryFolder": "glm", "provider": "opencode-go", "model": "glm-5.3-flash", "effort": "high", "image": false,
-     "route": "OpenCode Go subscription (its only subscription route)"},
+     "route": "OpenCode Go subscription (its only subscription route)",
+     "fallback": {"provider": "openrouter-chat", "model": "z-ai/glm-5.3-flash", "maxPrice": {"prompt": 0.2, "completion": 0.7},
+                  "route": "OpenRouter, metered: only while the subscription is down, inside the daily cap"}},
     {"name": "Gemini 3.8 Flash", "memoryFolder": "gemini", "enabled": false, "provider": "gemini-cli", "model": "gemini-3.8-flash", "effort": "high",
      "image": false, "route": "Gemini CLI subscription (route not wired yet)"},
     {"name": "Stockfish 19", "provider": "uci", "model": "stockfish-19", "effort": "ladder", "depth": 4,
