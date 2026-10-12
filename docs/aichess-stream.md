@@ -127,6 +127,23 @@ Measured on the VPS (4 vCPU), streaming to the private test broadcast, YouTube h
 
 0 duplicated and 0 dropped frames after the first second (checked over 60 s).
 
+## The waiting screen (no game is live)
+
+Between rounds, before an Armageddon decider and between tournaments no game is live. Every page then shows one
+card in the boards area: what is next ("Round 3 of 5", "The Final", "Tournament #37"), a countdown and a winners
+banner (the results of the last round and the leader of the table, or the champion with second and third place).
+On the stream the card fills the boards area and the finished boards are hidden; on the other pages it sits above
+them. A board picked by the viewer (focus) keeps the screen, so no card there.
+
+The next game starts when the AIs have written their notes, so the runner has no start time to publish. The
+countdown is the usual length of such a wait: `wait_stats` in `/api/tournament` (`game_typical_s`,
+`tournament_typical_s`, each with its sample count) is the median over the 12 newest tournament files in the live
+dir, measured from the saved start and end of every game; gaps over one hour count as outages and are left out.
+The page words it "starts in about", then "any moment now" with the time waited, and "longer than usual" at three
+times the usual wait. With no measured wait it shows only the time waited. It never shows a made-up time.
+Logic: `waitPlan()` in the page (between `WAIT-PLAN-START` and `WAIT-PLAN-END`, tested in node by
+`tests/test_aichess_wait_screen.py`), `tournament_timing()` and `wait_stats()` in the viewer.
+
 ## How the stream supervises itself
 
 - ffmpeg exits (RTMP drop): restarted after 3 s, doubling to 60 s.
