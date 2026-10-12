@@ -125,7 +125,7 @@ LIMIT_MARKERS = ("usagelimit", "usage limit", "usage_limit", "rate limit", "rate
                  "overloaded", "capacity")
 LIMIT_429 = re.compile(r"(?:http|status|code)[^0-9]{0,4}429\b|\b429 too many", re.I)
 LIMIT_WAIT_FIRST_SECONDS = 60.0
-LIMIT_WAIT_MAX_SECONDS = 900.0
+LIMIT_WAIT_MAX_SECONDS = 450.0   # was 900: a plan that resets is noticed within 7.5 minutes
 CLAUDE_RESET = re.compile(r"usage limit reached\|(\d{9,11})", re.I)
 ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
 NOTE_MAX_CHARS = 200
@@ -567,6 +567,14 @@ def limit_wait_seconds(text: str, attempt: int, now: float | None = None) -> flo
     return min(LIMIT_WAIT_MAX_SECONDS, LIMIT_WAIT_FIRST_SECONDS * (2 ** max(0, attempt)))
 
 
+def next_check_label(seconds: float, now: float | None = None) -> str:
+    """When the next check happens, as `22:25 SAST (20:25 UTC)` (SAST = UTC+2, no DST)."""
+    import datetime as _dt
+    at = _dt.datetime.fromtimestamp((time.time() if now is None else now) + seconds, _dt.timezone.utc)
+    sast = at + _dt.timedelta(hours=2)
+    return f"{sast:%H:%M} SAST ({at:%H:%M} UTC)"
+
+
 def http_usage(usage: dict) -> dict:
     """OpenAI-compatible usage -> {input, cached, output}. DeepSeek reports prompt_cache_hit_tokens.
     Anthropic wire (no prompt_tokens): input_tokens is only the uncached part, so the total adds the cache
@@ -837,14 +845,16 @@ class SubscriptionChessClient:
                 seconds = limit_wait_seconds(text, waits)
                 waits += 1
                 reason = " ".join(text.split())[:160]
-                self.log(f"{self.provider} {self.model} LIMIT WAIT {waits}: sleeping {seconds:.0f}s, then the same "
-                         f"request again ({reason})")
+                check = next_check_label(seconds)
+                self.log(f"{self.provider} {self.model} LIMIT WAIT {waits}: sleeping {seconds:.0f}s, next check at "
+                         f"{check}, then the same request again ({reason})")
                 if self.on_limit_wait is not None:
                     try:
                         self.on_limit_wait(int(seconds), reason)
                     except Exception:
                         pass
-                self._think(f"\n[waiting {seconds:.0f}s for the {self.provider} usage limit to reset; the clock is stopped]\n")
+                self._think(f"\n[waiting {seconds:.0f}s for the {self.provider} usage limit to reset; next check at "
+                            f"{check}; the clock is stopped]\n")
                 slept = time.monotonic()
                 self.sleep(seconds)
                 self._infra_ms += int((time.monotonic() - slept) * 1000)

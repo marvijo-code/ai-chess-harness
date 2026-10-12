@@ -600,6 +600,9 @@ class LimitWaitTest(unittest.TestCase):
         self.assertEqual(sp.limit_wait_seconds("Claude AI usage limit reached|1791460000", 0, now=1791459900), 105)
         self.assertEqual(sp.limit_wait_seconds("rate limit", 0), 60.0)
         self.assertEqual(sp.limit_wait_seconds("rate limit", 9), sp.LIMIT_WAIT_MAX_SECONDS)
+        self.assertEqual(sp.LIMIT_WAIT_MAX_SECONDS, 450.0)
+        # 2026-10-12 20:10:00 UTC + 450 s = 20:17:30 UTC = 22:17 SAST
+        self.assertEqual(sp.next_check_label(450, now=1791835800), "22:17 SAST (20:17 UTC)")
 
     def test_runner_moves_its_deadline_out_while_the_engine_waits(self):
         class FakeEngine:
