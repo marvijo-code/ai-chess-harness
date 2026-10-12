@@ -256,3 +256,5 @@
 - [x] Linux binary resolution and `run-ai-chess-forever.sh` launcher plus `docs/aichess-vps-forever.md` (PRD 185).
 - [x] Focused tests green on Windows and Linux; the full suite has the same 9 failures as origin/main (3 config-drift tests, 6 Playwright E2E needing browser build 1208) (Validation 81).
 - [ ] Real VPS preflight with measured cache hit rates and a reflection write (Validation 82): done for Sonnet 5.5 and GPT-6.1 Sol (40-ply segment, reflections written); DeepSeek, GLM and MiMo blocked by the OpenCode Go monthly limit until 2026-10-14 and Z.ai code 1113.
+- [x] Twitch gate: daily show window for Twitch, YouTube stays live all day; schedule file, `set` and `status` commands, status line in `status.sh`, unit `ai-chess-twitch-gate` (PRD 186).
+- [x] Twitch-gate tests green and the keyless VPS pilot passed: main target 95.0 s of 95 s, the gate target received 24 s of a 34 s open window (10 s reconnect), nothing while closed, no key in any log (Validation 83).

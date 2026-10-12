@@ -68,6 +68,34 @@ dead for the whole run = main target complete (12.0 s of 12 s); second target ki
 at 14 s = main target complete (40.0 s of 40 s) and the second target received 22 s after its return;
 main target dead = ffmpeg exits with an error.
 
+## Twitch show times (the gate)
+
+Twitch counts "average viewers" over every minute the channel is live. Its Affiliate rule is an average
+of 3 viewers on 4 different days, so a stream that is live 24 hours needs 72 viewer-hours on such a day
+and a 2 hour show needs 6. So Twitch can get a daily show while YouTube stays live all day.
+
+- `AICHESS_TWITCH_GATE=rtmp://127.0.0.1:19350/live/aichess` in `stream.env` sends the second output to
+  the gate (unit `ai-chess-twitch-gate`, `twitch_gate.py`) instead of straight to Twitch. The gate runs one
+  copy-only ffmpeg: to Twitch while the show is on, to nowhere (`-f null`) while it is off. So the
+  stream's second leg stays connected and `status.sh` keeps saying `2 of 2 connected`.
+- Schedule: `~/.config/ai-chess/twitch-show.env`, read again whenever it changes (no restart):
+  `python3 ~/.local/lib/ai-chess-stream/twitch_gate.py set --mode daily --start 19:00 --minutes 120 --tz Africa/Johannesburg`,
+  `... set --mode always` (24 hours, as before the gate), `... set --mode off`. No file = `always`.
+  Bad input is refused and nothing is saved; a file that is broken by hand keeps the last good schedule,
+  and at a gate start it means off, never 24 hours.
+- At a change the gate stops its ffmpeg and starts the other one; the stream's second leg reconnects
+  in about 10 s. Every show is a new Twitch broadcast, so followers get a new go-live notice each day.
+- `status.sh` prints `Twitch show: daily 19:00 for 120 min (Africa/Johannesburg) - now off air, starts Tue 19:00 (in 2h29m)`.
+  `twitch_gate.py status` prints the same line plus the status file (`/run/ai-chess-twitch-gate/status.json`).
+- Keep the show inside one calendar day in UTC and in US Pacific time (19:00 to 21:00 in South Africa is
+  17:00 to 19:00 UTC and 10:00 to 12:00 Pacific), so no show is split over two Twitch days.
+- Gate down = the second leg retries every 10 s and YouTube is not touched. Back to no gate: remove the
+  `AICHESS_TWITCH_GATE` line and restart `ai-chess-stream`.
+
+Pilot on the VPS (test picture, own ports, fake Twitch = a local `ffmpeg -listen 1`, 2026-10-12): gate
+off for 24 s, on for 34 s, off again; main target complete (95.0 s of 95 s), the fake Twitch got 24 s
+(the 10 s reconnect), nothing while off, the key in no log.
+
 ## Install and enable (VPS)
 
 ```bash
@@ -103,6 +131,7 @@ Remove the file or set `AICHESS_STREAM_MUSIC=` (empty) in `stream.env` for no mu
 | `ai-chess-viewer` | `python3 tools/llm_tournament_viewer.py $AICHESS_VIEWER_ARGS` | Default args: `--port 8770 --follow out/live/current.json --engine ~/sf19/stockfish/stockfish-linux-x86-64-universal --commentary`. `--follow` comes from the forever-runner branch. |
 | `ai-chess-pusher` | `python3 tools/aichess_push.py $AICHESS_PUSHER_ARGS` | Default args post straight to `127.0.0.1:8781` with `~/acl-chess-relay/ingest.token`, live dir `~/ai-chess/out/live`. |
 | `ai-chess-stream` | `~/.local/lib/ai-chess-stream/stream.sh` | Settings in `~/.config/ai-chess/stream.env`. OOMScoreAdjust -300, Nice -5, CPUWeight 200: viewers see this one. |
+| `ai-chess-twitch-gate` | `python3 ~/.local/lib/ai-chess-stream/twitch_gate.py run` | Passes the stream on to Twitch only while the show is on (`twitch-show.env`). Reads the address and the key file from `stream.env`. Uses one copy-only ffmpeg, no encode. |
 
 All units: system units with `User=marvijo`, `Restart=always`, no start limit. Arguments are in
 `~/.config/ai-chess/services.env` (edit, then `sudo systemctl restart ai-chess-<name>`).
