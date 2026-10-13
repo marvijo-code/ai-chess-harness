@@ -329,7 +329,11 @@ class SeriesWriter:
         }
 
 
-def write_text_retry(path: Path, text: str) -> None:
+# Seconds to wait before each further try of a failed file write (disk full, a busy file).
+WRITE_RETRY_DELAYS = (0.2, 0.6, 1.5)
+
+
+def _write_text_once(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")
     for _ in range(20):
@@ -339,6 +343,21 @@ def write_text_retry(path: Path, text: str) -> None:
         except PermissionError:  # the viewer may hold the file open for a moment on Windows
             time.sleep(0.05)
     path.write_text(text, encoding="utf-8")
+
+
+def write_text_retry(path: Path, text: str, delays: tuple[float, ...] | None = None, sleep=time.sleep) -> None:
+    """Write `text` through a temp file. A failed write (disk full, a busy file) is tried again after each
+    delay (a backoff); the last error is raised, so a caller that cannot go on without the file hears it.
+    `delays=()` = one try only (the caller has its own retry)."""
+    waits = WRITE_RETRY_DELAYS if delays is None else tuple(delays)
+    for wait in (*waits, None):
+        try:
+            _write_text_once(path, text)
+            return
+        except OSError:
+            if wait is None:
+                raise
+            sleep(wait)
 
 
 def play_game(

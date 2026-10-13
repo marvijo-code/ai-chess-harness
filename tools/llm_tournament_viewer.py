@@ -38,6 +38,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import aichess_logos  # noqa: E402
+import disk_guard  # noqa: E402
 TOOLS_DIR = Path(__file__).resolve().parent
 LIVE_DIR = ROOT / "out" / "live"
 VIEWER_VERSION = str(int(Path(__file__).stat().st_mtime))
@@ -78,6 +79,10 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 18px; pa
 #agents .ag-n { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 #agents .ag-c { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 #agents .ag-note { grid-column: 1 / -1; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+#agents .ag-disk { padding: 0 0 8px; }
+#agents .chip.disk { display: inline-block; white-space: normal; color: var(--warn); border-color: rgba(245, 185, 66, .55); background: rgba(245, 185, 66, .08); }
+#agents .chip.disk.critical { color: #ff8a80; border-color: rgba(255, 110, 100, .6); background: rgba(255, 110, 100, .09); }
+#agents .chip.disk b { color: inherit; }
 /* Stream mode (?stream=1 or --stream-layout): exactly one 1920x1080 screen, nothing below the fold.
    The boards of the round side by side (two at most), the side column keeps the standings (with the
    Stockfish depth), the notes and cache card and the bracket; rounds and rules are left out. */
@@ -957,19 +962,35 @@ function ladderLine(name) {
   const need = lad.wins_to_step || 2;
   return `<span class="ladder-line" title="Stockfish plays this AI at depth ${esc(p.depth)}; ${need} wins without a loss raise it by 1">v SF depth ${esc(p.depth)}, ${esc(p.streak || 0)} of ${esc(need)} wins</span>`;
 }
+// DISK-CHIP-START
+// The "disk low" chip of the notes card: null while there is room (or for an earlier tournament).
+function diskChip(d) {
+  const disk = d && !d.archived ? d.disk : null;
+  if (!disk || (disk.level !== "low" && disk.level !== "critical")) return null;
+  const mb = Number(disk.free_mb);
+  const size = v => v >= 1024 ? Math.round(v / 102.4) / 10 + " GB" : Math.round(v) + " MB";
+  const free = disk.free_mb === null || disk.free_mb === undefined || !isFinite(mb) ? "" : size(mb);
+  if (disk.level === "critical") return { level: "critical", free, tail: "the next tournament waits for space",
+    title: `Under ${size(Number(disk.refuse_mb) || 500)} free: no new tournament starts until space is freed. Games in play go on.` };
+  return { level: "low", free, tail: "",
+    title: `Under ${size(Number(disk.warn_mb) || 3072)} free on the server disk. A full disk stops the saving of games.` };
+}
+// DISK-CHIP-END
 function renderAgents() {
   const card = document.getElementById("agentsCard");
   if (!card) return;
   const notes = data.latest_notes || {}, cache = data.cache_stats || {};
   const names = (data.players || []).map(p => p.name).filter(n => notes[n] || cache[n]);
   const benched = data.benched || [];
-  card.style.display = names.length || benched.length ? "" : "none";
-  if (!names.length && !benched.length) return;
+  const chip = diskChip(data);
+  card.style.display = names.length || benched.length || chip ? "" : "none";
+  if (!names.length && !benched.length && !chip) return;
+  const diskRow = chip ? `<div class="ag-disk"><span class="chip disk ${chip.level}" title="${esc(chip.title)}">Disk low${chip.free ? `: <b>${esc(chip.free)}</b> free` : ""}${chip.tail ? " - " + esc(chip.tail) : ""}</span></div>` : "";
   const pctTxt = v => (v === null || v === undefined) ? "" : `${(v * 100).toFixed(1)}%`;
   const when = iso => { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }); };
   const benchRows = benched.map(b => `<div class="ag"><span class="ag-n">${pn(b.name)}</span><span class="ag-c">sits out</span>`
     + `<span class="ag-note" title="${esc(b.reason || "")}">benched: ${esc(b.kind || "preflight failed")}${b.resets_at ? ", resets " + esc(when(b.resets_at)) : ""}</span></div>`).join("");
-  setHTML(document.getElementById("agents"), benchRows + names.map(n => {
+  setHTML(document.getElementById("agents"), diskRow + benchRows + names.map(n => {
     const c = cache[n] || {}, note = notes[n];
     const hit = c.warm_hit_rate !== null && c.warm_hit_rate !== undefined ? c.warm_hit_rate : c.hit_rate;
     return `<div class="ag"><span class="ag-n">${pn(n)}</span><span class="ag-c" title="Cached input tokens / all input tokens (without each game's first 3 moves)">${hit !== undefined && hit !== null ? "cache " + pctTxt(hit) : ""}</span>`
@@ -3470,6 +3491,14 @@ def wait_stats(live_dir: Path, now: float | None = None) -> dict:
     return stats
 
 
+def live_disk(state_path: Path, state: dict) -> dict:
+    """Free space on the disk of the live folder, measured now, for the "disk low" chip of the notes card.
+    The limits are the tournament's own (config diskWarnMb, diskRefuseMb). Measured here and not read from
+    the state file: on a full disk the runner cannot write that file."""
+    cfg = state.get("config") or {}
+    return disk_guard.public_status(disk_guard.disk_status(Path(state_path).parent, cfg.get("diskWarnMb"), cfg.get("diskRefuseMb")))
+
+
 def archived_annotations(state_path: Path, state: dict) -> dict[str, dict[str, str]]:
     """Move marks of an earlier tournament from its saved sidecar: no engine, nothing queued."""
     state_path = Path(state_path)
@@ -3702,6 +3731,7 @@ class Handler(BaseHTTPRequestHandler):
             other = bool(wanted) and (current is None or Path(current).resolve() != path.resolve())
             if other and (state.get("finished") or state["state_age_s"] > ARCHIVE_STALE_S):
                 state["archived"] = True
+                state.pop("disk", None)   # the free space of back then says nothing now
                 state["annotations"] = archived_annotations(path, state)
                 if state["annotations"] and self.annotator is not None:
                     state["annotation_engine"] = self.annotator.name
@@ -3723,6 +3753,7 @@ class Handler(BaseHTTPRequestHandler):
                 state["annotations"] = {}
             state["commentary"] = self.commentator is not None
             state["wait_stats"] = wait_stats(self.live_dir, now)
+            state["disk"] = live_disk(path, state)
             if self.follow is not None:
                 state["viewer_follow"] = True
             publish = publish_status(self.live_dir, path, now)

@@ -28,6 +28,19 @@ GO = {"wtime": 600000, "btime": 600000, "winc": 10000, "binc": 10000}
 CONTEXT = {"memory": "# Memory\n- Castle early against GLM.\n", "header": "Tournament #1 (t1), Round 1, board 1.\nYou play White against Rival."}
 
 
+_REAL_DISK_USAGE = swiss.disk_guard.USAGE
+
+
+def setUpModule():
+    # The free-disk gate is tested in test_disk_full_guard.py; here the disk always has room, so these
+    # tests do not depend on how full the machine that runs them is.
+    swiss.disk_guard.USAGE = lambda _path: type("Usage", (), {"total": 75 * 2**30, "used": 35 * 2**30, "free": 40 * 2**30})()
+
+
+def tearDownModule():
+    swiss.disk_guard.USAGE = _REAL_DISK_USAGE
+
+
 def tmpdir(test) -> Path:
     path = Path(tempfile.mkdtemp(prefix="aichess-test-"))
     test.addCleanup(shutil.rmtree, path, True)
@@ -827,7 +840,7 @@ class SmallTournamentTest(unittest.TestCase):
 
         tmp = tmpdir(self)
         old = swiss._play_game, swiss.write_archive, swiss.GAME_SLOTS
-        swiss._play_game, swiss.write_archive = fake_play, (lambda _s: None)
+        swiss._play_game, swiss.write_archive = fake_play, (lambda *_a: None)
         swiss.GAME_SLOTS = threading.Semaphore(1)
         try:
             ts = swiss.TournamentState(state, tmp / "t3-tournament.json")

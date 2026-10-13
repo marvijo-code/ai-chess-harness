@@ -292,6 +292,48 @@ position block, and the CLI's closing system note), so its rate climbs as the ga
 MEMORY.md raises it from move 1. DeepSeek, GLM and MiMo could not be measured on 2026-10-08 (OpenCode
 Go monthly limit reached, resets 2026-10-14 07:24 UTC).
 
+## A full disk never loses a game
+
+On 2026-10-12 and 13 the VPS disk was full (Tournament #37). A state save raised `No space left on
+device` inside a game thread, the thread ended without a word, the board stayed "live" with one move,
+the round went on without it and the tournament ended `finished: true` with `third: None`. Since then:
+
+- **A state save never raises** (`TournamentState.save()`). A failed write is tried again after 0.5 s,
+  2 s and 5 s, then ONE log line says so: `STATE SAVE FAILED after 4 tries: the disk is full (No space
+  left on device), 110 MB free; <file> is stale. The state is kept in memory, the games go on, and it is
+  tried again every 5 s.` The heartbeat (every 5 s) is the retry from then on; while it keeps failing
+  there is one `STATE SAVE still failing` line a minute, and `STATE SAVE works again after N failed
+  saves` when the file is current again. Nothing is lost: the whole state is in memory.
+- The live PGN, the engine search text and the archive copy are written "quietly": a failed write is one
+  `WRITE FAILED (<kind>, <file>)` line a minute and the game goes on. The pointer file and the memory repo
+  index are tried through `attempt()`; a failure there never ends the runner.
+- **A game thread never ends silently** (`play_game_guarded`). An error that escapes a game is logged in
+  one line, `GAME THREAD DIED r5b3: <error> at <file:line>. The game goes on from its N saved moves on
+  fresh engines in 5 s (restart 1 of 3); no move is made for a player.` The moves the game already has
+  are put back on the board (clocks and invalid-reply counts too), both engine processes are replaced,
+  and the player whose move was lost is asked for it again. The harness never keeps, picks or invents a
+  move. Waits 5 s, 20 s, 60 s; after the third restart the game is void.
+- **A round is closed only when every game of it is final** (`void_unfinished`, the round gate). A game
+  that still has no result when its round ends becomes void (`ROUND GATE: ...`), which pauses the
+  tournament; the runner resumes it after 5 minutes and replays that game from move 1 (the `--resume`
+  rule). A knockout stage is also not closed while a match has no winner, so no champion is named while
+  the third place game is open.
+- **Free-disk check** (`tools/disk_guard.py`, config `diskWarnMb` 3072 and `diskRefuseMb` 500, 0 = off):
+  before a NEW tournament and before every round and knockout stage. Under 3 GB: `DISK LOW (round 4):
+  1.9 GB free ...` (a warning, play goes on). Under 500 MB: `DISK FULL (before a new tournament): 110 MB
+  free ..., under the 500 MB floor. No new tournament starts until space is freed.` and `NOT STARTING a
+  new tournament`; the runner looks again every `forever.diskRetrySeconds` (600 s). A tournament that is
+  already running is never stopped by the check, and a resume is not a new tournament.
+- **"Disk low" chip** in the viewer's "Notes and input cache" card (also on the stream and, through the
+  relay, on marvijo.com/ai-chess). The viewer measures the disk itself on every `/api/tournament` read
+  (`disk: {level, free_mb, warn_mb, refuse_mb}`), because on a full disk the runner cannot write the
+  state file. Amber under 3 GB, red under 500 MB with "the next tournament waits for space". No chip
+  while there is room and none on an earlier tournament.
+
+Check on the VPS: `df -h /` and
+`sudo journalctl -u ai-chess-runner --since "-2 hours" | grep -E "STATE SAVE|GAME THREAD|ROUND GATE|DISK (LOW|FULL)|No space left"`.
+Never delete another job's folder to make room: list the big folders for the owner.
+
 ## Usage limits
 
 `limitWait: true` in the config. A usage or rate limit (HTTP 429, "usage limit", "rate limit",

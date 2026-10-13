@@ -47,7 +47,9 @@ FOREVER_DEFAULTS = {"pauseSeconds": 120, "memoryRepo": str(ROOT / "out" / "ai-ch
                     "rosterCheckTimeoutSeconds": 300, "minPlayers": 3, "rosterRetrySeconds": 900,
                     # Second, metered route of a player (player["fallback"]): 0 = never used. See MeteredBudget.
                     "meteredDailyBudgetUsd": 0.0, "meteredFloorUsd": 0.5, "meteredReserveUsd": 1.0,
-                    "routeCheckTimeoutSeconds": 120, "routeRetrySeconds": 600}
+                    "routeCheckTimeoutSeconds": 120, "routeRetrySeconds": 600,
+                    # A new tournament is refused while the disk is nearly full (diskRefuseMb): look again after this.
+                    "diskRetrySeconds": 600}
 PAUSED_RETRY_SECONDS = 300
 MAX_REFLECTION_RETRIES = 2
 OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
@@ -486,7 +488,8 @@ class ForeverHooks(swiss.GameHooks):
             memory = self.repo.memory_text(engine.name)
             context = {"memory": memory, "header": game_header(state, game, side, self.cfg, state.get("ladder"))}
             path = self.context_dir / f"{state['id']}-{game_id}-{side}.json"
-            write_text_retry(path, json.dumps(context, indent=1))
+            # the player's memory for this game: on a full disk keep trying for about a minute
+            write_text_retry(path, json.dumps(context, indent=1), delays=(1, 3, 10, 20, 30))
             engine.send(f"setoption name GameContextFile value {path}")
             with ts.lock:
                 game.setdefault("route", {})[side] = {"provider": engine.player.get("provider"),
@@ -716,6 +719,16 @@ def bench_label(entry: dict) -> str:
     return text
 
 
+def attempt(what: str, action) -> bool:
+    """Run a file write the loop can live without; a failure is one log line, never the end of the runner."""
+    try:
+        action()
+        return True
+    except Exception as exc:
+        log(f"WRITE FAILED ({what}): {swiss.disk_guard.describe_error(exc)}; the runner goes on")
+        return False
+
+
 def tournament_slug(number: int) -> str:
     return f"aichess-{number:04d}-{time.strftime('%Y%m%d-%H%M%S')}"
 
@@ -738,6 +751,12 @@ def run_forever(cfg: dict, live_dir: Path, repo: MemoryRepo, pusher: GitPusher |
                 status_path = Path(pointer["state_path"])
                 log(f"resuming Tournament #{state.get('number')} ({state['id']})")
         if state is None:
+            # A full disk stops state saves: no new tournament starts on one (a running one is never stopped).
+            if swiss.check_disk(live_dir, cfg, log, "before a new tournament", starting=True)["level"] == "critical":
+                wait = float(cfg["forever"].get("diskRetrySeconds") or 600)
+                log(f"NOT STARTING a new tournament: the disk is nearly full; checking again in {wait:.0f}s")
+                sleep(wait)
+                continue
             roster, benched = list(cfg["players"]), []
             if cfg["forever"].get("rosterCheck", True):
                 log("roster check: one real move from every player")
@@ -767,9 +786,10 @@ def run_forever(cfg: dict, live_dir: Path, repo: MemoryRepo, pusher: GitPusher |
             log(f"starting Tournament #{number} ({slug}): " + ", ".join(p["name"] for p in roster)
                 + ("; " + "; ".join(f"{b['name']} {bench_label(b)}" for b in benched) if benched else ""))
         state["ladder"] = hooks.ladder_view()
-        swiss.TournamentState(state, status_path).save()
-        write_pointer(live_dir, status_path, state)
-        repo.record_tournament(state)
+        swiss.TournamentState(state, status_path, log).save()
+        # A failed write here (a full disk) never ends the runner: the tournament is played from memory.
+        attempt("the pointer file", lambda: write_pointer(live_dir, status_path, state))
+        attempt("the tournament index", lambda: repo.record_tournament(state))
         if pusher is not None:
             pusher.request(f"Tournament #{state.get('number')} started ({state['id']})")
         code = swiss.run_tournament(state, state["config"], status_path, log)
@@ -778,8 +798,8 @@ def run_forever(cfg: dict, live_dir: Path, repo: MemoryRepo, pusher: GitPusher |
             sleep(PAUSED_RETRY_SECONDS)
             continue
         played += 1
-        repo.record_tournament(state)
-        repo.record_cache_stats(state)
+        attempt("the tournament index", lambda: repo.record_tournament(state))
+        attempt("the cache table", lambda: repo.record_cache_stats(state))
         if pusher is not None:
             champion = (state.get("knockout") or {}).get("champion") or state.get("winner")
             pusher.request(f"Tournament #{state.get('number')} finished: champion {champion}")

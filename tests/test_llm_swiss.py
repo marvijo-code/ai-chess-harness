@@ -338,7 +338,7 @@ class KnockoutTest(unittest.TestCase):
 
         tmp = Path(tempfile.mkdtemp())
         old = swiss.play_game, swiss.write_archive
-        swiss.play_game, swiss.write_archive = fake_play, (lambda _s: None)
+        swiss.play_game, swiss.write_archive = fake_play, (lambda *_a: None)
         try:
             ts = swiss.TournamentState(state, tmp / "t-tournament.json")
             ok = swiss.run_knockouts(state, ts, dict(swiss.DEFAULTS, **state["config"]), lambda n: n, lambda e: None,
