@@ -258,3 +258,5 @@
 - [ ] Real VPS preflight with measured cache hit rates and a reflection write (Validation 82): done for Sonnet 5.5 and GPT-6.1 Sol (40-ply segment, reflections written); DeepSeek, GLM and MiMo blocked by the OpenCode Go monthly limit until 2026-10-14 and Z.ai code 1113.
 - [x] Twitch gate: daily show window for Twitch, YouTube stays live all day; schedule file, `set` and `status` commands, status line in `status.sh`, unit `ai-chess-twitch-gate` (PRD 186).
 - [x] Twitch-gate tests green and the keyless VPS pilot passed: main target 95.0 s of 95 s, the gate target received 24 s of a 34 s open window (10 s reconnect), nothing while closed, no key in any log (Validation 83).
+- [x] Full disk guard: state saves that never raise, quiet side-file writes, game threads replayed from saved moves, the round gate, the free-disk check before a tournament and every round, the viewer "disk low" chip (PRD 187).
+- [x] Disk-guard tests green (23 tests, ENOSPC simulated on the state write) and the before/after run: old main ends `finished` with a game still `live` after 1 move, this build finishes the same game 1-0 in 7 moves (Validation 84).
