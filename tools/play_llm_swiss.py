@@ -39,7 +39,7 @@ import chess.pgn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import disk_guard  # noqa: E402
-from play_llm_series import (LlmEngine, iso_now, move_comment, parse_info, parse_memory, parse_note, parse_usage,  # noqa: E402
+from play_llm_series import (LlmEngine, iso_now, move_comment, parse_info, parse_compacted, parse_memory, parse_note, parse_usage,  # noqa: E402
                              write_text_retry)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -516,6 +516,12 @@ def wait_bestmove(engine: LlmEngine, timeout: float, on_clockstart, on_limitwait
                             on_limitwait(wait_s, parts[4] if len(parts) > 4 else "")
                         except Exception:
                             pass
+                if line.startswith("info string infrawait "):
+                    # Not thinking and not a usage limit (a compaction finishing): only the deadline moves out.
+                    try:
+                        deadline += int(line.split()[3]) + 60
+                    except (IndexError, ValueError):
+                        deadline += 360
                 if line.startswith("bestmove"):
                     return seen
             left = deadline - time.monotonic()
@@ -853,6 +859,11 @@ def _play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: 
             memory_sha = parse_memory(lines)
             if memory_sha:
                 entry["memory_sha"] = memory_sha
+            compacted = parse_compacted(lines)
+            if compacted:
+                entry["compacted"] = compacted
+                log(f"{game_id} ply {len(history)}: {engine.name} goes on in a fresh session from a summary of its "
+                    f"thinking up to ply {compacted.get('plies')} (was {compacted.get('from_tokens')} input tokens)")
             if note:
                 entry["note"] = note[:200]
                 record.setdefault("notes", []).append({"ply": len(history), "side": side_name, "player": engine.name,

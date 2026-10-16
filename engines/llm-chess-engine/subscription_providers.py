@@ -106,6 +106,35 @@ ANSWER_MAX_TOKENS = 16000
 CLI_CUT_SHARE = THINK_SHARE + SAME_SHARE
 THOUGHTS_HEAD_CHARS = 20_000
 THOUGHTS_TAIL_CHARS = 100_000
+# Claude CLI thinking display. The default is "omitted": every thinking block arrives with empty text and only a
+# signature (measured 2026-10-16, Claude Code 2.1.296), so the viewer showed no thinking for Sonnet at all.
+# "summarized" returns the API-side thinking summaries. Empty LLM_CLAUDE_THINKING_DISPLAY leaves the flag out.
+CLAUDE_THINKING_DISPLAY = "summarized"
+# Keep reasoning across moves (owner 2026-10-16): the HTTP routes drop a reasoning_content passed back in the
+# history (OpenCode Go DeepSeek answered NONE to a planted word, 2026-10-16), so the engine carries the model's
+# own previous thinking forward as text in the next turn, at most this many characters (the newest part).
+CARRY_THOUGHTS_MAX_CHARS = 24_000
+# Compaction (owner 2026-10-16): when one game's conversation reaches this many input tokens, a helper model
+# summarises the player's own thinking and the game goes on in a fresh session that starts with that summary.
+# It runs in the background right after the player's move, while the opponent thinks.
+COMPACT_TIMEOUT_SECONDS = 300
+COMPACT_INPUT_MAX_CHARS = 300_000
+COMPACT_THOUGHTS_PER_MOVE_CHARS = 12_000
+COMPACT_MAX_OUTPUT_TOKENS = 16_000
+COMPACT_SUMMARY_WORDS = 700
+COMPACT_GIVE_UP_AFTER = 3
+COMPACT_SYSTEM = (
+    "You compress one chess player's own working notes from a game that is still being played, so the player can "
+    "go on in a fresh conversation. Write to the player in the second person ('you'). Keep only what the player "
+    "itself thought or decided: its plans, the threats and tactics it was watching, what it expects from the "
+    "opponent, how the opponent has played so far, how it has used its clock, and anything it promised itself. "
+    "Do not judge the quality of any move, do not add analysis, evaluations or advice of your own, and do not "
+    "invent facts. Do not list the pieces or describe the position: the player gets the exact current position "
+    "separately. Plain text, no JSON."
+)
+# A CLI reply that ran out of output tokens (Claude: "Claude's response exceeded the 32000 output token maximum";
+# OpenAI Responses: "max_output_tokens"). The model answers again at low effort from the thinking it showed.
+OUTPUT_LIMIT_MARKERS = ("output token maximum", "max_output_tokens", "maximum output tokens", "max output tokens")
 # The note the referee plays when a model is still thinking at its move cap (its own latest choice).
 BEST_SO_FAR = re.compile(r"BEST\s+SO\s+FAR\s*[:=\-]?\s*[*`\"']*\s*(?:\d+\s*\.+\s*)?([A-Za-z0-9=+#\-]{2,8})", re.I)
 MARKER_UNSAFE = re.compile(r"[\s\[\]{};]+")
@@ -154,6 +183,15 @@ class CliCrash(ProviderError):
 
 class CliCut(Exception):
     """The CLI was still thinking at its move cap and was stopped (not an error, not a rejected reply)."""
+
+
+class OutputLimit(CliCut):
+    """The CLI reply ran out of output tokens before it gave an answer (answered like a cut: from its thinking)."""
+
+
+def output_limit_error(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in OUTPUT_LIMIT_MARKERS)
 
 
 def resolve_binary(provider: str) -> str:
@@ -223,10 +261,12 @@ def build_command(provider: str, model: str, effort: str, binary: str, workdir: 
         settings = workdir / "claude-settings.json"
         if not settings.exists():
             settings.write_text(json.dumps({"disableAllHooks": True}), encoding="utf-8")
+        display = os.environ.get("LLM_CLAUDE_THINKING_DISPLAY", CLAUDE_THINKING_DISPLAY).strip()
         argv = [
             binary, "-p",
             "--model", model,
             "--effort", effort,
+            *(["--thinking-display", display] if display else []),
             "--tools", "",
             "--strict-mcp-config",
             "--no-session-persistence",
@@ -500,21 +540,74 @@ def history_section(history: list[str], notes: list[dict] | None = None) -> str:
     return text
 
 
+def summary_section(summary: dict | None) -> str:
+    """The compacted thinking of this game: the player's own thoughts, summarised by a helper model."""
+    if not summary or not (summary.get("text") or "").strip():
+        return ""
+    return (f"YOUR EARLIER THINKING IN THIS GAME (your own thoughts up to ply {summary.get('plies')}, summarised by a "
+            "helper model because your conversation grew long; it is a summary of your thinking, not advice)\n"
+            + summary["text"].strip())
+
+
+def carried_thoughts_section(thoughts: str) -> str:
+    """The model's own thinking on its previous move, carried into the next turn (routes that drop it)."""
+    thoughts = (thoughts or "").strip()
+    if not thoughts:
+        return ""
+    if len(thoughts) > CARRY_THOUGHTS_MAX_CHARS:
+        thoughts = "[... start omitted ...]\n" + thoughts[-CARRY_THOUGHTS_MAX_CHARS:]
+    return "YOUR OWN THINKING ON YOUR PREVIOUS MOVE (carried forward so you keep your reasoning)\n" + thoughts
+
+
 def build_full_turn(context: dict, board: chess.Board, go_args: dict, history: list[str], show_legal: bool = True,
                     cap_seconds: float | None = None, nudge: str | None = None, image: bool = False,
-                    notes: list[dict] | None = None) -> str:
-    """The whole request text for a fresh session: rules, memory, game header, moves so far, position."""
-    return "\n\n".join([RULES_TEXT, memory_section(context), game_header_section(context),
-                        history_section(history, notes),
-                        position_block(board, go_args, show_legal, cap_seconds, nudge, image)])
+                    notes: list[dict] | None = None, summary: dict | None = None) -> str:
+    """The whole request text for a fresh session: rules, memory, game header, moves so far, the summary of
+    this game's earlier thinking (after a compaction), position."""
+    parts = [RULES_TEXT, memory_section(context), game_header_section(context), history_section(history, notes)]
+    compacted = summary_section(summary)
+    if compacted:
+        parts.append(compacted)
+    parts.append(position_block(board, go_args, show_legal, cap_seconds, nudge, image))
+    return "\n\n".join(parts)
 
 
 def build_delta_turn(board: chess.Board, go_args: dict, history: list[str], seen_plies: int, show_legal: bool = True,
-                     cap_seconds: float | None = None, nudge: str | None = None, image: bool = False) -> str:
-    """A later turn of the same session: only the moves since the last turn, then the position."""
+                     cap_seconds: float | None = None, nudge: str | None = None, image: bool = False,
+                     carried: str = "") -> str:
+    """A later turn of the same session: the carried thinking (if any), the moves since the last turn, the position."""
     since = san_moves_since(history, seen_plies)
     head = f"MOVES SINCE YOUR LAST TURN\n{since}" if since else "MOVES SINCE YOUR LAST TURN\n(none)"
+    carried_text = carried_thoughts_section(carried)
+    if carried_text:
+        head = carried_text + "\n\n" + head
     return head + "\n\n" + position_block(board, go_args, show_legal, cap_seconds, nudge, image)
+
+
+def compact_prompt(header: str, history: list[str], turns: list[dict], previous: dict | None) -> str:
+    """The compactor's request: the game so far plus the player's own thinking and replies, newest kept."""
+    parts = [f"GAME\n{(header or '').strip() or '(no header)'}",
+             "MOVES SO FAR\n" + (san_moves_since(history, 0) or "(none)")]
+    if previous and (previous.get("text") or "").strip():
+        parts.append(f"YOUR SUMMARY FROM AN EARLIER COMPACTION (up to ply {previous.get('plies')})\n{previous['text'].strip()}")
+    blocks = []
+    for turn in turns:
+        thinking = (turn.get("thinking") or "").strip()
+        if len(thinking) > COMPACT_THOUGHTS_PER_MOVE_CHARS:
+            thinking = "[... start omitted ...]\n" + thinking[-COMPACT_THOUGHTS_PER_MOVE_CHARS:]
+        lines = [f"--- the player's move at ply {turn.get('ply')}: {turn.get('san')} ---",
+                 "thinking: " + (thinking or "(not visible)")]
+        if turn.get("comment"):
+            lines.append("comment: " + str(turn["comment"]))
+        if turn.get("note"):
+            lines.append("note to itself: " + str(turn["note"]))
+        blocks.append("\n".join(lines))
+    body = "\n\n".join(blocks)
+    if len(body) > COMPACT_INPUT_MAX_CHARS:
+        body = "[... older moves omitted ...]\n" + body[-COMPACT_INPUT_MAX_CHARS:]
+    parts.append("THE PLAYER'S OWN THINKING AND REPLIES, MOVE BY MOVE (oldest first)\n" + (body or "(none yet)"))
+    parts.append(f"Write the summary for the player in at most {COMPACT_SUMMARY_WORDS} words.")
+    return "\n\n".join(parts)
 
 
 def parse_note(text: str) -> str:
@@ -735,6 +828,24 @@ class SubscriptionChessClient:
         self._move_usage: list[dict] = []
         self._oneshot = False
         self._system_prompt = SYSTEM_PROMPT
+        # Owner 2026-10-16: no move cap (think until the move is made; only the chess clock limits a move),
+        # keep the reasoning across moves, compaction by a helper model when a game's conversation grows long.
+        self.move_cap = _flag_env("LLM_MOVE_CAP", True)
+        self.keep_reasoning = _flag_env("LLM_KEEP_REASONING", False)
+        self.max_output_tokens = _int_env("LLM_MAX_OUTPUT_TOKENS", HTTP_MAX_TOKENS, 1000, 1_000_000)
+        self.compact_at = _int_env("LLM_COMPACT_AT_TOKENS", 0, 0, 10_000_000)  # 0 = no compaction
+        self.compact_provider = (os.environ.get("LLM_COMPACT_PROVIDER") or "").strip()
+        self.compact_model = (os.environ.get("LLM_COMPACT_MODEL") or "").strip()
+        self.compact_effort = (os.environ.get("LLM_COMPACT_EFFORT") or "high").strip()
+        self.on_infra_wait: Callable[[int, str], None] | None = None
+        self.compactor_factory: Callable[[], "SubscriptionChessClient"] | None = None
+        self._game_turns: list[dict] = []      # this game's turns since the last compaction (for the compactor)
+        self._summary: dict | None = None       # the latest compaction summary of this game
+        self._context_tokens = 0               # input tokens of the last call in this game's session
+        self._compact_thread: threading.Thread | None = None
+        self._compact_result: dict | None = None
+        self._compact_failures = 0
+        self._last_reasoning = ""              # HTTP routes: the visible reasoning of the last answered call
 
     def set_option(self, name: str, value: str) -> None:
         lowered = name.lower()
@@ -763,6 +874,10 @@ class SubscriptionChessClient:
             self.conversation = value.strip().lower() in {"1", "true", "yes", "on"}
         elif lowered == "limitwait":
             self.limit_wait = value.strip().lower() in {"1", "true", "yes", "on"}
+        elif lowered == "movecap":
+            self.move_cap = value.strip().lower() in {"1", "true", "yes", "on"}
+        elif lowered == "keepreasoning":
+            self.keep_reasoning = value.strip().lower() in {"1", "true", "yes", "on"}
 
     def load_context(self, path: str) -> None:
         """Read the game context once (frozen for the whole game): {"memory": str, "header": str}."""
@@ -780,13 +895,116 @@ class SubscriptionChessClient:
     def new_game(self) -> None:
         self.invalid_model_moves = 0
         self._nudge = None
+        self._wait_compaction(announce=False)
         self.end_session()
         self.context = None
         self._notes = []
+        self._game_turns = []
+        self._summary = None
+        self._compact_result = None
+        self._compact_failures = 0
 
     def new_conversation(self) -> dict:
         self._conv = {"id": None, "started": False, "seen": 0, "messages": [], "committed": 0, "codex_total": None}
+        self._context_tokens = 0
         return self._conv
+
+    # ----- compaction -------------------------------------------------------------------------------------------
+
+    def _make_compactor(self) -> "SubscriptionChessClient":
+        if self.compactor_factory is not None:
+            return self.compactor_factory()
+        helper = SubscriptionChessClient(self.compact_provider, self.log)
+        helper.model = self.compact_model or DEFAULT_MODELS.get(self.compact_provider, helper.model)
+        helper.effort = self.compact_effort
+        helper.max_output_tokens = COMPACT_MAX_OUTPUT_TOKENS
+        helper.limit_wait = False   # a compaction that cannot run now is tried again after the next move
+        helper.conversation = False
+        helper.board_image = False
+        helper.move_cap = False
+        helper.compact_at = 0
+        return helper
+
+    def _maybe_start_compaction(self, history: list[str]) -> None:
+        """After a move: the session is past the threshold, so summarise this game's thinking in the background
+        (the opponent's thinking time). The next move starts a fresh session with the summary."""
+        if (not self.compact_at or self._conv is None or not self.compact_provider
+                or self._context_tokens < self.compact_at or self._compact_thread is not None
+                or self._compact_failures >= COMPACT_GIVE_UP_AFTER):
+            return
+        header = (self.context or {}).get("header", "")
+        turns = [dict(t) for t in self._game_turns]
+        previous = dict(self._summary) if self._summary else None
+        plies = len(history)
+        prompt = compact_prompt(header, list(history), turns, previous)
+        context_tokens = self._context_tokens
+        self.log(f"{self.provider} {self.model} COMPACT start: session at {context_tokens} input tokens "
+                 f"(threshold {self.compact_at}), {len(turns)} turns, {len(prompt)} chars to "
+                 f"{self.compact_provider} {self.compact_model}")
+
+        def run() -> None:
+            started = time.monotonic()
+            try:
+                helper = self._make_compactor()
+                text = helper.ask_text(COMPACT_SYSTEM, prompt, timeout=COMPACT_TIMEOUT_SECONDS,
+                                       effort=self.compact_effort)
+                # Plain hyphens only (owner rule: no long dashes anywhere the harness writes).
+                text = (text or "").replace(chr(0x2014), " - ").replace(chr(0x2013), "-").strip()
+                if not text:
+                    raise ProviderError("the compactor returned an empty summary")
+                self._compact_result = {"text": text, "plies": plies, "secs": round(time.monotonic() - started, 1),
+                                        "from_tokens": context_tokens, "usage": helper.last_report.get("usage")}
+            except Exception as exc:  # never breaks the game: the session simply stays as it is
+                self._compact_result = {"error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                                        "secs": round(time.monotonic() - started, 1)}
+
+        self._compact_result = None
+        self._compact_thread = threading.Thread(target=run, daemon=True, name="compaction")
+        self._compact_thread.start()
+
+    def _wait_compaction(self, announce: bool = True) -> None:
+        thread = self._compact_thread
+        if thread is None:
+            return
+        if thread.is_alive():
+            if announce and self.on_infra_wait is not None:
+                # The runner moves its own deadline out by this much: the wait is never a flag.
+                try:
+                    self.on_infra_wait(COMPACT_TIMEOUT_SECONDS, "compaction of this game's conversation")
+                except Exception:
+                    pass
+            self._think("\n[waiting for the summary of this game's earlier thinking; the clock is stopped]\n")
+            thread.join(COMPACT_TIMEOUT_SECONDS + 30)
+        self._compact_thread = None
+
+    def _apply_compaction(self) -> None:
+        """Before a move: finish a running compaction and, if it worked, start a fresh session with the summary."""
+        if self._compact_thread is None:
+            return
+        self._wait_compaction()
+        result, self._compact_result = self._compact_result, None
+        if not result:
+            return
+        if result.get("error"):
+            self._compact_failures += 1
+            self.log(f"{self.provider} {self.model} COMPACT failed after {result.get('secs')}s "
+                     f"({self._compact_failures}/{COMPACT_GIVE_UP_AFTER}): {result['error']}")
+            if self._compact_failures >= COMPACT_GIVE_UP_AFTER and self._conv is not None:
+                # The session would only keep growing: go on in a fresh session without a summary.
+                self.log(f"{self.provider} {self.model} COMPACT gave up: fresh session without a summary")
+                self.end_session()
+                self.new_conversation()
+                self._game_turns = []
+            return
+        self._summary = {"text": result["text"], "plies": result["plies"]}
+        self._game_turns = []
+        self._compact_failures = 0
+        self.end_session()
+        self.new_conversation()
+        self.log(f"{self.provider} {self.model} COMPACT done in {result.get('secs')}s: {result.get('from_tokens')} "
+                 f"input tokens -> fresh session with a {len(result['text'])}-char summary up to ply {result['plies']}")
+        self.last_report["compacted"] = {"plies": result["plies"], "from_tokens": result.get("from_tokens"),
+                                         "chars": len(result["text"]), "secs": result.get("secs")}
 
     def end_session(self) -> None:
         """Forget this game's provider session and delete its session file (CLI routes)."""
@@ -825,8 +1043,12 @@ class SubscriptionChessClient:
                 # Same move, previous reply rejected: the position is already in the session.
                 return (f"Your last reply was rejected: {rejections[-1]}. Choose again from the legal moves above. "
                         "Reply with ONLY the JSON object.")
-            return build_delta_turn(board, go_args, history, conv.get("seen", 0), self.show_legal, cap, self._nudge, image)
-        text = build_full_turn(self.context, board, go_args, history, self.show_legal, cap, self._nudge, image, self._notes)
+            # Routes that drop passed-back reasoning get their own previous thinking as text, once.
+            carried = conv.pop("carry", "") if self.keep_reasoning else ""
+            return build_delta_turn(board, go_args, history, conv.get("seen", 0), self.show_legal, cap, self._nudge,
+                                    image, carried)
+        text = build_full_turn(self.context, board, go_args, history, self.show_legal, cap, self._nudge, image,
+                               self._notes, self._summary)
         for index, reason in enumerate(rejections, start=1):
             text += f"\nAttempt {index} was rejected: {reason}. Choose again."
         return text
@@ -870,6 +1092,8 @@ class SubscriptionChessClient:
             return "0000", f"clock expired; forfeiting without calling {self.provider}"
         rejections: list[str] = []
         last_error = ""
+        # A compaction that ran while the opponent thought: finish it before the turn text is built.
+        self._apply_compaction()
         # Model thinking time for this move, summed over attempts. CLI start-up is not
         # thinking: claude reports its API time and codex brackets the turn with events.
         self.last_report["think_ms"] = 0
@@ -881,7 +1105,8 @@ class SubscriptionChessClient:
                 return "0000", f"{self.provider} {self.model} ran out of clock while thinking"
             timeout = self._attempt_timeout(left)
             inc = go_args.get("winc" if board.turn == chess.WHITE else "binc", 0)
-            self._cutoff_s = arbiter_cutoff_seconds(board, left, inc) if left is not None else None
+            # No move cap (owner 2026-10-16): the model thinks until it moves; only its chess clock limits it.
+            self._cutoff_s = arbiter_cutoff_seconds(board, left, inc) if (left is not None and self.move_cap) else None
             self._left_ms = left
             self._board = board
             if not self.board_image:
@@ -917,8 +1142,10 @@ class SubscriptionChessClient:
                     f"move={move.uci()} secs={time.monotonic() - started:.1f} think_ms={self.last_report['think_ms']}{usage}"
                 )
                 self._nudge = overrun_note(self.last_report["think_ms"], cap)
+                self._record_turn(board, move, comment, note, history)
                 self._think(f"\n[move] {board.san(move)}" + (f" - {comment}" if comment else "") + "\n")
                 self._think_close()
+                self._maybe_start_compaction(history + [move.uci()])
                 return move.uci(), comment
             except ValueError as exc:
                 self._add_think(started)
@@ -947,6 +1174,21 @@ class SubscriptionChessClient:
                 f"{time.monotonic() - started:.1f}s: {last_error[:400]} (invalid_count={self.invalid_model_moves})"
             )
         return "0000", f"{self.provider} {self.model} failed after {self.max_attempts} attempts; forfeiting ({last_error[:200]})"
+
+    def _visible_thoughts(self) -> str:
+        if self.provider in HTTP_ROUTES:
+            return self._last_reasoning or ""
+        return "\n".join(t for t in self._cli_thoughts if t.strip())
+
+    def _record_turn(self, board: chess.Board, move: chess.Move, comment: str, note: str, history: list[str]) -> None:
+        """Keep this move's own thinking for the compactor, and (HTTP routes) for the next turn's text."""
+        thoughts = self._visible_thoughts()
+        if self.compact_at:
+            self._game_turns.append({"ply": len(history) + 1, "san": board.san(move), "thinking": thoughts,
+                                     "comment": comment, "note": note})
+        if self.keep_reasoning and self._conv is not None and self.provider in HTTP_ROUTES and thoughts.strip():
+            self._conv["carry"] = thoughts
+        self.last_report["context_tokens"] = self._context_tokens
 
     def _think(self, text: str) -> None:
         """Append visible thinking to this move's file (what the model reveals; never fabricated)."""
@@ -987,6 +1229,9 @@ class SubscriptionChessClient:
         self.last_report["think_ms"] = self.last_report.get("think_ms", 0) + think
 
     def _attempt_timeout(self, remaining: int | None) -> int:
+        if not self.move_cap and remaining is not None:
+            # No move cap: one reply may use the whole clock (running out is a loss on time, never a rejection).
+            return max(10, int(remaining / 1000) + 5)
         timeout = self.timeout_seconds
         if remaining is not None:
             timeout = min(timeout, max(10, int(remaining / 1000)))
@@ -1012,34 +1257,44 @@ class SubscriptionChessClient:
         self._cli_cut_s = None if self._cutoff_s is None else CLI_CUT_SHARE * self._cutoff_s
         try:
             return self._ask_cli(prompt, timeout, self.effort)
-        except CliCut:
+        except (CliCut, ProviderError) as exc:
+            if isinstance(exc, ProviderError) and not output_limit_error(str(exc)):
+                raise
+            limit = not isinstance(exc, CliCut) or isinstance(exc, OutputLimit)
             thoughts = "\n".join(t for t in self._cli_thoughts if t.strip())[-THOUGHTS_TAIL_CHARS:]
             self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
-            self._think(f"\n[thinking stopped at the move cap - answering at low effort from its revealed thinking]\n")
-            self.log(f"{self.provider} {self.model} stopped at the {self._cli_cut_s:.0f}s cap; "
-                     f"asking at low effort with {len(thoughts)} chars of revealed thinking")
+            why = "ran out of output tokens" if limit else "was stopped at the move cap"
+            self._think(f"\n[the reply {why} - answering at low effort from its revealed thinking]\n")
+            self.log(f"{self.provider} {self.model} {why}"
+                     + ("" if limit or self._cli_cut_s is None else f" ({self._cli_cut_s:.0f}s)")
+                     + f"; asking at low effort with {len(thoughts)} chars of revealed thinking")
+            stop = ("Your reply ran out of output space before it gave a move."
+                    if limit else "Your thinking on the move below was stopped at the move cap.")
+            ask = ("Reply now with only the JSON object for your move, with no further long reasoning."
+                   if limit else "Your time for this move is up. Reply now with only the JSON object for your move.")
             if self._conv is not None and self._conv.get("started"):
                 # The killed turn may or may not be in the session: repeat the position, then the thinking.
                 board = self._board or chess.Board()
-                follow = ("Your thinking on the move below was stopped at the move cap.\n\n"
-                          + position_block(board, {}, self.show_legal) + "\n\nYour thinking on this move so far:\n"
-                          + (thoughts or "(none visible)")
-                          + "\nYour time for this move is up. Reply now with only the JSON object for your move.")
+                follow = (stop + "\n\n" + position_block(board, {}, self.show_legal)
+                          + "\n\nYour thinking on this move so far:\n" + (thoughts or "(none visible)") + "\n" + ask)
             else:
-                follow = (prompt + "\n\nYour thinking on this move so far (stopped at the move cap):\n"
-                          + (thoughts or "(none visible)")
-                          + "\nYour time for this move is up. Reply now with only the JSON object for your move.")
+                follow = (prompt + "\n\n" + stop + "\nYour thinking on this move so far:\n"
+                          + (thoughts or "(none visible)") + "\n" + ask)
             self._cli_cut_s = None
             left = timeout - (time.monotonic() - started)
             answer = self._ask_cli(follow, max(10, int(left)), "low")
+            if thoughts:
+                self._cli_thoughts = [thoughts] + self._cli_thoughts
             self._attempt_think_ms = None  # two calls: charge the wall time (infrastructure crashes still excluded)
             return answer
 
     def _cli_session(self) -> dict | None:
         conv = self._conv
-        if self._oneshot or conv is None or self.provider == "claude":
-            # Claude keeps its game as content blocks in one fresh request (see _claude_flat_prompt):
-            # measured 2026-10-08, `claude -p --resume` gave no cache reads for chess turns.
+        if self._oneshot or conv is None or (self.provider == "claude" and not self.keep_reasoning):
+            # Without keepReasoning Claude keeps its game as content blocks in one fresh request (see
+            # _claude_flat_prompt): its thinking is dropped. Measured 2026-10-08: `claude -p --resume` gave no cache
+            # reads; measured again 2026-10-16 (Claude Code 2.1.296): a resumed session reads its prefix from cache
+            # and its input grows by the previous turn's whole output, thinking included.
             return None
         if conv.get("started") and conv.get("id"):
             return {"mode": "resume", "id": conv["id"]}
@@ -1062,7 +1317,7 @@ class SubscriptionChessClient:
                 image_file = workdir / f"board-{os.getpid()}-{time.time_ns()}.png"
                 image_file.write_bytes(self._image)
                 argv = argv[:-1] + ["-i", str(image_file), "--", "-"]
-        elif self.provider == "claude" and self._conv is not None and not self._oneshot:
+        elif self.provider == "claude" and self._conv is not None and not self._oneshot and not self.keep_reasoning:
             argv = argv + ["--input-format", "stream-json"]
             prompt = self._claude_flat_prompt(prompt)
         elif self.provider == "claude" and self._image:
@@ -1090,7 +1345,7 @@ class SubscriptionChessClient:
                 raise ProviderError(f"codex wrote no final message; output tail: {output[-300:]!r}")
             answer = claude_result_text(output)
             self._session_started(session, output)
-            if self._conv is not None and not self._oneshot and self._flat_turn is not None:
+            if self._conv is not None and not self._oneshot and not self.keep_reasoning and self._flat_turn is not None:
                 # The turn and the reply become fixed blocks of the next request (never the thinking).
                 self._conv.setdefault("blocks", []).extend([self._flat_turn, "YOUR REPLY\n" + answer.strip()])
                 self._conv["started"] = True
@@ -1142,6 +1397,8 @@ class SubscriptionChessClient:
         entry = {"input": int(usage.get("input") or 0), "cached": int(usage.get("cached") or 0),
                  "output": int(usage.get("output") or 0), "oneshot": self._oneshot}
         self._move_usage.append(entry)
+        if not self._oneshot:
+            self._context_tokens = entry["input"]  # the session's size: what the compaction threshold watches
         self.log(f"{self.provider} {self.model} usage input={entry['input']} cached={entry['cached']} output={entry['output']}"
                  + (f" hit={entry['cached'] / entry['input']:.1%}" if entry["input"] else ""))
 
@@ -1185,7 +1442,8 @@ class SubscriptionChessClient:
         payload: dict = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": HTTP_MAX_TOKENS,
+            # The model's real output limit from the config (LLM_MAX_OUTPUT_TOKENS), never more.
+            "max_tokens": self.max_output_tokens,
         }
         effort = (self.effort or "").strip().lower()
         style = route["style"]
@@ -1236,6 +1494,7 @@ class SubscriptionChessClient:
         self.usage_log.append(streamed.get("usage") or {})
         if streamed.get("usage"):
             self._add_usage(http_usage(streamed["usage"]))
+        self._last_reasoning = streamed.get("reasoning") or ""
         content = streamed.get("content") or ""
         # Still thinking at the cap, or out of output tokens before any answer (DeepSeek, run 4).
         if not content.strip() and (streamed.get("cut") or streamed.get("finish") == "length"):
@@ -1259,8 +1518,10 @@ class SubscriptionChessClient:
         if len(thoughts) > THOUGHTS_HEAD_CHARS + THOUGHTS_TAIL_CHARS:
             thoughts = (thoughts[:THOUGHTS_HEAD_CHARS] + "\n[... middle of the thinking omitted for length ...]\n"
                         + thoughts[-THOUGHTS_TAIL_CHARS:])
+        capped = self._cutoff_s is not None
         total = self._cutoff_s or 30.0
-        why = "ran out of output space" if streamed.get("finish") == "length" else f"reached {THINK_SHARE * total:.0f}s of its {total:.0f}s move cap"
+        why = (f"ran out of output space ({payload.get('max_tokens')} tokens)" if streamed.get("finish") == "length"
+               else f"reached {THINK_SHARE * total:.0f}s of its {total:.0f}s move cap")
         self.log(f"{self.provider} {self.model} thinking stopped after {time.monotonic() - started:.1f}s ({why}); "
                  f"returning its {len(thoughts)} chars of thinking and asking for the move")
         self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
@@ -1272,6 +1533,9 @@ class SubscriptionChessClient:
         limits = {"same": min(ANSWER_WITH_THOUGHTS_SECONDS, SAME_SHARE * total),
                   "lowest": min(ANSWER_WITH_THOUGHTS_SECONDS, max(LOWEST_MIN_SECONDS, LOWEST_SHARE * total))}
         clock_left = None if self._left_ms is None else self._left_ms / 1000 - (time.monotonic() - started)
+        if not capped:
+            # No move cap: the same-effort answer is not squeezed into seconds; only the clock limits it.
+            limits["same"] = max(10.0, clock_left if clock_left is not None else 600.0)
         for level in ("same", "lowest"):
             if style == "anthropic":
                 follow = stream_payload({**payload, "messages": anthropic_messages(messages)}, style)
@@ -1287,7 +1551,7 @@ class SubscriptionChessClient:
                     follow.pop("reasoning_effort", None)
                     follow["thinking"] = {"type": "disabled"}
             if level == "same":
-                answer = self.http_stream(url, follow, headers, int(limits[level]) + 10, limits[level])
+                answer = self.http_stream(url, follow, headers, int(limits[level]) + 10, limits[level] if capped else None)
             else:
                 # No share limit: wait for the answer until the clock is gone (then it is a loss on time).
                 left = 600.0 if clock_left is None else max(5.0, clock_left - (time.monotonic() - started))
@@ -1295,6 +1559,8 @@ class SubscriptionChessClient:
             self.usage_log.append(answer.get("usage") or {})
             if answer.get("usage"):
                 self._add_usage(http_usage(answer["usage"]))
+            if answer.get("reasoning"):
+                self._last_reasoning = (self._last_reasoning + "\n" + answer["reasoning"]).strip()
             if (answer.get("content") or "").strip():
                 if level == "lowest":
                     self.log(f"{self.provider} {self.model} answered at the lowest effort after a "
@@ -1432,6 +1698,9 @@ class SubscriptionChessClient:
         env = os.environ.copy()
         for key in STRIPPED_ENV[self.provider]:
             env.pop(key, None)
+        if self.provider == "claude" and os.environ.get("LLM_MAX_OUTPUT_TOKENS"):
+            # The CLI's own output ceiling (it errors past it): the model's real output limit from the config.
+            env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(self.max_output_tokens)
         proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE,

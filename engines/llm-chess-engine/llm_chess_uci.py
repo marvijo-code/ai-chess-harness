@@ -494,12 +494,18 @@ class LlmChessUci:
             # A usage-limit wait: the runner extends its own deadline and stops the displayed clock.
             self.client.on_limit_wait = lambda secs, why: print(
                 f"info string limitwait {int(secs)} {' '.join(str(why).split())[:160]}", flush=True)
+        if hasattr(self.client, "on_infra_wait"):
+            # A wait that is not thinking (a compaction finishing): the runner moves its deadline out, no display.
+            self.client.on_infra_wait = lambda secs, why: print(
+                f"info string infrawait {int(secs)} {' '.join(str(why).split())[:160]}", flush=True)
         move, comment = self.client.choose_move(self.board.copy(), go_args, list(self.history))
         report = getattr(self.client, "last_report", None) or {}
         if report.get("usage"):
             print(f"info string usage {json.dumps(report['usage'], separators=(',', ':'))}", flush=True)
         if report.get("memory"):
             print(f"info string memory {report['memory']['sha']} {report['memory']['bytes']}", flush=True)
+        if report.get("compacted"):
+            print(f"info string compacted {json.dumps(report['compacted'], separators=(',', ':'))}", flush=True)
         if report.get("note"):
             print(f"info string note {' '.join(str(report['note']).split())[:240]}", flush=True)
         if report.get("tries", 0) > 1 or report.get("illegal"):
