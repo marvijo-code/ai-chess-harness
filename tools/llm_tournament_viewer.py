@@ -137,7 +137,7 @@ body.stream .side > .card, body.stream .boards { transform-origin: top left; }
 .evalline .eng { white-space: nowrap; }
 .evalline.hold .score { opacity: .6; }   /* the score of the position before: the new one is on its way */
 .chip.btn { cursor: pointer; user-select: none; } .chip.btn.on { color: var(--accent); border-color: rgba(91, 157, 255, .5); }
-.chip.btn.wait { color: var(--warn); border-color: rgba(245, 185, 66, .45); }
+.chip.btn.gesture { color: var(--warn); border-color: rgba(245, 185, 66, .45); }
 .comment { margin-top: 10px; padding: 9px 11px; background: var(--panel-2); border-radius: 10px; font-size: 14px; min-height: 58px; overflow-wrap: anywhere; }
 .comment .who { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
 .caption { margin: 6px 0 0; padding: 6px 10px; border-radius: 10px 10px 10px 2px; background: rgba(91, 157, 255, .13); border: 1px solid rgba(91, 157, 255, .35); font-size: 12.5px; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
@@ -1331,7 +1331,7 @@ function render() {
     isArchive() ? "" : `<span class="chip btn ${autoFocus ? "on" : ""}" data-toggle-autofocus title="${autoFocus ? `One live game: the camera stays on it. Several: it moves between them, ${Math.round(FOCUS_MIN_MS / 1000)} to ${Math.round(FOCUS_MAX_MS / 1000)} s each, following the commentary. Click a board yourself to stay on it.` : "Click to let the camera follow the live games and the commentary automatically"}">Auto-focus: <b>${autoFocus ? "on" : "off"}</b>${autoFocus && focusId && autoReason ? ` - ${esc(autoReason)}` : ""}</span>`,
     data.analysis_engine ? `<span class="chip btn ${analysisOn ? "on" : ""}" data-toggle-analysis title="Viewer-only engine analysis; the AI players never see it">${esc(data.analysis_engine)} analysis: <b>${analysisOn ? "on" : "off"}</b></span>` : "",
     `<span class="chip btn ${soundOn ? "on" : ""}" data-toggle-sound title="A short click whenever a new move appears on a visible board">Move sound: <b>${soundOn ? "on" : "off"}</b></span>`,
-    data.commentary ? `<span class="chip btn ${commentaryOn ? (needGesture ? "wait" : "on") : ""}" data-toggle-commentary title="Spoken commentary: it moves between the leaders and the most interesting games; in focus mode it stays on the focused board">Commentary: <b>${commentaryOn ? (needGesture ? "click to start" : "on") : "muted"}</b></span>` : "",
+    data.commentary ? `<span class="chip btn ${commentaryOn ? (needGesture ? "gesture" : "on") : ""}" data-toggle-commentary title="Spoken commentary: it moves between the leaders and the most interesting games; in focus mode it stays on the focused board">Commentary: <b>${commentaryOn ? (needGesture ? "click to start" : "on") : "muted"}</b></span>` : "",
     publishChip(),
   ].join(""));
   renderBanner();
@@ -1842,7 +1842,7 @@ function renderBanner() {
   if (data && data.id && data.finished && champ) {
     cls = "final"; msg = `<b>Final result</b> - champion ${esc(champ)}`;
   } else if (!data || !data.id) {
-    cls = feedFailed ? "off" : "wait";
+    cls = feedFailed ? "off" : "connecting";
     msg = feedFailed ? "Offline: the tournament feed cannot be reached right now" : "Connecting to the tournament...";
   } else {
     const age = stateAgeS();
