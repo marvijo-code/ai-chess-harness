@@ -1223,7 +1223,16 @@ class SubscriptionChessClient:
         started = time.monotonic()
         self._clock_start()
         think_cap = None if self._cutoff_s is None else THINK_SHARE * self._cutoff_s
-        streamed = self.http_stream(route["url"], stream_payload(payload, style), headers, timeout, think_cap)
+        try:
+            streamed = self.http_stream(route["url"], stream_payload(payload, style), headers, timeout, think_cap)
+        except CliCrash as exc:
+            # OpenCode Go sends GLM to more than one upstream; some refuse `thinking` (HTTP 400
+            # "unknown field", 2026-10-16) while others take it. Ask again without it: never a lost move.
+            if "thinking" not in payload or '"param":"thinking"' not in str(exc):
+                raise
+            payload.pop("thinking")
+            self.log(f"{self.provider} {self.model}: this upstream refuses `thinking`; asking again without it")
+            streamed = self.http_stream(route["url"], stream_payload(payload, style), headers, timeout, think_cap)
         self.usage_log.append(streamed.get("usage") or {})
         if streamed.get("usage"):
             self._add_usage(http_usage(streamed["usage"]))
