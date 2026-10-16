@@ -61,6 +61,14 @@ HTTP_MAX_TOKENS = 32000
 # A streaming reply that sends no bytes for this long is a gateway stall, not thinking
 # (GLM 5.3 streams reasoning at ~60 chunks/s with gaps under 2 s, measured 2026-10-05).
 STALL_SECONDS = 60
+# Loop guard (owner 2026-10-16): stop a reasoning stream that repeats one line, then ask for the move from its
+# thinking up to the repetition. DeepSeek V4.1 Flash repeated "What about 10.Bxh7+? Kxh7." for 384,000 tokens
+# (1,379 s of its clock, tournament #43). A loop = one 8-word phrase 20+ times in the newest 8,192 characters;
+# no other stored thinking file of any model reached 20 even across its whole text. LLM_LOOP_GUARD=0 turns it off.
+LOOP_WINDOW_CHARS = 8192
+LOOP_PHRASE_WORDS = 8
+LOOP_REPEATS = 20
+LOOP_CHECK_EVERY_CHARS = 1024
 # Codex features that give the model a tool (shell, browser, sub-agents, images...).
 # The model must pick its move by thinking, never by running code or an engine.
 CODEX_DISABLED_FEATURES = (
@@ -166,11 +174,12 @@ RULES_TEXT = """AI CHESS TOURNAMENT RULES (the same text for every player, every
 3. Reply with ONLY one JSON object: {"move": "<one legal move, SAN or UCI>", "comment": "<one or two short sentences about your idea>", "note": "<optional private note to yourself, at most 200 characters>"}
 4. The note is optional. Use it to remember a plan, a threat or a lesson from this game. Your notes are saved with the game, you see them again after the game when you update your memory, and they are public after the game.
 5. Choose the move with your own reasoning. Do not run code, call tools, or use a chess engine.
-6. A reply that is not the JSON object, or that names an illegal move, is rejected and you get another try with the reason. After the last allowed try (see the game header) you forfeit the game.
+6. A reply that is not the JSON object, or that names an illegal move, is rejected and you get another try with the reason. After the last allowed try (see the game header) the referee plays your latest legal BEST SO FAR move (rule 11); with none, you forfeit the game.
 7. Your clock runs only while you think. If it reaches 0:00 you lose on time. You get the increment after every move you make.
 8. A game is drawn by stalemate, insufficient material, threefold repetition, the 50-move rule, or at the game's ply cap.
 9. Before you move, look at every check, capture and threat for both sides, and do not leave a piece undefended by accident.
-10. Your memory below holds what you wrote after your earlier games. It does not change during a game; you update it after the game."""
+10. Your memory below holds what you wrote after your earlier games. It does not change during a game; you update it after the game.
+11. While you think, write a line `BEST SO FAR: <move>` (for example `BEST SO FAR: Nf3`) as soon as you have a first choice, and a new one each time your choice changes. If your thinking ends without an answer (for example because it keeps repeating itself) or no valid reply comes, the referee plays your latest legal BEST SO FAR move."""
 
 
 class ProviderError(RuntimeError):
@@ -832,6 +841,7 @@ class SubscriptionChessClient:
         # keep the reasoning across moves, compaction by a helper model when a game's conversation grows long.
         self.move_cap = _flag_env("LLM_MOVE_CAP", True)
         self.keep_reasoning = _flag_env("LLM_KEEP_REASONING", False)
+        self.loop_guard = _flag_env("LLM_LOOP_GUARD", True)
         self.max_output_tokens = _int_env("LLM_MAX_OUTPUT_TOKENS", HTTP_MAX_TOKENS, 1000, 1_000_000)
         self.compact_at = _int_env("LLM_COMPACT_AT_TOKENS", 0, 0, 10_000_000)  # 0 = no compaction
         self.compact_provider = (os.environ.get("LLM_COMPACT_PROVIDER") or "").strip()
@@ -1097,8 +1107,11 @@ class SubscriptionChessClient:
         # Model thinking time for this move, summed over attempts. CLI start-up is not
         # thinking: claude reports its API time and codex brackets the turn with events.
         self.last_report["think_ms"] = 0
+        # Visible thinking of the failed tries: the referee's BEST SO FAR move comes from here (rule 11).
+        failed_thoughts: list[str] = []
         for attempt in range(1, self.max_attempts + 1):
             self.last_report["tries"] = attempt
+            self._last_reasoning, self._cli_thoughts = "", []  # never a note from an earlier move
             left = None if remaining is None else remaining - self.last_report["think_ms"]
             if left is not None and left <= 0:
                 # Out of clock: report the time used so the arbiter flags it; never a forfeit.
@@ -1167,12 +1180,25 @@ class SubscriptionChessClient:
                 last_error = f"{type(exc).__name__}: {exc}"
                 rejections.append("no answer arrived in time" if isinstance(exc, subprocess.TimeoutExpired) else "the reply failed")
                 self.last_report["illegal"].append("timeout" if isinstance(exc, subprocess.TimeoutExpired) else "error")
+            failed_thoughts.append(self._visible_thoughts())
             self.invalid_model_moves += 1
             self._think(f"\n[reply {attempt} rejected: {last_error[:160]}]\n")
             self.log(
                 f"{self.provider} {self.model} attempt {attempt}/{self.max_attempts} rejected after "
                 f"{time.monotonic() - started:.1f}s: {last_error[:400]} (invalid_count={self.invalid_model_moves})"
             )
+        note = latest_note("\n".join(failed_thoughts), board)
+        if note is not None:
+            comment = "No valid reply came; the referee played its latest BEST SO FAR move."
+            self.log(f"{self.provider} {self.model} failed after {self.max_attempts} attempts ({last_error[:200]}); "
+                     f"the referee plays its latest BEST SO FAR move {note.uci()}")
+            self.last_report["referee"] = "best so far"
+            if self._conv is not None:
+                self._conv["seen"] = len(history)
+            self._record_turn(board, note, comment, "", history)
+            self._think(f"\n[move] {board.san(note)} - {comment}\n")
+            self._think_close()
+            return note.uci(), comment
         return "0000", f"{self.provider} {self.model} failed after {self.max_attempts} attempts; forfeiting ({last_error[:200]})"
 
     def _visible_thoughts(self) -> str:
@@ -1516,22 +1542,32 @@ class SubscriptionChessClient:
         """The model's thinking was stopped: give it all of that thinking back as its own earlier turn and
         ask for the move. Same effort first; the lowest effort the route allows only if that brings no move."""
         thoughts = streamed.get("reasoning") or ""
+        loop = streamed.get("loop")
+        if loop:
+            # Only the thinking before the repeats goes back, and on to the next turn: the repeats would invite more.
+            thoughts = before_loop(thoughts, loop)
+            self._last_reasoning = thoughts
         if len(thoughts) > THOUGHTS_HEAD_CHARS + THOUGHTS_TAIL_CHARS:
             thoughts = (thoughts[:THOUGHTS_HEAD_CHARS] + "\n[... middle of the thinking omitted for length ...]\n"
                         + thoughts[-THOUGHTS_TAIL_CHARS:])
         capped = self._cutoff_s is not None
         total = self._cutoff_s or 30.0
-        why = (f"ran out of output space ({payload.get('max_tokens')} tokens)" if streamed.get("finish") == "length"
+        why = (f"it repeated the same line {LOOP_REPEATS}+ times: \"{loop[:120]}\"" if loop
+               else f"ran out of output space ({payload.get('max_tokens')} tokens)" if streamed.get("finish") == "length"
                else f"reached {THINK_SHARE * total:.0f}s of its {total:.0f}s move cap")
+        if loop:
+            self.last_report["loops"] = self.last_report.get("loops", 0) + 1
+            opening = "Your previous reply kept repeating the same line, so it was stopped. Your thinking up to that point is above. "
+        else:
+            opening = (("Your time for this move is up. " if capped else "Your previous reply ran out of output space. ")
+                       + "Your full thinking so far is above. ")
         self.log(f"{self.provider} {self.model} thinking stopped after {time.monotonic() - started:.1f}s ({why}); "
                  f"returning its {len(thoughts)} chars of thinking and asking for the move")
         self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
         self._think(f"\n[thinking stopped: {why} - answering from its own thoughts]\n")
         messages = plain_messages(payload["messages"]) + [
             {"role": "assistant", "content": "My thinking on this move so far:\n" + (thoughts or "(no visible thinking)")},
-            {"role": "user", "content": ("Your time for this move is up. " if capped else
-                                        "Your previous reply ran out of output space. ") + "Your full thinking so far is above. "
-                                        "Reply now with only the JSON object for your move."}]
+            {"role": "user", "content": opening + "Reply now with only the JSON object for your move."}]
         limits = {"same": min(ANSWER_WITH_THOUGHTS_SECONDS, SAME_SHARE * total),
                   "lowest": min(ANSWER_WITH_THOUGHTS_SECONDS, max(LOWEST_MIN_SECONDS, LOWEST_SHARE * total))}
         clock_left = None if self._left_ms is None else self._left_ms / 1000 - (time.monotonic() - started)
@@ -1568,7 +1604,8 @@ class SubscriptionChessClient:
                     self.log(f"{self.provider} {self.model} answered at the lowest effort after a "
                              f"{limits['same']:.0f}s answer at its own effort brought no move")
                 return answer["content"]
-        note = latest_note(streamed.get("reasoning") or "", self._board or chess.Board())
+        source = before_loop(streamed.get("reasoning") or "", loop) if loop else streamed.get("reasoning") or ""
+        note = latest_note(source, self._board or chess.Board())
         if note is not None:
             return json.dumps({"move": note.uci(), "comment": "Its own last stated choice from its thinking."})
         raise ValueError("time was up and no move came back after its thinking was returned to it")
@@ -1583,6 +1620,16 @@ class SubscriptionChessClient:
         # once, and no later event is written: tournament #5 (2026-10-08) cut a stream before its headers came,
         # and it then streamed into the next thinking file and kept spending tokens nobody read.
         stopped = threading.Event()
+        guard = LoopGuard() if self.loop_guard else None
+
+        def watch(piece: str) -> None:
+            """Stop listening once the reasoning loops (only while no answer text has come)."""
+            if guard is None or not piece or state["content"].strip():
+                return
+            phrase = guard.feed(piece)
+            if phrase:
+                state["loop"] = phrase
+                stopped.set()  # the reader leaves the stream at its next event, which disconnects
 
         def stop_listening() -> None:
             stopped.set()
@@ -1639,6 +1686,7 @@ class SubscriptionChessClient:
                                 state["reasoning"] += piece
                                 if not stopped.is_set():
                                     self._think(piece)
+                                watch(piece)
                                 state["content"] += str(delta.get("text") or "")
                             elif kind == "error":
                                 err = data.get("error") or {}
@@ -1652,6 +1700,7 @@ class SubscriptionChessClient:
                             state["reasoning"] += piece
                             if not stopped.is_set():
                                 self._think(piece)
+                            watch(piece)
                             state["content"] += str(delta.get("content") or "")
                             if choice.get("finish_reason"):
                                 state["finish"] = choice["finish_reason"]
@@ -1668,6 +1717,9 @@ class SubscriptionChessClient:
         worker.start()
         while not state["done"]:
             now = time.monotonic()
+            if state.get("loop"):
+                stop_listening()
+                return {**state, "cut": True}
             if cutoff is not None and now - started > cutoff and not state["content"].strip():
                 stop_listening()
                 return {**state, "cut": True}
@@ -1678,6 +1730,8 @@ class SubscriptionChessClient:
                 stop_listening()
                 raise subprocess.TimeoutExpired(url, timeout)
             time.sleep(0.2)
+        if state.get("loop"):
+            return {**state, "cut": True}
         error = state["error"]
         if error and error[0] == "http":
             code, text = error[1], error[2]
@@ -1867,6 +1921,38 @@ def cli_think_ms(provider: str, output: str, line_times: list[tuple[float, str]]
         if began is not None and ended is not None and ended >= began:
             return int((ended - began) * 1000)
     return None
+
+
+class LoopGuard:
+    """Watches streamed reasoning for one phrase repeated LOOP_REPEATS times in the newest LOOP_WINDOW_CHARS."""
+
+    def __init__(self) -> None:
+        self.tail = ""
+        self.unchecked = 0
+
+    def feed(self, piece: str) -> str | None:
+        """The repeated phrase once the reasoning loops, else None."""
+        self.tail = (self.tail + piece)[-LOOP_WINDOW_CHARS:]
+        self.unchecked += len(piece)
+        if self.unchecked < LOOP_CHECK_EVERY_CHARS:
+            return None
+        self.unchecked = 0
+        words = self.tail.split()
+        n = LOOP_PHRASE_WORDS
+        counts: dict[tuple[str, ...], int] = {}
+        for i in range(len(words) - n + 1):
+            key = tuple(words[i:i + n])
+            counts[key] = counts.get(key, 0) + 1
+        phrase, repeats = max(counts.items(), key=lambda item: item[1], default=((), 0))
+        return " ".join(phrase) if repeats >= LOOP_REPEATS else None
+
+
+def before_loop(thoughts: str, phrase: str) -> str:
+    """The thinking up to and including the first copy of the repeated phrase."""
+    match = re.search(r"\s+".join(re.escape(word) for word in phrase.split()), thoughts)
+    if match is None:
+        return thoughts
+    return thoughts[:match.end()] + "\n[... the same line then repeated many times; the repeats are left out ...]"
 
 
 def _close_quietly(response: object) -> None:

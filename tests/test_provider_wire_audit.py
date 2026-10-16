@@ -43,6 +43,7 @@ def test_observation_does_not_cut_or_change_a_repeating_stream(tmp_path):
            + 'data: {"usage":{"completion_tokens":500},"choices":[]}\n\ndata: [DONE]\n\n').encode()
     client = sp.SubscriptionChessClient("opencode-go", lambda _: None)
     client.thinking_file = tmp_path / "thinking.txt"
+    client.loop_guard = False  # this test is about the passive audit alone (tests/test_loop_guard.py stops loops)
     with patch.object(sp.urllib.request, "urlopen", lambda *args, **kwargs: io.BytesIO(raw)):
         result = client._http_stream("https://example.invalid", {"model": "deepseek-v4.1-flash"},
                                      {"Authorization": "secret-only-in-memory"}, 30, None)

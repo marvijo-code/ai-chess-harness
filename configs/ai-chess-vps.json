@@ -35,6 +35,8 @@
   "players": [
     {"name": "Sonnet 5.5", "memoryFolder": "claude", "provider": "claude", "model": "claude-sonnet-5-5", "effort": "high", "image": false, "maxOutputTokens": 128000,
      "route": "Claude subscription (claude CLI)"},
+    {"name": "Haiku 5.5", "memoryFolder": "haiku", "provider": "claude", "model": "claude-haiku-5-5", "effort": "high", "image": false, "maxOutputTokens": 128000,
+     "route": "Claude subscription (claude CLI)"},
     {"name": "GPT-6.1 Sol", "memoryFolder": "gpt", "provider": "codex", "model": "gpt-6.1-sol", "effort": "high", "image": false, "maxOutputTokens": 128000,
      "route": "ChatGPT subscription (codex CLI)"},
     {"name": "DeepSeek V4.1 Flash", "memoryFolder": "deepseek", "provider": "opencode-go", "model": "deepseek-v4.1-flash", "effort": "high", "image": false, "maxOutputTokens": 384000,

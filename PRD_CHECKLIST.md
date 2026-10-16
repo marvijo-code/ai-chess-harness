@@ -1,5 +1,8 @@
 # PRD Checklist
 
+- [x] Loop guard: stop a reasoning stream that repeats one 8-word phrase 20+ times, ask for the move from the thinking before the repeats, then the latest BEST SO FAR move (tests/test_loop_guard.py).
+- [x] Rule 11: every player writes BEST SO FAR lines; the referee plays the latest legal one instead of a forfeit when no valid reply comes.
+- [x] Haiku 5.5 added on the Claude subscription; Sonnet 5.5 hold cleared. Both play from #44.
 - [x] Capture four direct provider responses, verify that the real parser and thinking files match the raw reasoning, and deploy passive bounded wire evidence capture without a repetition cutoff (PR #62; four new tests passed; 102 focused tests passed and one skipped after merge).
 - [x] Find where the historical DeepSeek repetition came from: file size matches the 384,000 billed output tokens (no harness or gateway copy), the only other loop in 36,863 thinking files was also DeepSeek on another route and request shape, and the gateway's default sampling is random. It is rare model-side generation, not a harness fault. A raw capture of the next loop is still kept passively.
 - [x] Stop cut streams from running on: a stream cut before its headers arrived kept writing into later thinking files and spending tokens (new Linux reproduction test failed before the fix, passes after).
