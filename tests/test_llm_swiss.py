@@ -114,6 +114,42 @@ class ThinkTimeTest(unittest.TestCase):
         self.assertEqual(sp.codex_tool_items(out), {"command_execution"})
         self.assertEqual(sp.codex_tool_items('{"type":"item.completed","item":{"type":"agent_message"}}'), set())
 
+    def test_glm_asks_again_without_thinking_when_the_upstream_refuses_it(self):
+        import chess
+        import os
+
+        client = sp.SubscriptionChessClient("opencode-go", lambda _m: None)
+        client.model = "glm-5.3-flash"
+        sent = []
+
+        def fake_stream(url, payload, headers, timeout, cutoff):
+            sent.append(dict(payload))
+            if "thinking" in payload:
+                raise sp.CliCrash('HTTP 400: {"error":{"param":"thinking","type":"invalid_request_error",'
+                                  '"message":"Upstream request failed: [unknown_parameter] unknown field \\"thinking\\""}}')
+            return {"content": '{"move": "c5", "comment": "Sicilian"}', "reasoning": "", "usage": {}, "cut": False}
+
+        client.http_stream = fake_stream
+        os.environ.setdefault("OPENCODE_GO_API_KEY", "test-key")
+        board = chess.Board()
+        board.push_san("e4")
+        move, _comment = client.choose_move(board, {"wtime": 600000, "btime": 600000}, [])
+        self.assertEqual(move, "c7c5")
+        self.assertEqual([("thinking" in p) for p in sent], [True, False])
+
+        # any other HTTP 400 is not answered by dropping `thinking`
+        other = []
+
+        def other_error(url, payload, headers, timeout, cutoff):
+            other.append("thinking" in payload)
+            raise sp.CliCrash('HTTP 400: {"error":{"param":"messages","type":"invalid_request_error"}}')
+        client.http_stream = other_error
+        try:
+            client.choose_move(board, {"wtime": 600000, "btime": 600000}, [])
+        except sp.ProviderError:
+            pass
+        self.assertTrue(other and all(other), "every try still carried `thinking`")
+
     def test_http_route_uses_the_shared_prompt_and_glm_thinking_switch(self):
         import chess
 
