@@ -39,6 +39,8 @@ import chess.pgn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import disk_guard  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engines" / "llm-chess-engine"))
+from harness_version import HARNESS_VERSION  # noqa: E402
 from play_llm_series import (LlmEngine, iso_now, move_comment, parse_info, parse_compacted, parse_memory, parse_note, parse_usage,  # noqa: E402
                              write_text_retry)
 
@@ -663,6 +665,12 @@ def _play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: 
     headers["Black"] = black.name
     headers["Result"] = "*"
     headers["TournamentId"] = state["id"]
+    harness = {"runner": HARNESS_VERSION, "white": getattr(white, "harness_version", None),
+               "black": getattr(black, "harness_version", None)}
+    headers["HarnessVersion"] = str(HARNESS_VERSION)
+    for side in ("white", "black"):
+        if harness[side] is not None:
+            headers[f"{side.title()}EngineVersion"] = str(harness[side])
     headers["WhiteProvider"] = f"{white.player['provider']} {white.player['model']} {white.player['effort']}"
     headers["BlackProvider"] = f"{black.player['provider']} {black.player['model']} {black.player['effort']}"
     headers["MaxAttempts"] = str(cfg["maxAttempts"])
@@ -689,6 +697,8 @@ def _play_game(game_id: str, white: LlmEngine, black: LlmEngine, cfg: dict, ts: 
         except ValueError as exc:
             log(f"{game_id}: its saved moves cannot be replayed ({exc}); the game starts again from move 1")
             saved = []
+    with ts.lock:
+        record["harness"] = harness
     if saved:
         for entry, uci in zip(saved, history):
             node = node.add_variation(chess.Move.from_uci(uci))

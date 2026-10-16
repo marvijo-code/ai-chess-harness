@@ -27,6 +27,9 @@ from pathlib import Path
 import chess
 import chess.pgn
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engines" / "llm-chess-engine"))
+from harness_version import engine_version  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "chess-harness.config.json"
 ENGINE_SCRIPT = ROOT / "engines" / "llm-chess-engine" / "llm_chess_uci.py"
@@ -184,7 +187,10 @@ class LlmEngine:
         self.cond = threading.Condition()
         threading.Thread(target=self._pump, daemon=True).start()
         self.send("uci")
-        self.wait_for("uciok", 30)
+        handshake = self.wait_for("uciok", 30)
+        # The engine process's own harness version (it can be older than the runner: processes are reused).
+        self.harness_version = next((engine_version(line[len("id name "):]) for line in handshake
+                                     if line.startswith("id name ")), None)
         for name, value in (player.get("options") or {}).items():
             self.send(f"setoption name {name} value {value}")
         self.send("isready")

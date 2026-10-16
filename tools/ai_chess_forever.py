@@ -32,6 +32,7 @@ import chess
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engines" / "llm-chess-engine"))
 import play_llm_swiss as swiss  # noqa: E402
+from harness_version import HARNESS_VERSION  # noqa: E402
 from ai_chess_memory import (GitPusher, MemoryRepo, MEMORY_MAX_BYTES, MEMORY_TARGET_BYTES, MAX_NOTE_FILES,  # noqa: E402
                              NOTE_MAX_BYTES,
                              LADDER_WINS_TO_STEP, LINE_COUNTED_PLIES, LINE_MAX_PLIES, MAX_LINES_PER_FILE, ensure_repo, game_markdown, ladder_depth, ladder_entry, ladder_step, line_allowance, line_shape, parse_reflection, player_folders, slugify,
@@ -834,6 +835,7 @@ def run_forever(cfg: dict, live_dir: Path, repo: MemoryRepo, pusher: GitPusher |
                 tcfg["rounds"] = swiss.max_rounds(len(roster))
             state = swiss.new_state(tcfg, slug, title=f"{cfg['title']} #{number}")
             state["number"] = number
+            state["harness_version"] = HARNESS_VERSION
             state["benched"] = benched
             state["format"] = {"type": tcfg.get("format"), "rr_rounds": tcfg["rounds"],
                                "ko_size": min(int(tcfg.get("knockoutSize", 4)), len(roster))}

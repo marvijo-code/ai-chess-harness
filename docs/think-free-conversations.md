@@ -149,6 +149,44 @@ bug did not cause the #43 loop.
 Sources for the diagnostic controls: the [model author's sampling guidance](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)
 and [DeepSeek's reasoning/history protocol](https://api-docs.deepseek.com/guides/thinking_mode/).
 
+### Loop guard and BEST SO FAR referee (owner request, 2026-10-16)
+
+What happens when a reasoning stream loops (HTTP routes: DeepSeek, GLM and their OpenRouter second routes):
+
+1. While reasoning streams in, every 1,024 new characters the engine checks the newest 8,192. If one
+   8-word phrase appears 20 or more times, the stream is stopped and the connection is closed, so the
+   provider stops generating. No other stored thinking file of any model reached 20 even across its
+   whole text; #43 ply 18 would have stopped within about 60 repeats instead of 384,000 tokens.
+2. The thinking up to the first copy of the repeated phrase goes back to the model as its own turn,
+   with "Your previous reply kept repeating the same line, so it was stopped." It is asked for only
+   the JSON move at the same effort (at most 16,000 output tokens). The same guard watches this answer.
+3. The repeats are not carried into the next turn: the carried thinking is the trimmed text.
+4. If that answer has no legal move, the referee plays the model's latest legal `BEST SO FAR` move
+   from its thinking before the repeats. With none, that try is rejected and the normal retries follow.
+
+`BEST SO FAR` (rule 11 of the shared rules): every player is asked to write `BEST SO FAR: <move>` as
+soon as it has a first choice and again whenever the choice changes. The instruction had been removed
+from the prompt on 2026-10-06 (PR #5), so the extractor had nothing to read; ply 18 had no such line.
+After the last allowed try, the referee now plays the latest legal BEST SO FAR move from the failed
+tries' visible thinking instead of a forfeit. Notes from an earlier move are never used. With no note,
+the forfeit rule is unchanged. `LLM_LOOP_GUARD=0` turns the guard off.
+
+Haiku 5.5 joins the roster on the Claude subscription (`claude-haiku-5-5`, high effort, its own memory
+folder `haiku`). Sonnet 5.5's hold ended with #43. A running tournament keeps its own roster, so both
+play from #44.
+
+### Harness version (owner request, 2026-10-16)
+
+`engines/llm-chess-engine/harness_version.py` holds `HARNESS_VERSION` (1 from this change) and a SHA-256
+fingerprint of the harness sources: the engine modules, the runner modules, `configs/ai-chess-vps.json`
+and `run-ai-chess-forever.sh`. `tests/test_harness_version.py` fails when any of them changes without a
+bump. Bump with `python tools/bump_harness_version.py` (`--check` only reports).
+
+Each game records `harness: {runner, white, black}` in the tournament state, and the PGN headers carry
+`HarnessVersion`, `WhiteEngineVersion` and `BlackEngineVersion`. The engine versions come from the UCI
+handshake (`id name llm-chess-engine v<N>`); they can be older than the runner because engine processes
+are reused across games. Each tournament state also has `harness_version`. Earlier games have no version.
+
 ## Links
 
 - [Live tournament](https://marvijo.com/ai-chess)

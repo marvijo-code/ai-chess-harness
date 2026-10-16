@@ -809,7 +809,7 @@ class RosterTest(unittest.TestCase):
         hooks = forever.ForeverHooks(cfg, repo, None, live)
         forever.run_forever(cfg, live, repo, None, hooks, max_tournaments=1, sleep=lambda s: None)
         state = seen[0]
-        self.assertEqual([p["name"] for p in state["players"]], ["Sonnet 5.5", "GPT-6.1 Sol", "Stockfish 19"])
+        self.assertEqual([p["name"] for p in state["players"]], ["Sonnet 5.5", "Haiku 5.5", "GPT-6.1 Sol", "Stockfish 19"])
         self.assertEqual(state["config"]["rounds"], 3)
         kinds = {b["name"]: (b["kind"], b["resets_at"]) for b in state["benched"]}
         self.assertEqual(kinds["GLM 5.3 Flash"], ("subscription limit", "2026-10-14T07:24:17.000Z"))
@@ -840,7 +840,7 @@ class RosterTest(unittest.TestCase):
         forever.run_forever(cfg, live, repo, None, forever.ForeverHooks(cfg, repo, None, live), max_tournaments=1,
                             sleep=slept.append)
         self.assertEqual(slept[0], cfg["forever"]["rosterRetrySeconds"])
-        self.assertEqual(len(seen[0]["players"]), 5, "the second check found everyone")
+        self.assertEqual(len(seen[0]["players"]), 6, "the second check found everyone")
 
     def test_bench_kinds(self):
         self.assertEqual(forever.bench_kind('HTTP 429: {"error":{"code":"1113","message":"Insufficient balance"}}'),
