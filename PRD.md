@@ -17,6 +17,8 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 
 ## Product Requirements
 
+- Repeated reasoning must be diagnosed from provider wire events before blaming a model or changing generation policy. Keep a bounded in-memory tail of raw streamed events for live moves. Persist evidence only when repetition is observed, including the exact request when bounded, its hash, raw response events, and final provider usage. Never persist authentication headers. Evidence collection must not interrupt generation, choose moves, change reasoning effort or charge extra clock time.
+
 - Live thinking cached by the relay belongs to one tournament. Reused board IDs and lower move numbers in the next tournament must not return or be pruned by old thinking. The association persists across relay restarts; unscoped legacy cache is invalidated. Publishing thinking for a different tournament must be rejected. Full source thinking files remain intact.
 
 0. Future non-trivial chess-harness tasks should update `PRD.md` and `PRD_CHECKLIST.md` before implementation and keep checklist status current while work proceeds.

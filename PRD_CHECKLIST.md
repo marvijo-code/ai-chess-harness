@@ -1,5 +1,7 @@
 # PRD Checklist
 
+- [ ] Investigate DeepSeek repetition with raw provider captures, verify the parser against those bytes, and enable bounded evidence capture for a future failing live request without adding a repetition cutoff.
+
 - [x] Fix thinking-cache isolation across tournaments, reproduce the old-high-ply/new-low-ply failure, and verify live DeepSeek thinking on the public page without restarting its game (PR #60; 56 tests passed; browser displayed 60,045 characters).
 
 - [x] Temporarily omit Claude for the first tournament with the new settings, verify automatic eligibility in the following tournament, and start live play without waiting for Claude's quota (live #43, eligible #44).

@@ -1579,6 +1579,17 @@ class SubscriptionChessClient:
         body = json.dumps(payload).encode("utf-8")
         state = {"content": "", "reasoning": "", "usage": {}, "finish": None, "done": False, "error": None,
                  "last": time.monotonic(), "resp": None}
+        # Observe raw provider bytes before parsing. Evidence never stops or changes a reply.
+        from provider_wire_audit import ProviderWireAudit
+        audit = (ProviderWireAudit(url, payload, self.thinking_file, self.log, session_id=self.session_id)
+                 if self.thinking_file else None)
+
+        def observe(method, *args) -> None:
+            if audit is not None:
+                try:
+                    getattr(audit, method)(*args)
+                except Exception:
+                    pass   # diagnostic failures must never change the model's reply
 
         def reader() -> None:
             request = urllib.request.Request(url, data=body, headers=headers, method="POST")
@@ -1586,6 +1597,7 @@ class SubscriptionChessClient:
                 with urllib.request.urlopen(request, timeout=timeout) as response:
                     state["resp"] = response
                     for raw in response:
+                        observe("raw_event", raw)
                         state["last"] = time.monotonic()
                         line = raw.decode("utf-8", errors="replace").strip()
                         if not line.startswith("data:"):
@@ -1611,6 +1623,7 @@ class SubscriptionChessClient:
                             elif kind == "content_block_delta":
                                 delta = data.get("delta") or {}
                                 piece = str(delta.get("thinking") or "")
+                                observe("reasoning", piece)
                                 state["reasoning"] += piece
                                 self._think(piece)
                                 state["content"] += str(delta.get("text") or "")
@@ -1622,6 +1635,7 @@ class SubscriptionChessClient:
                         for choice in data.get("choices") or []:
                             delta = choice.get("delta") or {}
                             piece = str(delta.get("reasoning_content") or delta.get("reasoning") or "")
+                            observe("reasoning", piece)
                             state["reasoning"] += piece
                             self._think(piece)
                             state["content"] += str(delta.get("content") or "")
@@ -1632,6 +1646,7 @@ class SubscriptionChessClient:
             except Exception as exc:  # socket errors; ignored once the stream was cut on purpose
                 state["error"] = ("exc", exc)
             finally:
+                observe("finish", state)
                 state["done"] = True
 
         worker = threading.Thread(target=reader, daemon=True)
