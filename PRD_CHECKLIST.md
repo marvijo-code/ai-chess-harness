@@ -1,5 +1,7 @@
 # PRD Checklist
 
+- [ ] Temporarily omit Claude for the first tournament with the new settings, verify automatic eligibility in the following tournament, and start live play without waiting for Claude's quota.
+
 - [x] Validate the one-hour clocks, disabled move cap, retained reasoning, visible CLI thinking and output limits with focused tests (20 passed).
 - [ ] Complete real local Claude/Codex and OpenCode Go games with forced compaction and preserved evidence.
 - [ ] Document the settings and measured compactor choice, merge the change, and verify the deployed runner at a safe game boundary.

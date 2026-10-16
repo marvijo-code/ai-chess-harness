@@ -767,6 +767,25 @@ def tournament_slug(number: int) -> str:
     return f"aichess-{number:04d}-{time.strftime('%Y%m%d-%H%M%S')}"
 
 
+def tournament_roster(cfg: dict, live_dir: Path, number: int) -> tuple[dict, list[dict]]:
+    """An operator hold expires by tournament number, without changing the configured players."""
+    path = live_dir / "roster-holds.json"
+    holds = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if not isinstance(holds, dict) or any(type(n) is not int or n < 1 for n in holds.values()):
+        raise ValueError(f"{path}: expected player names mapped to positive tournament numbers")
+    playing, benched = [], []
+    for player in cfg["players"]:
+        through = holds.get(player["name"], 0)
+        if number <= through:
+            benched.append({"name": player["name"], "route": player.get("route"),
+                            "kind": f"temporary hold through tournament #{through}",
+                            "reason": f"Owner requested a break; eligible again in tournament #{through + 1}",
+                            "resume_after_tournament": through, "checked_at": iso_now()})
+        else:
+            playing.append(player)
+    return dict(cfg, players=playing), benched
+
+
 def run_forever(cfg: dict, live_dir: Path, repo: MemoryRepo, pusher: GitPusher | None, hooks: ForeverHooks,
                 max_tournaments: int | None = None, sleep=time.sleep) -> int:
     pointer_path = live_dir / POINTER_NAME
@@ -791,22 +810,24 @@ def run_forever(cfg: dict, live_dir: Path, repo: MemoryRepo, pusher: GitPusher |
                 log(f"NOT STARTING a new tournament: the disk is nearly full; checking again in {wait:.0f}s")
                 sleep(wait)
                 continue
-            roster, benched = list(cfg["players"]), []
+            number = repo.next_tournament_number()
+            if pointer and pointer.get("number"):
+                number = max(number, int(pointer["number"]) + 1)
+            roster_cfg, held = tournament_roster(cfg, live_dir, number)
+            roster, benched = list(roster_cfg["players"]), []
             if cfg["forever"].get("rosterCheck", True):
                 log("roster check: one real move from every player")
-                roster, benched, rows = check_roster(cfg, live_dir)
+                roster, benched, rows = check_roster(roster_cfg, live_dir)
                 for row in rows:
                     log("ROSTER " + json.dumps({k: row.get(k) for k in ("name", "ok", "route", "metered", "move", "seconds",
                                                                          "kind", "resets_at", "reason")}))
+            benched.extend(held)
             need = int(cfg["forever"].get("minPlayers") or 3)
             if len(roster) < need:
                 wait = float(cfg["forever"].get("rosterRetrySeconds") or 900)
                 log(f"only {len(roster)} players can play (need {need}); checking again in {wait:.0f}s")
                 sleep(wait)
                 continue
-            number = repo.next_tournament_number()
-            if pointer and pointer.get("number"):
-                number = max(number, int(pointer["number"]) + 1)
             slug = tournament_slug(number)
             tcfg = dict(cfg, players=roster)
             if tcfg.get("format") == "round-robin+knockout":

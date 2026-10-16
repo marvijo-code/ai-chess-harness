@@ -86,6 +86,13 @@ viewer edits and keep the viewer, pusher and stream services running.
 
 ### Roster check and benching
 
+To omit a player temporarily, write `out/live/roster-holds.json`, for example
+`{"Sonnet 5.5": 43}`. The player receives no roster probe or game through tournament 43.
+At tournament 44 the normal roster probe includes it again automatically. The configured
+player remains enabled, no timer or restart is needed, and a restart during the held
+tournament preserves its saved roster. An invalid hold file stops startup rather than
+silently allowing a held player. Hold files are operational state, not tracked config.
+
 Every NEW tournament starts with one real move from every enabled player (all at once, 300 s at
 most). A player whose move hits a usage limit, missing funds or plan, or a login or key problem is
 benched for that tournament; any other failure benches it as "preflight failed". The state has
