@@ -1,6 +1,8 @@
 # PRD Checklist
 
-- [ ] Investigate DeepSeek repetition with raw provider captures, verify the parser against those bytes, and enable bounded evidence capture for a future failing live request without adding a repetition cutoff.
+- [x] Capture four direct provider responses, verify that the real parser and thinking files match the raw reasoning, and deploy passive bounded wire evidence capture without a repetition cutoff (PR #62; four new tests passed; 102 focused tests passed and one skipped after merge).
+- [x] Find where the historical DeepSeek repetition came from: file size matches the 384,000 billed output tokens (no harness or gateway copy), the only other loop in 36,863 thinking files was also DeepSeek on another route and request shape, and the gateway's default sampling is random. It is rare model-side generation, not a harness fault. A raw capture of the next loop is still kept passively.
+- [x] Stop cut streams from running on: a stream cut before its headers arrived kept writing into later thinking files and spending tokens (new Linux reproduction test failed before the fix, passes after).
 
 - [x] Fix thinking-cache isolation across tournaments, reproduce the old-high-ply/new-low-ply failure, and verify live DeepSeek thinking on the public page without restarting its game (PR #60; 56 tests passed; browser displayed 60,045 characters).
 
