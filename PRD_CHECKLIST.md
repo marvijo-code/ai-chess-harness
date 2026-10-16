@@ -1,10 +1,10 @@
 # PRD Checklist
 
-- [ ] Temporarily omit Claude for the first tournament with the new settings, verify automatic eligibility in the following tournament, and start live play without waiting for Claude's quota.
+- [x] Temporarily omit Claude for the first tournament with the new settings, verify automatic eligibility in the following tournament, and start live play without waiting for Claude's quota (live #43, eligible #44).
 
 - [x] Validate the one-hour clocks, disabled move cap, retained reasoning, visible CLI thinking and output limits with focused tests (20 passed).
-- [ ] Complete real local Claude/Codex and OpenCode Go games with forced compaction and preserved evidence.
-- [ ] Document the settings and measured compactor choice, merge the change, and verify the deployed runner at a safe game boundary.
+- [x] Complete real local Codex/DeepSeek and DeepSeek/GLM eight-ply games with visible thinking and three compactions each. Claude's test reached its subscription limit; the owner directed deployment without Claude for the first tournament.
+- [x] Document the settings and measured compactor choice, merge the change, and verify the deployed runner. The owner authorised closing blocked tournament #42 without scoring its unfinished semifinal; #43 is playing with the new settings.
 
 - [x] Create PRD and checklist for the viewer and engine-boundary work.
 - [x] Keep engine prompts free of Stockfish analysis, fallback moves, client-picked shortcuts, and `repetition_risk` fields.
