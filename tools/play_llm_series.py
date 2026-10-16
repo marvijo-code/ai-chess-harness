@@ -121,10 +121,22 @@ def engine_env(player: dict, cfg: dict) -> dict[str, str]:
     if player.get("maxPrice"):
         env["LLM_MAX_PRICE"] = json.dumps(player["maxPrice"])
     # Forever tournament: one provider session per game (cache) and waiting out usage limits.
-    for key, var in (("conversation", "LLM_CONVERSATION"), ("limitWait", "LLM_LIMIT_WAIT")):
+    # moveCap false = think until the move is made (only the clock limits it); keepReasoning = the reasoning stays
+    # in the game's session from move to move (owner 2026-10-16).
+    for key, var in (("conversation", "LLM_CONVERSATION"), ("limitWait", "LLM_LIMIT_WAIT"),
+                     ("moveCap", "LLM_MOVE_CAP"), ("keepReasoning", "LLM_KEEP_REASONING")):
         value = player.get(key, cfg.get(key))
         if value is not None:
             env[var] = "true" if value else "false"
+    if player.get("maxOutputTokens"):
+        # The model's real output limit: the request never asks for more (Claude CLI: its own ceiling).
+        env["LLM_MAX_OUTPUT_TOKENS"] = str(int(player["maxOutputTokens"]))
+    compaction = player.get("compaction", cfg.get("compaction"))
+    if isinstance(compaction, dict) and compaction.get("atTokens"):
+        env["LLM_COMPACT_AT_TOKENS"] = str(int(compaction["atTokens"]))
+        env["LLM_COMPACT_PROVIDER"] = str(compaction.get("provider") or "")
+        env["LLM_COMPACT_MODEL"] = str(compaction.get("model") or "")
+        env["LLM_COMPACT_EFFORT"] = str(compaction.get("effort") or "high")
     if player["provider"] == "openrouter":
         env.update({
             "OPENROUTER_MODEL": player["model"],
@@ -219,14 +231,19 @@ class LlmEngine:
         self.send("isready")
         self.wait_for("readyok", 30)
 
-    def move_budget_seconds(self) -> float:
+    def move_budget_seconds(self, go_line: str | None = None) -> float:
+        if self.player.get("moveCap", self.cfg.get("moveCap", True)) is False and go_line:
+            words = go_line.split()
+            clocks = [int(words[i + 1]) for i, word in enumerate(words[:-1]) if word in {"wtime", "btime"}]
+            if clocks:
+                return max(clocks) / 1000 + 60
         return self.cfg["maxAttempts"] * (self.cfg["attemptTimeoutSeconds"] + 30) + 60
 
     def go(self, history: list[str], go_line: str) -> tuple[str, list[str]]:
         position = "position startpos" + (" moves " + " ".join(history) if history else "")
         self.send(position)
         self.send(go_line)
-        lines = self.wait_for("bestmove", self.move_budget_seconds())
+        lines = self.wait_for("bestmove", self.move_budget_seconds(go_line))
         return lines[-1].split()[1], lines
 
     def close(self) -> None:
@@ -252,6 +269,18 @@ def parse_usage(lines: list[str]) -> dict | None:
         if line.startswith("info string usage "):
             try:
                 data = json.loads(line[len("info string usage "):])
+            except ValueError:
+                return None
+            return data if isinstance(data, dict) else None
+    return None
+
+
+def parse_compacted(lines: list[str]) -> dict | None:
+    """This move started a fresh session from a compaction summary (`info string compacted {json}`)."""
+    for line in reversed(lines):
+        if line.startswith("info string compacted "):
+            try:
+                data = json.loads(line[len("info string compacted "):])
             except ValueError:
                 return None
             return data if isinstance(data, dict) else None

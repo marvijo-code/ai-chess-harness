@@ -1,5 +1,9 @@
 # PRD Checklist
 
+- [x] Validate the one-hour clocks, disabled move cap, retained reasoning, visible CLI thinking and output limits with focused tests (20 passed).
+- [ ] Complete real local Claude/Codex and OpenCode Go games with forced compaction and preserved evidence.
+- [ ] Document the settings and measured compactor choice, merge the change, and verify the deployed runner at a safe game boundary.
+
 - [x] Create PRD and checklist for the viewer and engine-boundary work.
 - [x] Keep engine prompts free of Stockfish analysis, fallback moves, client-picked shortcuts, and `repetition_risk` fields.
 - [x] Move Engine Analysis to the left column, rename it from Stockfish Analysis, and show the selected analysis engine name.
