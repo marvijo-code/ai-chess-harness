@@ -48,6 +48,8 @@ FOREVER_DEFAULTS = {"pauseSeconds": 120, "memoryRepo": str(ROOT / "out" / "ai-ch
                     # Second, metered route of a player (player["fallback"]): 0 = never used. See MeteredBudget.
                     "meteredDailyBudgetUsd": 0.0, "meteredFloorUsd": 0.5, "meteredReserveUsd": 1.0,
                     "routeCheckTimeoutSeconds": 120, "routeRetrySeconds": 600,
+                    # The subscription failed while its plan still has credits (timeout, server error): ask it again.
+                    "routeErrorRetrySeconds": 60,
                     # A new tournament is refused while the disk is nearly full (diskRefuseMb): look again after this.
                     "diskRetrySeconds": 600}
 PAUSED_RETRY_SECONDS = 300
@@ -384,6 +386,9 @@ def probe_with_fallback(player: dict, cfg: dict, live_dir: Path, timeout: float,
     row = prober(player, cfg, live_dir, timeout)
     if row.get("ok") or not player.get("fallback") or budget is None:
         return row
+    if not plan_out_of_credits(player, row):
+        row["metered"] = "second route not used: the plan still has credits (the metered route is for an empty plan)"
+        return row
     reserve = float(cfg["forever"].get("meteredReserveUsd") or 0)
     left = budget.remaining()
     if left < max(reserve, 0.01):
@@ -440,6 +445,13 @@ class ForeverHooks(swiss.GameHooks):
             if row.get("ok"):
                 log(f"ROUTE {name}: the subscription route {player.get('provider')} answers, it plays this game")
                 return player
+            if not plan_out_of_credits(player, row):
+                wait = float(fv.get("routeErrorRetrySeconds") or 60)
+                log(f"ROUTE {name}: subscription route failed but the plan still has credits "
+                    f"({row.get('reason', '')[:120]}); the metered route is only for an empty plan, "
+                    f"asking the subscription again in {wait:.0f}s")
+                self.sleep(wait)
+                continue
             left = BUDGET.remaining()
             second = fallback_player(player)
             if left > 0:
@@ -600,8 +612,8 @@ def bench_kind(reason: str) -> str:
     return "preflight failed"
 
 
-def opencode_go_reset(timeout: float = 15) -> str | None:
-    """The resetsAt of the OpenCode Go window that is rate limited (rolling, weekly or monthly), or None."""
+def opencode_go_usage(timeout: float = 15) -> dict | None:
+    """The OpenCode Go plan's usage windows {"rolling"|"weekly"|"monthly": {"status", "resetsAt"}}, or None."""
     import urllib.request
 
     import subscription_providers as sp
@@ -612,11 +624,33 @@ def opencode_go_reset(timeout: float = 15) -> str | None:
     request = urllib.request.Request(OPENCODE_GO_USAGE_URL, headers={"Authorization": f"Bearer {key}", "User-Agent": sp.BROWSER_UA})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            usage = (json.loads(response.read().decode("utf-8")) or {}).get("usage") or {}
+            usage = (json.loads(response.read().decode("utf-8")) or {}).get("usage")
     except Exception:
         return None
+    return usage if isinstance(usage, dict) else None
+
+
+def opencode_go_reset(timeout: float = 15) -> str | None:
+    """The resetsAt of the OpenCode Go window that is rate limited (rolling, weekly or monthly), or None."""
+    usage = opencode_go_usage(timeout) or {}
     limited = [w.get("resetsAt") for w in usage.values() if isinstance(w, dict) and w.get("status") != "ok" and w.get("resetsAt")]
     return max(limited) if limited else None
+
+
+def plan_out_of_credits(player: dict, row: dict) -> bool:
+    """True only when the subscription plan itself has no credits left (owner 2026-10-16: the metered route
+    is for an empty plan, not for a timeout or a server error). OpenCode Go: its own usage page decides when
+    it answers; otherwise the error must be a funds or usage-limit error."""
+    import subscription_providers as sp
+
+    reason = row.get("reason") or ""
+    if bench_kind(reason) == "no subscription funds or plan":
+        return True
+    if player.get("provider") == "opencode-go":
+        usage = opencode_go_usage()
+        if usage is not None:
+            return any(isinstance(w, dict) and w.get("status") != "ok" for w in usage.values())
+    return sp.limit_error(reason)
 
 
 def reset_time(player: dict, reason: str) -> str | None:

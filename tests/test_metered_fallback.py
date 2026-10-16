@@ -86,6 +86,37 @@ class RouteChoiceTest(unittest.TestCase):
         self.assertIs(self.hooks.player_for_game(PLAYER), PLAYER)
         self.assertEqual(len(waits), 2)
 
+    def test_a_timeout_or_server_error_with_credits_left_never_goes_metered(self):
+        forever.BUDGET = budget(spent=0.0)
+        answers = [{"ok": False, "reason": "no answer within 120s"}, {"ok": False, "reason": "HTTP 502 bad gateway"},
+                   {"ok": True}]
+
+        def probe(player, cfg, live_dir, timeout):
+            self.probed.append(player["provider"])
+            return dict(answers.pop(0), name=player["name"])
+        self.hooks.prober = probe
+        waits = []
+        self.hooks.sleep = waits.append
+        self.assertIs(self.hooks.player_for_game(PLAYER), PLAYER)
+        self.assertEqual(self.probed, ["alibaba"] * 3)
+        self.assertEqual(waits, [60.0, 60.0])
+
+    def test_opencode_go_asks_its_usage_page_whether_the_plan_is_empty(self):
+        forever.BUDGET = budget(spent=0.0)
+        glm = dict(PLAYER, name="GLM 5.3 Flash", provider="opencode-go", model="glm-5.3-flash",
+                   fallback={"provider": "openrouter-chat", "model": "z-ai/glm-5.3-flash"})
+        usage = {"rolling": {"status": "ok"}, "weekly": {"status": "ok"}, "monthly": {"status": "ok"}}
+        self.addCleanup(setattr, forever, "opencode_go_usage", forever.opencode_go_usage)
+        forever.opencode_go_usage = lambda timeout=15: usage
+        # a 429 with every window "ok" is a short rate limit, not an empty plan: ask the plan again
+        self.hooks.prober = self.prober([False, True])
+        self.hooks.sleep = lambda s: None
+        self.assertIs(self.hooks.player_for_game(glm), glm)
+        # the monthly window is used up: OpenRouter plays this game
+        usage["monthly"] = {"status": "rate-limited", "resetsAt": "2026-11-14T07:24:17.000Z"}
+        self.hooks.prober = self.prober([False])
+        self.assertEqual(self.hooks.player_for_game(glm)["provider"], "openrouter-chat")
+
     def test_without_a_budget_or_a_second_route_nothing_changes(self):
         forever.BUDGET = None
         self.hooks.prober = self.prober([])
@@ -127,6 +158,17 @@ class RosterFallbackTest(unittest.TestCase):
         row = forever.probe_with_fallback(PLAYER, self.CFG, Path("."), 5, budget(), self.probe({"alibaba", "openrouter-chat"}))
         self.assertFalse(row["ok"])
         self.assertIn("failed too", row["metered"])
+
+    def test_a_failure_with_credits_left_is_benched_not_sent_to_the_metered_route(self):
+        tried = []
+
+        def prober(player, cfg, live_dir, timeout):
+            tried.append(player["provider"])
+            return {"name": player["name"], "ok": False, "reason": "no answer within 300s", "kind": "preflight failed"}
+        row = forever.probe_with_fallback(PLAYER, self.CFG, Path("."), 5, budget(), prober)
+        self.assertFalse(row["ok"])
+        self.assertIn("still has credits", row["metered"])
+        self.assertEqual(tried, ["alibaba"])
 
     def test_the_subscription_answer_is_kept_and_no_budget_means_no_second_try(self):
         row = forever.probe_with_fallback(PLAYER, self.CFG, Path("."), 5, budget(), self.probe(set()))
