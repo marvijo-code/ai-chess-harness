@@ -17,6 +17,8 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 
 ## Product Requirements
 
+- Live thinking cached by the relay belongs to one tournament. Reused board IDs and lower move numbers in the next tournament must not return or be pruned by old thinking. The association persists across relay restarts; unscoped legacy cache is invalidated. Publishing thinking for a different tournament must be rejected. Full source thinking files remain intact.
+
 0. Future non-trivial chess-harness tasks should update `PRD.md` and `PRD_CHECKLIST.md` before implementation and keep checklist status current while work proceeds.
 1. The board page uses a three-column desktop layout.
 2. The far-left column contains only the large board card filling the full left height: attached bottom/top player bars with clocks, and the eval bar beside the board. No board header block, no result/title text above the board, no thinking or analysis panels sit in the board column.

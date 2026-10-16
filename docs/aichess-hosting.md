@@ -13,6 +13,22 @@ viewer :8770 <- aichess_push.py -> ssh -L 18781 -> relay ingest 127.0.0.1:8781
 
 No cloud resource is created and nothing costs money.
 
+## Thinking belongs to the current tournament
+
+Production uses the viewer and pusher on the VPS beside the runner. The public relay caches
+only the current tournament's thinking. Board IDs such as `r1b2` repeat in each tournament;
+they do not identify a tournament by themselves.
+
+`thinking.meta.json` persists the tournament association. Each cached record also carries its
+tournament ID. A tournament change clears the old in-memory cache and its scoped cache files.
+A restart ignores legacy records without a matching association. The full source thinking
+files under the runner's `out/live` directory are preserved. New uploads carry `tournament_id`;
+an upload naming another tournament is rejected.
+
+This prevents an old board's highest 40 move numbers from immediately pruning a new board's
+lower move numbers. Before the fix, a live DeepSeek file kept growing while the public API
+reported that no thinking existed for the current move.
+
 ## Files
 
 | File | Role |

@@ -449,7 +449,7 @@ class Pusher:
                 key = (gid, p)
                 if self.think_sizes.get(key) == info.get("size"):
                     continue
-                payload = {"game": gid, "ply": p, "size": info.get("size"), "text": info.get("text") or "",
+                payload = {"game": gid, "ply": p, "tournament_id": self.tid, "size": info.get("size"), "text": info.get("text") or "",
                            "from": info.get("from") or 0}
                 result = self._relay_post("/ingest/thinking", json.dumps(payload).encode("utf-8"))
                 if not result.get("rejected"):

@@ -184,6 +184,7 @@ class Store:
         self.clips: dict[int, dict] = {}    # seq -> clip (+ _received, _age)
         self.wavs: dict[str, int] = {}      # name -> bytes
         self.thinking: dict[str, dict[int, dict]] = {}   # game -> ply -> {base, data, received}
+        self.thinking_tournament: str | None = None
         self.version = "relay"
         self.archive: dict[str, dict] = {}  # tournament id -> summary
         self.memory: bytes | None = None    # the /api/memory JSON body
@@ -223,11 +224,23 @@ class Store:
                     continue
                 try:
                     rec = json.loads(item.read_text("utf-8"))
+                    current_id = self.state["id"] if self.state else None
+                    if rec.get("tournament_id") != current_id:
+                        continue
                     self.thinking.setdefault(game_dir.name, {})[int(item.stem)] = {
                         "base": int(rec["from"]), "data": rec["text"].encode("utf-8"),
                         "received": float(rec["received"])}
                 except (OSError, ValueError, KeyError):
                     continue
+        current_id = self.state["id"] if self.state else None
+        try:
+            scope = json.loads((self.dir / "thinking.meta.json").read_text("utf-8"))["tournament_id"]
+        except (OSError, ValueError, KeyError):
+            scope = object()   # legacy cache has no trustworthy tournament association
+        if scope != current_id:
+            self._reset_thinking(current_id)
+        else:
+            self.thinking_tournament = current_id
         try:
             self.version = json.loads((self.dir / "version.json").read_text("utf-8"))["version"]
         except (OSError, ValueError, KeyError):
@@ -256,6 +269,8 @@ class Store:
         entry = {"tail": tail, "deflate": deflate, "length": len(body), "updated": obj.get("updated_epoch_ms"),
                  "received": received, "age": age, "id": obj.get("id"), "gz_len": len(deflate) + 18}
         with self.lock:
+            if persist and self.thinking_tournament != entry["id"]:
+                self._reset_thinking(entry["id"])
             self.state = entry              # serve from memory even when the disk write fails
         if persist:
             try:
@@ -491,6 +506,22 @@ class Store:
 
     # ----- thinking
 
+    def _reset_thinking(self, tournament_id: str | None) -> None:
+        """Drop only relay cache; full thinking remains in the tournament runner's files."""
+        with self.lock:
+            for game, plies in list(self.thinking.items()):
+                for ply in list(plies):
+                    try:
+                        self._drop_thinking(game, ply)
+                    except OSError as exc:
+                        self.log(f"old thinking cache removal failed: {exc}")
+            self.thinking.clear()
+            self.thinking_tournament = tournament_id
+            try:
+                atomic_write(self.dir / "thinking.meta.json", json.dumps({"tournament_id": tournament_id}).encode())
+            except OSError as exc:
+                self.log(f"thinking scope persist failed (kept in memory): {exc}")
+
     def ingest_thinking(self, rec) -> dict:
         if not isinstance(rec, dict):
             raise ValueError("thinking must be a JSON object")
@@ -509,13 +540,16 @@ class Store:
             data, base = data[cut:], base + cut
         now = self.clock()
         stored = {"base": base, "data": data, "received": now}
-        try:
-            atomic_write(self.dir / "thinking" / game / f"{ply}.json",
-                         json.dumps({"from": base, "text": data.decode("utf-8", errors="replace"), "received": now},
-                                    ensure_ascii=False).encode("utf-8"))
-        except OSError as exc:
-            self.log(f"thinking persist failed (kept in memory): {exc}")
         with self.lock:
+            if "tournament_id" in rec and rec["tournament_id"] != self.thinking_tournament:
+                raise ValueError("thinking belongs to a different tournament")
+            try:
+                atomic_write(self.dir / "thinking" / game / f"{ply}.json",
+                             json.dumps({"from": base, "text": data.decode("utf-8", errors="replace"),
+                                         "received": now, "tournament_id": self.thinking_tournament},
+                                        ensure_ascii=False).encode("utf-8"))
+            except OSError as exc:
+                self.log(f"thinking persist failed (kept in memory): {exc}")
             plies = self.thinking.setdefault(game, {})
             plies[ply] = stored
             for old in sorted(plies)[:-THINK_PLIES_PER_GAME]:

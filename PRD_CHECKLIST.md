@@ -1,5 +1,7 @@
 # PRD Checklist
 
+- [ ] Fix thinking-cache isolation across tournaments, reproduce the old-high-ply/new-low-ply failure, and verify live DeepSeek thinking on the public page without restarting its game.
+
 - [x] Temporarily omit Claude for the first tournament with the new settings, verify automatic eligibility in the following tournament, and start live play without waiting for Claude's quota (live #43, eligible #44).
 
 - [x] Validate the one-hour clocks, disabled move cap, retained reasoning, visible CLI thinking and output limits with focused tests (20 passed).
