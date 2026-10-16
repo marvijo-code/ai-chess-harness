@@ -166,7 +166,7 @@ def test_thinking_pushed_when_size_changes_and_rate_limited(tmp_path):
     http.clips = []
     p.cycle()
     think = [json.loads(b) for path, b, _ in http.posts if path == "/ingest/thinking"]
-    assert think == [{"game": "r1b1", "ply": 5, "size": 10, "text": "0123456789", "from": 0}]
+    assert think == [{"game": "r1b1", "ply": 5, "tournament_id": p.tid, "size": 10, "text": "0123456789", "from": 0}]
     mono.now += 2.5
     p.cycle()                                         # same size: nothing new
     assert len(http.paths("/ingest/thinking")) == 1

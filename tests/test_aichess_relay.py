@@ -238,6 +238,42 @@ def test_thinking_offsets(rl):
     assert rl.get("/api/thinking?game=r1b1&ply=x")[0] == 400
 
 
+def test_new_tournament_drops_old_high_plies_and_keeps_new_live_thinking(rl):
+    rl.ingest("/ingest/state", json.dumps(state_payload(id="tournament-old")).encode())
+    for ply in range(60, 100):
+        rl.store.ingest_thinking({"game": "r1b2", "ply": ply, "text": "old thinking"})
+    rl.ingest("/ingest/state", json.dumps(state_payload(id="tournament-new")).encode())
+    assert rl.store.read_thinking("r1b2", 99, 0)["exists"] is False
+    rl.store.ingest_thinking({"game": "r1b2", "ply": 18, "text": "new live thinking",
+                              "tournament_id": "tournament-new"})
+    assert rl.store.read_thinking("r1b2", 18, 0)["text"] == "new live thinking"
+    assert sorted(rl.store.thinking["r1b2"]) == [18]
+    # Normal state updates preserve the current move's thinking.
+    rl.ingest("/ingest/state", json.dumps(state_payload(id="tournament-new", updated=999)).encode())
+    assert rl.store.read_thinking("r1b2", 18, 0)["text"] == "new live thinking"
+    assert not (rl.store.dir / "thinking/r1b2/99.json").exists()
+
+
+def test_late_thinking_from_an_old_tournament_is_rejected(rl):
+    rl.ingest("/ingest/state", json.dumps(state_payload(id="new")).encode())
+    code, _, _ = rl.ingest("/ingest/thinking", json.dumps(
+        {"game": "r1b2", "ply": 18, "text": "old", "tournament_id": "old"}).encode())
+    assert code == 400
+    assert rl.store.read_thinking("r1b2", 18, 0)["exists"] is False
+
+
+def test_legacy_thinking_cache_is_not_misattributed_after_restart(tmp_path):
+    store = relay.Store(tmp_path)
+    store.ingest_state(json.dumps(state_payload(id="current")).encode())
+    store.ingest_thinking({"game": "r1b2", "ply": 99, "text": "unscoped old text"})
+    (tmp_path / "thinking.meta.json").unlink(missing_ok=True)
+    restarted = relay.Store(tmp_path)
+    assert restarted.read_thinking("r1b2", 99, 0)["exists"] is False
+    restarted.ingest_thinking({"game": "r1b2", "ply": 18, "text": "current text"})
+    again = relay.Store(tmp_path)
+    assert again.read_thinking("r1b2", 18, 0)["text"] == "current text"
+
+
 def test_thinking_tail_limit_and_ply_window(rl):
     big = "\u00e9" * 40_000                 # 80 000 bytes of 2-byte characters
     rl.ingest("/ingest/thinking", json.dumps({"game": "g1", "ply": 1, "text": big, "from": 0}).encode())
