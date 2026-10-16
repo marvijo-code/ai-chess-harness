@@ -60,6 +60,46 @@ appeared 1,200 times and its Qh5 line 1,199 times. No move was invented and its 
 left running under the owner's no-cutoff setting. A repetition guard was offered separately;
 it was not enabled as part of the display repair.
 
+## Repetition root-cause investigation
+
+The original DeepSeek move received 384,000 output tokens according to the provider's usage
+event. It took 1,379 seconds before the output ceiling was reached. The harness then returned
+the model's own thoughts at high effort, and DeepSeek supplied `g6` in the follow-up. The
+completed move used 1,385.6 seconds of its own clock. This was one generation plus recovery,
+not a series of hidden illegal-move retries. The preceding move's thinking did not contain
+the repeated Bxh7 phrase.
+
+The historical raw network stream was not recorded, so the exact cause of that generation's
+repetition is not proven. Reconstructing from saved moves, frozen memory and visible reasoning
+recovers the same position and memory hash, but normalises earlier JSON replies. Its input
+count is 22,530 versus the original 22,550. It must not be called a byte-identical replay.
+
+Four direct Go subscription probes captured raw response events before the chess harness:
+
+- Reconstructed conversation: completed normally in 48.3 seconds, no repeated-text pattern.
+- Same conversation with the provider author's sampling settings: completed normally in 76.3 seconds, no repeated-text pattern.
+- Conversation with carried reasoning removed: still reasoning at the 100-second diagnostic boundary, no repeated-text pattern. Completion remains unknown.
+- Fresh conversation with the same real position, memory and move history: still reasoning at the 100-second diagnostic boundary, no repeated-text pattern. Completion remains unknown.
+
+Every captured response was replayed offline through the real harness parser. Parsed reasoning
+and the written thinking file matched the raw reasoning exactly in all four captures. These
+tests do not reproduce the original failure and do not prove the model, gateway or prompt is
+the cause. Lowering effort or adding an interruption policy would be a workaround, not a
+confirmed root-cause fix.
+
+Live move clients now keep a bounded raw-event tail in memory. If repeated text is observed,
+they save `<thinking-file>.provider-wire.json` privately beside the source thinking file. The
+evidence includes the exact bounded request, its hash, client session identifier, raw provider
+events and final usage. No authentication headers are accepted or written. Raw response storage
+is capped at 512 KiB and request storage at 1 MiB. Normal replies create no diagnostic file.
+This observation does not stop generation, change settings, choose a move or change the clock
+policy. New engine processes pick it up when their next game starts; active games are preserved.
+
+The exact trigger remains unconfirmed until a failing response is captured at the wire.
+
+Sources for the diagnostic controls: the [model author's sampling guidance](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)
+and [DeepSeek's reasoning/history protocol](https://api-docs.deepseek.com/guides/thinking_mode/).
+
 ## Links
 
 - [Live tournament](https://marvijo.com/ai-chess)
