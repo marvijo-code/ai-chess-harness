@@ -1579,6 +1579,14 @@ class SubscriptionChessClient:
         body = json.dumps(payload).encode("utf-8")
         state = {"content": "", "reasoning": "", "usage": {}, "finish": None, "done": False, "error": None,
                  "last": time.monotonic(), "resp": None}
+        # Set when this call stops listening (cut, stall, timeout). A response that arrives later is closed at
+        # once, and no later event is written: tournament #5 (2026-10-08) cut a stream before its headers came,
+        # and it then streamed into the next thinking file and kept spending tokens nobody read.
+        stopped = threading.Event()
+
+        def stop_listening() -> None:
+            stopped.set()
+            _close_quietly(state.get("resp"))
         # Observe raw provider bytes before parsing. Evidence never stops or changes a reply.
         from provider_wire_audit import ProviderWireAudit
         audit = (ProviderWireAudit(url, payload, self.thinking_file, self.log, session_id=self.session_id)
@@ -1596,7 +1604,11 @@ class SubscriptionChessClient:
             try:
                 with urllib.request.urlopen(request, timeout=timeout) as response:
                     state["resp"] = response
+                    if stopped.is_set():
+                        return  # the caller gave up before the headers came; leaving `with` disconnects
                     for raw in response:
+                        if stopped.is_set():
+                            break
                         observe("raw_event", raw)
                         state["last"] = time.monotonic()
                         line = raw.decode("utf-8", errors="replace").strip()
@@ -1625,7 +1637,8 @@ class SubscriptionChessClient:
                                 piece = str(delta.get("thinking") or "")
                                 observe("reasoning", piece)
                                 state["reasoning"] += piece
-                                self._think(piece)
+                                if not stopped.is_set():
+                                    self._think(piece)
                                 state["content"] += str(delta.get("text") or "")
                             elif kind == "error":
                                 err = data.get("error") or {}
@@ -1637,7 +1650,8 @@ class SubscriptionChessClient:
                             piece = str(delta.get("reasoning_content") or delta.get("reasoning") or "")
                             observe("reasoning", piece)
                             state["reasoning"] += piece
-                            self._think(piece)
+                            if not stopped.is_set():
+                                self._think(piece)
                             state["content"] += str(delta.get("content") or "")
                             if choice.get("finish_reason"):
                                 state["finish"] = choice["finish_reason"]
@@ -1655,13 +1669,13 @@ class SubscriptionChessClient:
         while not state["done"]:
             now = time.monotonic()
             if cutoff is not None and now - started > cutoff and not state["content"].strip():
-                _close_quietly(state.get("resp"))
+                stop_listening()
                 return {**state, "cut": True}
             if now - state["last"] > STALL_SECONDS:
-                _close_quietly(state.get("resp"))
+                stop_listening()
                 raise CliCrash(f"stream stalled: no bytes for {STALL_SECONDS}s")
             if now - started > timeout + 2:
-                _close_quietly(state.get("resp"))
+                stop_listening()
                 raise subprocess.TimeoutExpired(url, timeout)
             time.sleep(0.2)
         error = state["error"]
