@@ -13,6 +13,7 @@ Keep the local FastChess viewer useful during live play and replay without leaki
 - At 120,000 input tokens, DeepSeek V4.1 Flash on OpenCode Go summarises only the player's own earlier thoughts. Summarising adds no analysis or advice and does not consume the player's clock.
 - DeepSeek and GLM use OpenCode Go. Compaction has no metered fallback. Existing paid player fallback remains restricted to the previously approved empty-plan policy.
 - Validate the changed tests and real local subscription games before deployment. Deploy the runner at a boundary with no game or post-game reflection in progress; preserve the live stream and unrelated changes.
+- An operator may temporarily hold a player out through a numbered tournament using `out/live/roster-holds.json`. The held player receives no roster probe or game in that tournament and becomes eligible for the following tournament without a timer or service restart. A resumed tournament retains its saved roster.
 
 ## Product Requirements
 

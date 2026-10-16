@@ -679,6 +679,44 @@ class PointerFollowTest(unittest.TestCase):
 
 
 class ForeverLoopTest(unittest.TestCase):
+    def test_temporary_hold_skips_probes_then_restores_player_next_tournament(self):
+        root = tmpdir(self)
+        live = root / "live"
+        live.mkdir()
+        repo = mem.MemoryRepo(root / "memory")
+        cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
+        (live / "roster-holds.json").write_text(json.dumps({"Sonnet 5.5": 1}))
+        hooks = forever.ForeverHooks(cfg, repo, None, live)
+        probes, rosters = [], []
+        old_check, old_run = forever.check_roster, swiss.run_tournament
+        self.addCleanup(setattr, forever, "check_roster", old_check)
+        self.addCleanup(setattr, swiss, "run_tournament", old_run)
+
+        def check(config, live_dir):
+            probes.append([p["name"] for p in config["players"]])
+            return config["players"], [], []
+
+        def run(state, config, path, log):
+            rosters.append([p["name"] for p in state["players"]])
+            if state["number"] == 1:
+                self.assertEqual(state["benched"][0]["resume_after_tournament"], 1)
+            state["finished"] = True
+            swiss.TournamentState(state, path).save()
+            return 0
+
+        forever.check_roster, swiss.run_tournament = check, run
+        forever.run_forever(cfg, live, repo, None, hooks, max_tournaments=2, sleep=lambda _s: None)
+        for observed in (probes, rosters):
+            self.assertNotIn("Sonnet 5.5", observed[0])
+            self.assertIn("Sonnet 5.5", observed[1])
+        self.assertIn("Sonnet 5.5", [p["name"] for p in cfg["players"]])
+
+    def test_invalid_hold_file_does_not_silently_restore_a_held_player(self):
+        live = tmpdir(self)
+        (live / "roster-holds.json").write_text('{"Sonnet 5.5": "forever"}')
+        with self.assertRaises(ValueError):
+            forever.tournament_roster({"players": [{"name": "Sonnet 5.5"}]}, live, 43)
+
     def test_finished_tournaments_are_followed_by_the_next_number_and_a_restart_resumes(self):
         root = tmpdir(self)
         live = root / "live"
