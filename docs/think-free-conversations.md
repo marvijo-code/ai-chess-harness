@@ -39,6 +39,27 @@ kept SHA-256 `65ef5a4b2ff95bf4fa0f7175d14bf46aa46a82aafeaa92a97d7ffc901c0079a2`.
 This is a backend and runner change; the public viewer was not redesigned. Screenshots verify
 the served state and the stream. No new win against Stockfish is claimed.
 
+## Thinking visibility correction
+
+PR #60 fixes a separate relay-cache defect found after deployment. Board IDs repeat across
+tournaments. Old high move numbers occupied the relay's 40-move cache and caused the current
+lower move number to be pruned immediately. The relay now persists a tournament association,
+ignores unscoped legacy cache on startup and rejects explicitly stale tournament uploads.
+
+All 56 relay and publisher tests passed before and after merge. Three new regressions failed
+on the preceding code. The deployed relay file matched the merged source hash. Only the relay
+and publisher restarted; the runner remained up from its earlier deployment, and the active
+game kept its move history and clock.
+
+The public thinking API then returned `exists: true`, size 483,483 and a 60,000-character tail.
+A real browser displayed 60,045 characters in the open DeepSeek thinking panel. A screenshot
+confirmed the visible text. The source file continued growing.
+
+The model itself was also looping. In the latest 60,000 source characters, its Bxh7 line
+appeared 1,200 times and its Qh5 line 1,199 times. No move was invented and its response was
+left running under the owner's no-cutoff setting. A repetition guard was offered separately;
+it was not enabled as part of the display repair.
+
 ## Links
 
 - [Live tournament](https://marvijo.com/ai-chess)
