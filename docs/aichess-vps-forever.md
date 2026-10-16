@@ -35,16 +35,54 @@ The owner's top 5 plus Stockfish:
 | --- | --- | --- |
 | Sonnet 5.5 | `claude` CLI, `claude-sonnet-5-5`, effort high | Claude subscription |
 | GPT-6.1 Sol | `codex` CLI, `gpt-6.1-sol`, effort high | ChatGPT subscription |
-| DeepSeek V4.1 Flash | `alibaba`, `deepseek-v4.1-flash`, effort high | Alibaba (Bailian) Token Plan subscription, Anthropic Messages wire |
-| GLM 5.3 Flash | `opencode-go`, `glm-5.3-flash` | Its only subscription route. OpenCode Go monthly limit reached on 2026-10-08, resets 2026-10-14 07:24 UTC (09:24 SAST). Z.ai answered code 1113 (no plan). |
+| DeepSeek V4.1 Flash | `opencode-go`, `deepseek-v4.1-flash`, effort high | OpenCode Go, since 2026-10-16 |
+| GLM 5.3 Flash | `opencode-go`, `glm-5.3-flash`, effort high | OpenCode Go; some upstreams reject the thinking switch and the existing route retries without that switch |
 | Gemini 3.8 Flash | `enabled: false` | No subscription route yet |
 | Stockfish 19 | Linux binary, own ladder per AI from depth 4 | `Threads 1`, `Hash 128` (owner 2026-10-11: strongest Stockfish, more hash; Threads stays 1 because RAM is tight with two games at once) |
 
-No player uses `openrouter-chat` or any other metered route. Time control 15 min + 10 s (owner 2026-10-08: fewer losses on time from winning positions),
+Subscription routes are the default. The two configured metered fallbacks remain subject to the empty-plan rule and existing budget below. Normal games use 60 min per player + 10 s per move (owner 2026-10-16),
 3 tries per move, `showLegalMoves: true`, no board image (the FEN and the diagram carry the
 position; an image would be uncached input on every move). No fallback move ever: a failed
 move after 3 tries is a forfeit, as before. `maxConcurrentGames: 2` caps the boards played at
 once (RAM); with 4 or 5 players a round has 2 boards anyway.
+
+### One-hour games, retained thinking and compaction
+
+`moveCap: false` disables the per-move cutoff and lets one reply use the remaining chess clock.
+`attemptTimeoutSeconds` still applies when the move cap is enabled. Invalid replies retain the
+three-attempt limit. Armageddon remains 10 minutes for White and 7 minutes 30 seconds for Black.
+
+`keepReasoning: true` resumes one native Claude or Codex session per game. HTTP routes carry the
+player's own previous visible reasoning as text in the next turn because OpenCode Go discarded
+reasoning fields in the measured probe. The carried text retains the newest 24,000 characters.
+The viewer shows only what the provider reveals, which may be empty on an easy move. Claude needs
+CLI 2.1.296 and `--thinking-display summarized`. Codex exposes reasoning summaries.
+
+`maxOutputTokens` is 128,000 for Claude and Codex, 384,000 for DeepSeek and 131,072 for GLM.
+HTTP requests and Claude's `CLAUDE_CODE_MAX_OUTPUT_TOKENS` receive their configured ceilings.
+Codex enforces its native model ceiling; this setting is not passed as an unsupported CLI option.
+If a reply exhausts its output space, the same player gets its own thoughts back and is asked
+to return its move. With the move cap disabled, this recovery keeps the configured high effort.
+
+`compaction` selects OpenCode Go, `deepseek-v4.1-flash`, high effort and `atTokens: 120000`.
+After a move crosses that input threshold, a background request summarises the player's own
+thinking while the opponent plays. It adds no new chess analysis or advice. The next turn starts
+a fresh session containing the summary, full move history, memory and current position. Any
+remaining summary wait is excluded from charged thinking time. The runner records `compacted`
+metadata on that move. A helper failure preserves the current session and retries after later
+moves; after three failures the engine opens a fresh session without a new summary. There is no
+metered compaction fallback. Helper input keeps at most 12,000 thinking characters per move and
+300,000 characters overall; output is limited to 16,000 tokens and requests at most 700 words.
+
+The original comparison used the same real game twice per helper. DeepSeek returned accurate
+summaries in 13.8 and 21.1 seconds. Both GLM attempts took about 163 seconds and returned no text.
+
+Before deployment, run `python -m pytest -q tests/test_think_free_sessions.py` and real local
+subscription games with a lower compaction threshold. Update the server CLI first. Pull the
+merged commit and restart only the runner once the current tournament has finished, all AI
+reflections are saved, and no game is live. Existing tournaments keep their saved settings;
+the next tournament receives the new clocks and conversation settings. Preserve any unrelated
+viewer edits and keep the viewer, pusher and stream services running.
 
 ### Roster check and benching
 

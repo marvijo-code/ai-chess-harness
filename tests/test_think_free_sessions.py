@@ -65,6 +65,14 @@ def claude_result(reply: str, read: int = 0, write: int = 400) -> str:
 
 
 class NoMoveCapTest(unittest.TestCase):
+    def test_series_runner_waits_for_the_game_clock_when_move_cap_is_off(self):
+        engine = object.__new__(series.LlmEngine)
+        engine.player = {}
+        engine.cfg = {"moveCap": False, "maxAttempts": 3, "attemptTimeoutSeconds": 900}
+        self.assertEqual(engine.move_budget_seconds("go wtime 3600000 btime 3500000"), 3660)
+        engine.player["moveCap"] = True
+        self.assertEqual(engine.move_budget_seconds("go wtime 3600000 btime 3500000"), 2850)
+
     def test_no_cap_streams_without_a_cutoff_and_waits_for_the_clock(self):
         client, calls = http_client(['{"move": "Nf3"}'])
         move, _ = client.choose_move(board_after(["e2e4", "e7e5"]), GO, ["e2e4", "e7e5"])
@@ -183,6 +191,17 @@ class HttpCarriesItsThinkingTest(unittest.TestCase):
 
 
 class OutputLimitTest(unittest.TestCase):
+    def test_uncapped_http_recovery_does_not_disable_reasoning_after_an_empty_answer(self):
+        client, calls = http_client([
+            {"content": "", "reasoning": "Count the guards.", "finish": "length"},
+            {"content": "", "reasoning": "Still counting.", "finish": "length"},
+        ])
+        client._left_ms = 3_600_000
+        with self.assertRaises(ValueError):
+            client._ask_http("Choose a move.", 3600)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1]["payload"].get("reasoning_effort"), "high")
+
     def test_http_asks_for_the_configured_limit_and_answers_from_its_thoughts_without_a_cap(self):
         client, calls = http_client([
             {"content": "", "reasoning": "Long think... BEST SO FAR: Nf3", "cut": False, "finish": "length",
@@ -195,9 +214,12 @@ class OutputLimitTest(unittest.TestCase):
         self.assertEqual(calls[0]["payload"]["max_tokens"], 32000)
         self.assertIsNone(calls[1]["cutoff"], "no cap: the answer step is not squeezed into seconds")
         self.assertGreater(calls[1]["timeout"], 600)
+        follow = calls[1]["payload"]
+        self.assertEqual(follow.get("reasoning_effort"), "high")
+        self.assertNotIn("time for this move is up", follow["messages"][-1]["content"])
         self.assertEqual(client.last_report.get("hurried"), 1)
 
-    def test_claude_output_limit_answers_at_low_effort_from_its_thinking(self):
+    def test_claude_output_limit_keeps_high_effort_from_its_thinking_without_a_cap(self):
         client = sp.SubscriptionChessClient("claude", lambda _m: None)
         client.board_image, client.conversation, client.context = False, True, dict(CONTEXT)
         client.move_cap, client.keep_reasoning = False, True
@@ -216,7 +238,7 @@ class OutputLimitTest(unittest.TestCase):
         client.runner = runner
         move, _ = client.choose_move(board_after(["e2e4", "e7e5", "g1f3"]), GO, ["e2e4", "e7e5", "g1f3"])
         self.assertEqual(move, "b8c6")
-        self.assertEqual(efforts, ["high", "low"])
+        self.assertEqual(efforts, ["high", "high"])
         self.assertTrue(sp.output_limit_error("Incomplete response: max_output_tokens"))
         self.assertFalse(sp.output_limit_error("rate limit reached"))
 

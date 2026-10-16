@@ -1264,10 +1264,11 @@ class SubscriptionChessClient:
             thoughts = "\n".join(t for t in self._cli_thoughts if t.strip())[-THOUGHTS_TAIL_CHARS:]
             self.last_report["hurried"] = self.last_report.get("hurried", 0) + 1
             why = "ran out of output tokens" if limit else "was stopped at the move cap"
-            self._think(f"\n[the reply {why} - answering at low effort from its revealed thinking]\n")
+            answer_effort = self.effort if not self.move_cap else "low"
+            self._think(f"\n[the reply {why} - answering at {answer_effort} effort from its revealed thinking]\n")
             self.log(f"{self.provider} {self.model} {why}"
                      + ("" if limit or self._cli_cut_s is None else f" ({self._cli_cut_s:.0f}s)")
-                     + f"; asking at low effort with {len(thoughts)} chars of revealed thinking")
+                     + f"; asking at {answer_effort} effort with {len(thoughts)} chars of revealed thinking")
             stop = ("Your reply ran out of output space before it gave a move."
                     if limit else "Your thinking on the move below was stopped at the move cap.")
             ask = ("Reply now with only the JSON object for your move, with no further long reasoning."
@@ -1282,7 +1283,7 @@ class SubscriptionChessClient:
                           + (thoughts or "(none visible)") + "\n" + ask)
             self._cli_cut_s = None
             left = timeout - (time.monotonic() - started)
-            answer = self._ask_cli(follow, max(10, int(left)), "low")
+            answer = self._ask_cli(follow, max(10, int(left)), answer_effort)
             if thoughts:
                 self._cli_thoughts = [thoughts] + self._cli_thoughts
             self._attempt_think_ms = None  # two calls: charge the wall time (infrastructure crashes still excluded)
@@ -1528,7 +1529,8 @@ class SubscriptionChessClient:
         self._think(f"\n[thinking stopped: {why} - answering from its own thoughts]\n")
         messages = plain_messages(payload["messages"]) + [
             {"role": "assistant", "content": "My thinking on this move so far:\n" + (thoughts or "(no visible thinking)")},
-            {"role": "user", "content": "Your time for this move is up. Your full thinking so far is above. "
+            {"role": "user", "content": ("Your time for this move is up. " if capped else
+                                        "Your previous reply ran out of output space. ") + "Your full thinking so far is above. "
                                         "Reply now with only the JSON object for your move."}]
         limits = {"same": min(ANSWER_WITH_THOUGHTS_SECONDS, SAME_SHARE * total),
                   "lowest": min(ANSWER_WITH_THOUGHTS_SECONDS, max(LOWEST_MIN_SECONDS, LOWEST_SHARE * total))}
@@ -1536,7 +1538,7 @@ class SubscriptionChessClient:
         if not capped:
             # No move cap: the same-effort answer is not squeezed into seconds; only the clock limits it.
             limits["same"] = max(10.0, clock_left if clock_left is not None else 600.0)
-        for level in ("same", "lowest"):
+        for level in (("same", "lowest") if capped else ("same",)):
             if style == "anthropic":
                 follow = stream_payload({**payload, "messages": anthropic_messages(messages)}, style)
                 if level == "lowest":

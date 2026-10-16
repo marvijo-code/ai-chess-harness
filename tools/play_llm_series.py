@@ -231,14 +231,19 @@ class LlmEngine:
         self.send("isready")
         self.wait_for("readyok", 30)
 
-    def move_budget_seconds(self) -> float:
+    def move_budget_seconds(self, go_line: str | None = None) -> float:
+        if self.player.get("moveCap", self.cfg.get("moveCap", True)) is False and go_line:
+            words = go_line.split()
+            clocks = [int(words[i + 1]) for i, word in enumerate(words[:-1]) if word in {"wtime", "btime"}]
+            if clocks:
+                return max(clocks) / 1000 + 60
         return self.cfg["maxAttempts"] * (self.cfg["attemptTimeoutSeconds"] + 30) + 60
 
     def go(self, history: list[str], go_line: str) -> tuple[str, list[str]]:
         position = "position startpos" + (" moves " + " ".join(history) if history else "")
         self.send(position)
         self.send(go_line)
-        lines = self.wait_for("bestmove", self.move_budget_seconds())
+        lines = self.wait_for("bestmove", self.move_budget_seconds(go_line))
         return lines[-1].split()[1], lines
 
     def close(self) -> None:

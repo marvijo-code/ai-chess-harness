@@ -4,6 +4,16 @@
 
 Keep the local FastChess viewer useful during live play and replay without leaking analysis or client shortcuts into engine move selection.
 
+## One-hour tournament conversations (owner request 2026-10-16)
+
+- Normal games give each player 60 minutes with a 10-second increment. Armageddon retains its separate clocks.
+- `moveCap: false` removes the per-move cut and attempt timeout; the player's remaining game clock still limits the reply. Invalid replies still have three attempts. High reasoning remains configured for every player, including output-limit recovery when the move cap is off.
+- Claude and Codex continue their own game sessions. HTTP players carry their own visible reasoning into the next turn. Only provider-revealed thinking is shown.
+- Each player has a configured output-token ceiling. Codex uses its native model ceiling. A truncated reply must ask the same model for its move from its own thoughts, never choose a fallback move.
+- At 120,000 input tokens, DeepSeek V4.1 Flash on OpenCode Go summarises only the player's own earlier thoughts. Summarising adds no analysis or advice and does not consume the player's clock.
+- DeepSeek and GLM use OpenCode Go. Compaction has no metered fallback. Existing paid player fallback remains restricted to the previously approved empty-plan policy.
+- Validate the changed tests and real local subscription games before deployment. Deploy the runner at a boundary with no game or post-game reflection in progress; preserve the live stream and unrelated changes.
+
 ## Product Requirements
 
 0. Future non-trivial chess-harness tasks should update `PRD.md` and `PRD_CHECKLIST.md` before implementation and keep checklist status current while work proceeds.
