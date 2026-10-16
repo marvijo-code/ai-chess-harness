@@ -175,6 +175,18 @@ Haiku 5.5 joins the roster on the Claude subscription (`claude-haiku-5-5`, high 
 folder `haiku`). Sonnet 5.5's hold ended with #43. A running tournament keeps its own roster, so both
 play from #44.
 
+### Harness version (owner request, 2026-10-16)
+
+`engines/llm-chess-engine/harness_version.py` holds `HARNESS_VERSION` (1 from this change) and a SHA-256
+fingerprint of the harness sources: the engine modules, the runner modules, `configs/ai-chess-vps.json`
+and `run-ai-chess-forever.sh`. `tests/test_harness_version.py` fails when any of them changes without a
+bump. Bump with `python tools/bump_harness_version.py` (`--check` only reports).
+
+Each game records `harness: {runner, white, black}` in the tournament state, and the PGN headers carry
+`HarnessVersion`, `WhiteEngineVersion` and `BlackEngineVersion`. The engine versions come from the UCI
+handshake (`id name llm-chess-engine v<N>`); they can be older than the runner because engine processes
+are reused across games. Each tournament state also has `harness_version`. Earlier games have no version.
+
 ## Links
 
 - [Live tournament](https://marvijo.com/ai-chess)

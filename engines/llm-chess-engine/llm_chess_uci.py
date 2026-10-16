@@ -565,7 +565,8 @@ def main() -> None:
 
         try:
             if command == "uci":
-                print("id name llm-chess-engine", flush=True)
+                from harness_version import HARNESS_VERSION
+                print(f"id name llm-chess-engine v{HARNESS_VERSION}", flush=True)
                 print("id author marvijo/OpenRouter", flush=True)
                 print("option name Provider type combo default openrouter var openrouter var codex var claude var openrouter-chat var opencode-go var zai var alibaba", flush=True)
                 print(f"option name Model type string default {DEFAULT_MODEL}", flush=True)

@@ -1,5 +1,6 @@
 # PRD Checklist
 
+- [x] Harness version v1: every game records runner and engine versions (state and PGN); a fingerprint test forces a bump when the harness changes.
 - [x] Loop guard: stop a reasoning stream that repeats one 8-word phrase 20+ times, ask for the move from the thinking before the repeats, then the latest BEST SO FAR move (tests/test_loop_guard.py).
 - [x] Rule 11: every player writes BEST SO FAR lines; the referee plays the latest legal one instead of a forfeit when no valid reply comes.
 - [x] Haiku 5.5 added on the Claude subscription; Sonnet 5.5 hold cleared. Both play from #44.
