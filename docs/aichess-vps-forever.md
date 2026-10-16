@@ -68,6 +68,11 @@ in the config (DeepSeek V4.1 Flash and GLM 5.3 Flash). The subscription always c
 - **Before every game** of such a player the subscription route gets one real move. It answers = it
   plays this game. It is down = the metered route plays this game. The next game asks again, so the
   player is back on its subscription the first game after the reset (log lines start with `ROUTE`).
+- **Metered only for an empty plan** (owner 2026-10-16: "only fallback to OpenRouter if there are no
+  plan credits"). `plan_out_of_credits()`: OpenCode Go asks its own usage page (any window not "ok" =
+  empty); other routes need a funds or usage-limit error. A timeout, server error or short rate limit
+  while the plan has credits = ask the subscription again every `routeErrorRetrySeconds` (60); at a
+  tournament start the player is benched instead.
 - **Daily cap** `forever.meteredDailyBudgetUsd` (10.28 = R170 at R16.53). What was spent today comes
   from OpenRouter itself (`/key` usage_daily, UTC day), so moves, notes, retries and route checks all
   count; other use of the same key counts too. `meteredFloorUsd` (0.5) of the account balance is never
