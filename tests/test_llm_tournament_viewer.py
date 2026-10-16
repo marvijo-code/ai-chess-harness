@@ -784,3 +784,17 @@ class PerModelLadderPageTest(unittest.TestCase):
         tag, line = out.split("|")
         self.assertIn("depth 6", tag)
         self.assertEqual(line, "")
+
+
+class StateClassClashTest(unittest.TestCase):
+    """2026-10-16: the Commentary chip's "click to start" state and the hosted "Connecting" banner used the class
+    `wait`, which is also the full-width waiting screen (`.wait { grid-column: 1 / -1; display: flex; ... }`).
+    The chip turned into a giant pill and stretched the Move sound chip beside it."""
+
+    def test_chip_and_banner_states_do_not_reuse_the_waiting_screen_class(self):
+        page = viewer.PAGE
+        self.assertIn(".wait { grid-column: 1 / -1;", page)
+        self.assertIn('(needGesture ? "gesture" : "on")', page)
+        self.assertIn(".chip.btn.gesture {", page)
+        self.assertNotIn(".chip.btn.wait", page)
+        self.assertIn('cls = feedFailed ? "off" : "connecting";', page)
