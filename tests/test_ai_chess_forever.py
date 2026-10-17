@@ -149,7 +149,7 @@ class LadderTest(unittest.TestCase):
         state = swiss.new_state(cfg, "t-ladder")
         state["number"] = 1
         games = {}
-        for i, (white, black) in enumerate([("Sonnet 5.5", self.SF), (self.SF, "Sonnet 5.5"), (self.SF, "GPT-6.1 Sol"),
+        for i, (white, black) in enumerate([("Sonnet 5.5", self.SF), (self.SF, "Sonnet 5.5"), (self.SF, "DeepSeek V4.1 Flash 1017"),
                                             ("Sonnet 5.5", self.SF)], start=1):
             games[f"r{i}b1"] = {"id": f"r{i}b1", "round": i, "board": 1, "white": white, "black": black,
                                 "result": "*", "moves": []}
@@ -181,7 +181,7 @@ class LadderTest(unittest.TestCase):
         self.assertEqual(play("r2b1", "0-1"), 4)
         self.assertEqual(state["ladder"]["players"]["Sonnet 5.5"], {"depth": 5, "streak": 0})
         self.assertEqual(json.loads((root / "ladder.json").read_text())["players"]["Sonnet 5.5"]["depth"], 5)
-        self.assertEqual(play("r3b1", "1/2-1/2"), 4, "GPT still plays Stockfish at its own depth")
+        self.assertEqual(play("r3b1", "1/2-1/2"), 4, "DeepSeek 1017 still plays Stockfish at its own depth")
         self.assertEqual(players[self.SF]["depth"], 4)
         self.assertEqual(play("r4b1", "0-1"), 5, "Sonnet now plays depth 5")
         self.assertEqual(state["ladder"]["players"]["Sonnet 5.5"], {"depth": 5, "streak": 0})
@@ -191,7 +191,7 @@ class LadderTest(unittest.TestCase):
         self.assertIn("search depth 5", header)
         md = mem.tournament_markdown(state)
         self.assertIn("- Sonnet 5.5: depth 5, streak 0 of 2", md)
-        self.assertIn("- GPT-6.1 Sol: depth 4, streak 0 of 2", md)
+        self.assertIn("- DeepSeek V4.1 Flash 1017: depth 4, streak 0 of 2", md)
         # A restart loads the ladder from the repo, not from the config.
         again = forever.ForeverHooks(cfg, mem.MemoryRepo(root), None, root / "live")
         self.assertEqual(again.ladder["players"]["Sonnet 5.5"]["depth"], 5)
@@ -809,7 +809,7 @@ class RosterTest(unittest.TestCase):
         hooks = forever.ForeverHooks(cfg, repo, None, live)
         forever.run_forever(cfg, live, repo, None, hooks, max_tournaments=1, sleep=lambda s: None)
         state = seen[0]
-        self.assertEqual([p["name"] for p in state["players"]], ["Sonnet 5.5", "Haiku 5.5", "GPT-6.1 Sol", "Stockfish 19"])
+        self.assertEqual([p["name"] for p in state["players"]], ["Sonnet 5.5", "Haiku 5.5", "DeepSeek V4.1 Flash 1017", "Stockfish 19"])
         self.assertEqual(state["config"]["rounds"], 3)
         kinds = {b["name"]: (b["kind"], b["resets_at"]) for b in state["benched"]}
         self.assertEqual(kinds["GLM 5.3 Flash"], ("subscription limit", "2026-10-14T07:24:17.000Z"))

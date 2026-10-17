@@ -13,8 +13,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-HARNESS_VERSION = 1
-SOURCES_SHA256 = "43e4a90ea2e2a196a27c3972592afb58ad1701b6773563de782022b29b52b08c"
+HARNESS_VERSION = 2
+SOURCES_SHA256 = "4daac9b7a17b47ef014cb333dc280ac68ed697798cd3146f10005d8e1a184edc"
 
 ROOT = Path(__file__).resolve().parents[2]
 # Everything that decides how a game is played: the engine, the runner, its settings and its launcher.
