@@ -4,14 +4,21 @@
 
 Keep the local FastChess viewer useful during live play and replay without leaking analysis or client shortcuts into engine move selection.
 
+## Free OpenCode chess players (2026-10-19)
+
+- DeepSeek V4.1 Flash and GLM 5.3 Flash use their explicit `opencode/*-free` IDs through the real OpenCode CLI. Never imitate OpenCode headers to bypass its free-tier client restriction.
+- Gate every tool behind approval, which noninteractive OpenCode rejects; never auto-approve. Isolate configuration, keep one conversation per game, and preserve provider thinking and token usage. Reject tool-use events and errors even when the CLI exits successfully.
+- These two players and the compactor have no paid fallback. The separately named DeepSeek 1017 player remains unchanged because the free route does not establish which dated checkpoint it serves.
+- Prove both routes with real legal moves before rollout. Preserve saved games and unrelated server edits.
+
 ## One-hour tournament conversations (owner request 2026-10-16)
 
 - Normal games give each player 60 minutes with a 10-second increment. Armageddon retains its separate clocks.
 - `moveCap: false` removes the per-move cut and attempt timeout; the player's remaining game clock still limits the reply. Invalid replies still have three attempts. High reasoning remains configured for every player, including output-limit recovery when the move cap is off.
 - Claude and Codex continue their own game sessions. HTTP players carry their own visible reasoning into the next turn. Only provider-revealed thinking is shown.
 - Each player has a configured output-token ceiling. Codex uses its native model ceiling. A truncated reply must ask the same model for its move from its own thoughts, never choose a fallback move.
-- At 120,000 input tokens, DeepSeek V4.1 Flash on OpenCode Go summarises only the player's own earlier thoughts. Summarising adds no analysis or advice and does not consume the player's clock.
-- DeepSeek and GLM use OpenCode Go. Compaction has no metered fallback. Existing paid player fallback remains restricted to the previously approved empty-plan policy.
+- At 120,000 input tokens, DeepSeek V4.1 Flash on OpenCode's free route summarises only the player's own earlier thoughts. Summarising adds no analysis or advice and does not consume the player's clock.
+- DeepSeek and GLM use explicit OpenCode free IDs. Neither player nor compaction has a metered fallback. Free-tier network rejection is infrastructure unavailability, never a scored forfeit.
 - Validate the changed tests and real local subscription games before deployment. Deploy the runner at a boundary with no game or post-game reflection in progress; preserve the live stream and unrelated changes.
 - An operator may temporarily hold a player out through a numbered tournament using `out/live/roster-holds.json`. The held player receives no roster probe or game in that tournament and becomes eligible for the following tournament without a timer or service restart. A resumed tournament retains its saved roster.
 

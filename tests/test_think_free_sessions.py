@@ -374,14 +374,16 @@ class ConfigAndRunnerTest(unittest.TestCase):
         self.assertEqual(cfg["timeControlMs"], 3_600_000)
         self.assertIs(cfg["moveCap"], False)
         self.assertIs(cfg["keepReasoning"], True)
-        self.assertEqual(cfg["compaction"]["provider"], "opencode-go")
-        self.assertIn(cfg["compaction"]["model"], ("glm-5.3-flash", "deepseek-v4.1-flash"))
+        self.assertEqual(cfg["compaction"]["provider"], "opencode")
+        self.assertIn(cfg["compaction"]["model"], sp.OPENCODE_FREE_MODELS)
         players = {p["name"]: p for p in cfg["players"]}
-        for name in ("Sonnet 5.5", "GPT-6.1 Sol", "DeepSeek V4.1 Flash", "GLM 5.3 Flash"):
+        for name in ("Sonnet 5.5", "Haiku 5.5", "DeepSeek V4.1 Flash", "GLM 5.3 Flash"):
             self.assertEqual(players[name]["effort"], "high", name)
             self.assertGreater(players[name].get("maxOutputTokens", 0), 0, name)
-        self.assertEqual(players["DeepSeek V4.1 Flash"]["provider"], "opencode-go")
-        self.assertEqual(players["GLM 5.3 Flash"]["provider"], "opencode-go")
+        for name in ("DeepSeek V4.1 Flash", "GLM 5.3 Flash"):
+            self.assertEqual(players[name]["provider"], "opencode")
+            self.assertIn(players[name]["model"], sp.OPENCODE_FREE_MODELS)
+            self.assertNotIn("fallback", players[name])
 
     def test_runner_deadline_moves_out_on_an_infrastructure_wait(self):
         class Engine:

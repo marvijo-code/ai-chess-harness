@@ -35,7 +35,8 @@ import chess
 
 # CLI routes run a local subscription CLI; HTTP routes post the SAME prompt to an
 # OpenAI-compatible chat endpoint, so every player in a tournament sees one prompt.
-CLI_PROVIDERS = ("codex", "claude")
+CLI_PROVIDERS = ("codex", "claude", "opencode")
+OPENCODE_FREE_MODELS = ("opencode/deepseek-v4.1-flash-free", "opencode/glm-5.3-flash-free")
 HTTP_ROUTES = {
     # Metered OpenRouter credit (only when the owner names this route).
     "openrouter-chat": {"url": "https://openrouter.ai/api/v1/chat/completions", "key": "OPENROUTER_API_KEY", "style": "openrouter"},
@@ -55,6 +56,7 @@ ANTHROPIC_THINKING_BUDGET = {"low": 4000, "medium": 8000, "high": 16000, "xhigh"
 ANTHROPIC_VERSION = "2023-06-01"
 PROVIDERS = CLI_PROVIDERS + tuple(HTTP_ROUTES)
 DEFAULT_MODELS = {"codex": "gpt-6-sol", "claude": "claude-sonnet-5-5", "openrouter-chat": "x-ai/grok-4.7",
+                  "opencode": OPENCODE_FREE_MODELS[0],
                   "opencode-go": "deepseek-v4.1-flash", "zai": "glm-5.3", "alibaba": "deepseek-v4.1-flash"}
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
 HTTP_MAX_TOKENS = 32000
@@ -88,6 +90,10 @@ CODEX_EXE = NPM_ROOT / "@openai" / "codex" / "node_modules" / "@openai" / "codex
 CLAUDE_EXE = NPM_ROOT / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
 # Metered-credit routes must never be picked up silently from the parent shell.
 STRIPPED_ENV = {
+    "opencode": ("OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_DIR",
+                 "OPENCODE_API_KEY", "OPENCODE_GO_API_KEY", "OPENROUTER_API_KEY",
+                 "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENCODE_SERVER_PASSWORD",
+                 "OPENCODE_PERMISSION", "OPENCODE_CLIENT", "OPENCODE", "OPENCODE_PID", "OPENCODE_PURE"),
     "codex": ("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"),
     "claude": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"),
 }
@@ -153,7 +159,8 @@ UNAVAILABLE_MARKERS = ("usagelimit", "usage limit", "usage_limit", "insufficient
                        "accessdenied.unpurchased", "throttling.allocationquota",
                        "exceeded your current quota", "credit balance", "payment required", "not logged in",
                        "please run /login", "invalid api key", "unauthorized", "http 401", "http 402", "http 403",
-                       "no allowed providers")
+                       "no allowed providers", "free tier can only be used from within opencode",
+                       "free models aren't available", "abusive traffic")
 # A subscription usage or rate limit (forever tournament, LLM_LIMIT_WAIT=1): the engine waits and asks the
 # SAME move again once the limit resets. Never a forfeit, never a fallback move, never charged to the clock.
 LIMIT_MARKERS = ("usagelimit", "usage limit", "usage_limit", "rate limit", "rate_limit", "ratelimit", "too many requests",
@@ -211,8 +218,8 @@ def resolve_binary(provider: str) -> str:
     if override:
         return override
     if os.name == "nt":
-        native = CODEX_EXE if provider == "codex" else CLAUDE_EXE
-        if native.exists():
+        native = CODEX_EXE if provider == "codex" else CLAUDE_EXE if provider == "claude" else None
+        if native is not None and native.exists():
             return str(native)
         found = shutil.which(provider)
     else:
@@ -1277,6 +1284,8 @@ class SubscriptionChessClient:
         raise AssertionError("unreachable")
 
     def _ask(self, prompt: str, timeout: int) -> str:
+        if self.provider == "opencode":
+            return self._ask_opencode(prompt, timeout)
         if self.provider in HTTP_ROUTES:
             return self._ask_http(prompt, timeout)
         started = time.monotonic()
@@ -1314,6 +1323,55 @@ class SubscriptionChessClient:
                 self._cli_thoughts = [thoughts] + self._cli_thoughts
             self._attempt_think_ms = None  # two calls: charge the wall time (infrastructure crashes still excluded)
             return answer
+
+    def _ask_opencode(self, prompt: str, timeout: int) -> str:
+        """Use the actual OpenCode client for its restricted free tier, with no paid route."""
+        if self.model not in OPENCODE_FREE_MODELS:
+            raise ProviderError(f"OpenCode chess route permits only explicit free IDs, got {self.model!r}")
+        if self._image:
+            raise ProviderError("OpenCode free chess route currently supports text positions only")
+        workdir = isolated_workdir() / "opencode-free"
+        workdir.mkdir(parents=True, exist_ok=True)
+        conv = None if self._oneshot else self._conv
+        argv = [resolve_binary("opencode"), "run", "--pure", "--format", "json", "--thinking",
+                "--agent", "chess", "--model", self.model, "--variant", self.effort,
+                "--title", "AI chess"]
+        if conv and conv.get("started") and conv.get("id"):
+            argv += ["--session", conv["id"]]
+        self._cli_thoughts = []
+        self._line_times = []
+        output = self.runner(argv, prompt, timeout, workdir)
+        events = opencode_events(output)
+        errors = [event.get("error") for event in events if event.get("type") == "error"]
+        if errors:
+            raise ProviderError("OpenCode error: " + json.dumps(errors)[:600])
+        if any(event.get("type") == "tool_use" or event.get("part", {}).get("type") == "tool"
+               for event in events):
+            raise ValueError("you used a tool; choose the move by reasoning only")
+        answer = "".join(str(event.get("part", {}).get("text") or "") for event in events
+                         if event.get("type") == "text")
+        if not answer.strip():
+            raise ProviderError("OpenCode returned no answer: " + cli_error_text(output))
+        if conv is not None:
+            sid = next((event.get("sessionID") for event in events if event.get("sessionID")), None)
+            if sid:
+                conv["id"], conv["started"] = sid, True
+        usage = {"input": 0, "cached": 0, "output": 0}
+        for event in events:
+            if event.get("type") != "step_finish":
+                continue
+            part = event.get("part") or {}
+            if float(part.get("cost") or 0) > 0:
+                raise ProviderError("OpenCode free route reported a nonzero charge; refusing further play")
+            tokens = part.get("tokens") or {}
+            cache = tokens.get("cache") or {}
+            usage["input"] += int(tokens.get("input") or 0) + int(cache.get("read") or 0) + int(cache.get("write") or 0)
+            usage["cached"] += int(cache.get("read") or 0)
+            usage["output"] += int(tokens.get("output") or 0) + int(tokens.get("reasoning") or 0)
+        if any(usage.values()):
+            self._add_usage(usage)
+        self._attempt_think_ms = cli_think_ms("opencode", output, self._line_times)
+        return answer
 
     def _cli_session(self) -> dict | None:
         conv = self._conv
@@ -1783,6 +1841,8 @@ class SubscriptionChessClient:
         env = os.environ.copy()
         for key in STRIPPED_ENV[self.provider]:
             env.pop(key, None)
+        if self.provider == "opencode":
+            env.update(opencode_environment(workdir, self.model, self._system_prompt))
         if self.provider == "claude" and os.environ.get("LLM_MAX_OUTPUT_TOKENS"):
             # The CLI's own output ceiling (it errors past it): the model's real output limit from the config.
             env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(self.max_output_tokens)
@@ -1817,7 +1877,8 @@ class SubscriptionChessClient:
                     self._cli_thoughts.append(visible)
                     self._think(visible + "\n")
                 # The model starts thinking here (CLI start-up is over): tell the viewer clock.
-                if not started_signal and ('"turn.started"' in line or '"subtype":"init"' in line):
+                if not started_signal and ('"turn.started"' in line or '"subtype":"init"' in line
+                                           or '"step_start"' in line):
                     started_signal = True
                     thinking_since[0] = time.monotonic()
                     self._clock_start()
@@ -1860,6 +1921,8 @@ def cli_visible_thinking(line: str) -> str:
     except json.JSONDecodeError:
         return ""
     item = event.get("item") if isinstance(event.get("item"), dict) else None
+    if event.get("type") == "reasoning":
+        return str((event.get("part") or {}).get("text") or "")
     if item and item.get("type") == "reasoning" and event.get("type") == "item.completed":
         return str(item.get("text") or "")
     message = event.get("message") if event.get("type") == "assistant" else None
@@ -1911,16 +1974,46 @@ def cli_think_ms(provider: str, output: str, line_times: list[tuple[float, str]]
             return int(value) if value is not None else None
         except (TypeError, ValueError):
             return None
-    if provider == "codex":
+    if provider in {"codex", "opencode"}:
         began = ended = None
         for stamp, line in line_times:
-            if '"turn.started"' in line and began is None:
+            if ('"turn.started"' in line or '"step_start"' in line) and began is None:
                 began = stamp
-            elif '"turn.completed"' in line or '"turn.failed"' in line:
+            elif '"turn.completed"' in line or '"turn.failed"' in line or '"step_finish"' in line:
                 ended = stamp
         if began is not None and ended is not None and ended >= began:
             return int((ended - began) * 1000)
     return None
+
+
+def opencode_events(output: str) -> list[dict]:
+    events = []
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
+
+
+def opencode_environment(workdir: Path, model: str, system_prompt: str) -> dict[str, str]:
+    """Dedicated configuration and storage; every helper uses the same free model."""
+    if model not in OPENCODE_FREE_MODELS:
+        raise ProviderError("OpenCode chess requires an explicit free model ID")
+    # OpenCode issue #50627: removing the tool definitions also rejects its free tier.
+    # Keep definitions approval-gated. Noninteractive `run` rejects permission requests;
+    # never pass --auto, and reject every tool-use event before accepting an answer.
+    permissions = {"*": "ask", "external_directory": "deny"}
+    config = {"model": model, "small_model": model, "share": "disabled",
+              "permission": permissions, "compaction": {"auto": False},
+              "agent": {"chess": {"mode": "primary", "prompt": system_prompt,
+                                   "permission": permissions}}}
+    return {"XDG_CONFIG_HOME": str(workdir / "config"), "OPENCODE_CONFIG_DIR": str(workdir / "config"),
+            "XDG_DATA_HOME": str(workdir / "data"), "XDG_STATE_HOME": str(workdir / "state"),
+            "OPENCODE_CONFIG_CONTENT": json.dumps(config), "OPENCODE_DISABLE_AUTOUPDATE": "true",
+            "OPENCODE_DISABLE_CLAUDE_CODE": "true", "OPENCODE_DISABLE_EXTERNAL_SKILLS": "true"}
 
 
 class LoopGuard:

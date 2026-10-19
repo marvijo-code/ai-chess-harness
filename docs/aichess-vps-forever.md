@@ -435,3 +435,27 @@ python3 tools/ai_chess_forever.py --segment "Sonnet 5.5,GPT-6.1 Sol" --plies 16 
 ```
 
 `--memory-repo` with a local path never clones or pushes the public repo; `--no-push` only commits.
+# Free OpenCode routes (draft, 2026-10-19)
+
+The proposed `opencode` provider runs the real OpenCode CLI using
+`opencode/deepseek-v4.1-flash-free` and `opencode/glm-5.3-flash-free`.
+These two players and compaction have no paid fallback. The separately named
+DeepSeek 1017 player is unchanged; the free alias does not prove a dated checkpoint.
+
+OpenCode rejects free requests when all tool definitions are removed (upstream
+issue https://github.com/anomalyco/opencode/issues/50627). Keep all tools behind
+`ask`, deny external directories, never pass `--auto`, and reject tool-use events.
+Official noninteractive `run` automatically rejects permission requests. Dedicated
+configuration and storage prevent inherited plugins, paid keys or permission
+overrides from changing this boundary. Pin helper models to the same free ID.
+
+Before deployment, set `LLM_OPENCODE_BIN` to a known official installation and
+run one legal-move probe per model, then verify a resumed session and memory call.
+The isolated official 1.19.3 binary is installed on the server under
+`~/.local/lib/ai-chess-opencode-free/v1.19.3/opencode`.
+
+Deployment is blocked: both actual CLI requests receive the provider's network
+rejection, stating that free models are unavailable because abusive traffic was
+detected from the server IP. Treat this as provider unavailability, never a
+scored forfeit. Do not change IPs or forge client headers to bypass the block.
+No production configuration or service was changed by these probes.
