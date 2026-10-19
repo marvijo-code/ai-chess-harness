@@ -568,7 +568,7 @@ def main() -> None:
                 from harness_version import HARNESS_VERSION
                 print(f"id name llm-chess-engine v{HARNESS_VERSION}", flush=True)
                 print("id author marvijo/OpenRouter", flush=True)
-                print("option name Provider type combo default openrouter var openrouter var codex var claude var openrouter-chat var opencode-go var zai var alibaba", flush=True)
+                print("option name Provider type combo default openrouter var openrouter var codex var claude var opencode var openrouter-chat var opencode-go var zai var alibaba", flush=True)
                 print(f"option name Model type string default {DEFAULT_MODEL}", flush=True)
                 print("option name Temperature type spin default 20 min 0 max 100", flush=True)
                 print("option name MaxAttempts type spin default 3 min 1 max 9", flush=True)
