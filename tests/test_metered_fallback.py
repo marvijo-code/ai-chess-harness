@@ -255,3 +255,54 @@ class FallbackChainTest(unittest.TestCase):
                 "route": {"white": {"provider": "opencode-zen", "model": "deepseek-v4.1-flash-free", "metered": False}}}
         used = self.hooks.route_player(CHAIN, game)
         self.assertEqual((used["provider"], used["metered"]), ("opencode-zen", False))
+
+class FreeOnlyChainTest(unittest.TestCase):
+    """A chain of free routes must work even when no metered route is configured (no budget)."""
+
+    FREE_ONLY = dict(CHAIN, provider="alibaba", model="deepseek-v4.1-flash",
+                     fallbacks=[{"provider": "opencode-zen", "model": "glm-5.3-flash-free", "route": "free"}])
+
+    def setUp(self):
+        root = Path(tempfile.mkdtemp())
+        cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
+        self.hooks = forever.ForeverHooks(cfg, mem.MemoryRepo(root / "memory"), None, root / "live")
+        self.addCleanup(setattr, forever, "BUDGET", forever.BUDGET)
+
+    def test_the_free_route_plays_without_a_metered_budget(self):
+        forever.BUDGET = None
+        answers = [False, True]
+
+        def probe(player, cfg, live_dir, timeout):
+            ok = answers.pop(0)
+            return {"name": player["name"], "ok": ok, "kind": None if ok else "subscription limit",
+                    "reason": "" if ok else "HTTP 429: Go usage limit exceeded"}
+        self.hooks.prober = probe
+        used = self.hooks.player_for_game(self.FREE_ONLY)
+        self.assertEqual((used["provider"], used["model"], used["metered"]),
+                         ("opencode-zen", "glm-5.3-flash-free", False))
+
+    def test_the_free_route_joins_the_roster_without_a_metered_budget(self):
+        def prober(player, cfg, live_dir, timeout):
+            ok = player["provider"] != "alibaba"
+            return {"name": player["name"], "ok": ok, "route": player["provider"],
+                    "reason": "" if ok else "HTTP 429", "kind": None if ok else "subscription limit"}
+        row = forever.probe_with_fallback(self.FREE_ONLY, {"forever": {}}, Path("."), 5, None, prober)
+        self.assertTrue(row["ok"])
+        self.assertEqual(row["route"], "opencode-zen")
+
+    def test_the_budget_is_asked_only_for_players_with_a_metered_route(self):
+        free = dict(self.FREE_ONLY, name="GLM 5.3 Flash")
+        cfg = {"players": [CHAIN, free, {"name": "Stockfish 19", "provider": "uci"}]}
+        self.assertEqual(forever.players_with_metered_route(cfg), [CHAIN["name"]])
+
+
+class ChainBudgetTest(unittest.TestCase):
+    """The live bug of 2026-10-25: a "fallbacks" list left the game with no budget at all."""
+
+    def test_a_fallbacks_list_sets_the_metered_budget(self):
+        cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
+        names = forever.players_with_metered_route(cfg)
+        self.assertIn("DeepSeek V4.1 Flash", names)
+        self.assertIn("GLM 5.3 Flash", names)
+        self.assertNotIn("Stockfish 19", names)
+        self.assertNotIn("Muse Spark 1.3", names, "a player with no fallback needs no budget")

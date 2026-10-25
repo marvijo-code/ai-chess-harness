@@ -825,17 +825,23 @@ class RosterTest(unittest.TestCase):
         live = root / "live"
         repo = mem.MemoryRepo(root / "memory")
         cfg = self.cfg()
-        calls = {"n": 0}
+        checks = {"n": 0}
 
         def prober(player, cfg_, live_dir, timeout):
-            ok = calls["n"] >= len(cfg["players"]) or player["provider"] == "uci"
-            calls["n"] += 1
+            ok = checks["n"] >= 1 or player["provider"] == "uci"
             return {"name": player["name"], "ok": ok, "reason": "" if ok else "usage limit", "kind": "subscription limit"}
 
         slept, seen = [], []
         original_run, original_check = swiss.run_tournament, forever.check_roster
+
+        def counting_check(c, d, *args, **kwargs):
+            try:
+                return original_check(c, d, *args, **kwargs)
+            finally:
+                checks["n"] += 1      # one per roster check, however many routes were probed
+
         swiss.run_tournament = lambda state, c, path, log: (seen.append(state), state.update(finished=True), 0)[-1]
-        forever.check_roster = lambda c, d: original_check(c, d, 5, prober)
+        forever.check_roster = lambda c, d: counting_check(c, d, 5, prober)
         self.addCleanup(setattr, swiss, "run_tournament", original_run)
         self.addCleanup(setattr, forever, "check_roster", original_check)
         forever.run_forever(cfg, live, repo, None, forever.ForeverHooks(cfg, repo, None, live), max_tournaments=1,
