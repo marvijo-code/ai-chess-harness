@@ -41,6 +41,11 @@ HTTP_ROUTES = {
     "openrouter-chat": {"url": "https://openrouter.ai/api/v1/chat/completions", "key": "OPENROUTER_API_KEY", "style": "openrouter"},
     # OpenCode Go subscription (/zen/go/ is the subscription path, /zen/v1 is pay-per-use).
     "opencode-go": {"url": "https://opencode.ai/zen/go/v1/chat/completions", "key": "OPENCODE_GO_API_KEY", "style": "effort"},
+    # OpenCode Zen free tier (owner 2026-10-25): deepseek-v4.1-flash-free is the 1017 snapshot and
+    # glm-5.3-flash-free is the same GLM, and both cost nothing, so they are a player's first fallback.
+    # A second OpenCode Go subscription carries its own free quota: OPENCODE_GO_API_KEY_2 is asked first.
+    "opencode-zen": {"url": "https://opencode.ai/zen/v1/chat/completions", "key": "OPENCODE_GO_API_KEY_2",
+                     "alt_keys": ["OPENCODE_GO_API_KEY"], "style": "effort"},
     # Z.ai GLM Coding Plan subscription endpoint (the generic /api/paas/v4 bills pay-as-you-go).
     "zai": {"url": "https://api.z.ai/api/coding/paas/v4/chat/completions", "key": "ZAI_API_KEY", "style": "thinking"},
     # Alibaba (Bailian) Token Plan subscription: Anthropic Messages wire only (the OpenAI path is 404).
@@ -55,7 +60,8 @@ ANTHROPIC_THINKING_BUDGET = {"low": 4000, "medium": 8000, "high": 16000, "xhigh"
 ANTHROPIC_VERSION = "2023-06-01"
 PROVIDERS = CLI_PROVIDERS + tuple(HTTP_ROUTES)
 DEFAULT_MODELS = {"codex": "gpt-6-sol", "claude": "claude-sonnet-5-5", "openrouter-chat": "x-ai/grok-4.7",
-                  "opencode-go": "deepseek-v4.1-flash", "zai": "glm-5.3", "alibaba": "deepseek-v4.1-flash"}
+                  "opencode-go": "deepseek-v4.1-flash", "opencode-zen": "deepseek-v4.1-flash-free",
+                  "zai": "glm-5.3", "alibaba": "deepseek-v4.1-flash"}
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
 HTTP_MAX_TOKENS = 32000
 # A streaming reply that sends no bytes for this long is a gateway stall, not thinking
@@ -1449,7 +1455,11 @@ class SubscriptionChessClient:
 
     def _ask_http(self, prompt: str, timeout: int) -> str:
         route = HTTP_ROUTES[self.provider]
-        api_key = os.environ.get(route["key"]) or _user_env(route["key"])
+        api_key = ""
+        for key_name in [route["key"]] + list(route.get("alt_keys") or []):
+            api_key = os.environ.get(key_name) or _user_env(key_name)
+            if api_key:
+                break
         if not api_key:
             raise ProviderError(f"{route['key']} is not set")
         user: object = prompt
@@ -1500,7 +1510,7 @@ class SubscriptionChessClient:
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": BROWSER_UA}
         if style == "anthropic":
             headers["anthropic-version"] = ANTHROPIC_VERSION
-        if self.provider == "opencode-go":
+        if self.provider in ("opencode-go", "opencode-zen"):
             headers["x-opencode-session"] = self.session_id
         if self.provider == "openrouter-chat":
             headers["X-Title"] = "ai-chess-harness"

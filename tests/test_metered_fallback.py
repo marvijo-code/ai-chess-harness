@@ -179,3 +179,79 @@ class RosterFallbackTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+CHAIN = {"name": "DeepSeek V4.1 Flash", "memoryFolder": "deepseek", "provider": "opencode-go",
+         "model": "deepseek-v4.1-flash", "effort": "high", "route": "subscription",
+         "fallbacks": [{"provider": "opencode-zen", "model": "deepseek-v4.1-flash-free", "route": "free"},
+                       {"provider": "openrouter-chat", "model": "deepseek/deepseek-v4.1-flash",
+                        "metered": True, "maxPrice": {"prompt": 0.35, "completion": 1.4}, "route": "metered"}]}
+
+
+class FallbackChainTest(unittest.TestCase):
+    """A player may carry a chain of fallbacks: subscription, then the free tier, then the metered one
+    (owner 2026-10-25: the second OpenCode Go subscription and its free models play before any money)."""
+
+    def setUp(self):
+        root = Path(tempfile.mkdtemp())
+        cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
+        self.hooks = forever.ForeverHooks(cfg, mem.MemoryRepo(root / "memory"), None, root / "live")
+        self.probed = []
+        self.addCleanup(setattr, forever, "BUDGET", forever.BUDGET)
+
+    def prober(self, answers):
+        answers = list(answers)
+
+        def probe(player, cfg, live_dir, timeout):
+            self.probed.append(player["provider"])
+            ok = answers.pop(0)
+            return {"name": player["name"], "ok": ok, "kind": None if ok else "subscription limit",
+                    "reason": "" if ok else "HTTP 429"}
+        return probe
+
+    def test_the_free_route_plays_when_the_plan_is_empty_and_no_money_is_allowed(self):
+        forever.BUDGET = budget(spent=10.0)
+        self.hooks.prober = self.prober([False, True])
+        second = self.hooks.player_for_game(CHAIN)
+        self.assertEqual((second["provider"], second["model"], second["metered"]),
+                         ("opencode-zen", "deepseek-v4.1-flash-free", False))
+        self.assertEqual((second["name"], second["memoryFolder"], second["effort"]),
+                         ("DeepSeek V4.1 Flash", "deepseek", "high"))
+        self.assertEqual(self.probed, ["opencode-go", "opencode-zen"])
+        self.assertNotIn("fallbacks", second)
+
+    def test_the_metered_route_plays_only_after_the_free_route_is_out(self):
+        forever.BUDGET = budget(spent=2.0)
+        self.hooks.prober = self.prober([False, False, True])
+        second = self.hooks.player_for_game(CHAIN)
+        self.assertEqual((second["provider"], second["metered"]), ("openrouter-chat", True))
+        self.assertEqual(second["maxPrice"], {"prompt": 0.35, "completion": 1.4})
+        self.assertEqual(self.probed, ["opencode-go", "opencode-zen"],
+                         "the metered route is not probed: a probe costs money")
+
+    def test_every_route_out_and_no_money_waits_then_takes_the_subscription_back(self):
+        forever.BUDGET = budget(spent=10.0)
+        self.hooks.prober = self.prober([False, False, True])
+        waits = []
+        self.hooks.sleep = waits.append
+        self.assertIs(self.hooks.player_for_game(CHAIN), CHAIN)
+        self.assertEqual(len(waits), 1)
+
+    def test_the_free_route_joins_the_roster_for_free_when_the_cap_is_used_up(self):
+        def prober(player, cfg, live_dir, timeout):
+            ok = player["provider"] != "opencode-go"
+            return {"name": player["name"], "ok": ok, "route": f"{player['provider']} {player['model']}",
+                    "reason": "" if ok else "HTTP 429", "kind": None if ok else "subscription limit"}
+
+        row = forever.probe_with_fallback(CHAIN, {"forever": {"meteredReserveUsd": 1.0}}, Path("."), 5,
+                                          budget(spent=10.0), prober)
+        self.assertTrue(row["ok"])
+        self.assertEqual(row["route"], "opencode-zen deepseek-v4.1-flash-free")
+        self.assertEqual(row["name"], CHAIN["name"])
+        self.assertIsNone(row.get("metered"))
+
+    def test_the_notes_call_uses_the_free_route_the_game_was_played_on(self):
+        game = {"white": CHAIN["name"], "black": "Stockfish 19",
+                "route": {"white": {"provider": "opencode-zen", "model": "deepseek-v4.1-flash-free", "metered": False}}}
+        used = self.hooks.route_player(CHAIN, game)
+        self.assertEqual((used["provider"], used["metered"]), ("opencode-zen", False))

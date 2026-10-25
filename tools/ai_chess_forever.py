@@ -371,13 +371,30 @@ class MeteredBudget:
 BUDGET: MeteredBudget | None = None   # set by main() when the config allows a metered second route
 
 
-def fallback_player(player: dict) -> dict:
-    """The player on its second route: same name, memory and clock, another provider and model."""
-    second = dict(player.get("fallback") or {})
-    out = {k: v for k, v in player.items() if k != "fallback"}
-    out.update(second)
-    out["metered"] = True
+def fallbacks_of(player: dict) -> list[dict]:
+    """The player's fallback routes in order: the "fallbacks" list when given (free routes first, metered
+    last), otherwise the older single "fallback" object, which was always the metered route."""
+    routes = player.get("fallbacks")
+    if isinstance(routes, list):
+        return [r for r in routes if isinstance(r, dict)]
+    single = player.get("fallback")
+    if not isinstance(single, dict):
+        return []
+    return [dict(single, metered=single.get("metered", True))]
+
+
+def player_on_route(player: dict, route: dict) -> dict:
+    """The player on one fallback route: same name, memory and clock, another provider and model."""
+    out = {k: v for k, v in player.items() if k not in ("fallback", "fallbacks")}
+    out.update(route)
+    out["metered"] = bool(route.get("metered"))
     return out
+
+
+def fallback_player(player: dict) -> dict:
+    """The player on its metered fallback route (the last route when none is marked metered)."""
+    routes = [r for r in fallbacks_of(player) if r.get("metered")] or fallbacks_of(player)
+    return player_on_route(player, routes[-1]) if routes else dict(player)
 
 
 def probe_with_fallback(player: dict, cfg: dict, live_dir: Path, timeout: float, budget: MeteredBudget | None,
@@ -385,21 +402,24 @@ def probe_with_fallback(player: dict, cfg: dict, live_dir: Path, timeout: float,
     """Roster check of one player: the subscription route first; when it is down and today's cap leaves
     room for a tournament, the metered route. The row says which route answered."""
     row = prober(player, cfg, live_dir, timeout)
-    if row.get("ok") or not player.get("fallback") or budget is None:
+    routes = fallbacks_of(player)
+    if row.get("ok") or not routes or budget is None:
         return row
     if not plan_out_of_credits(player, row):
-        row["metered"] = "second route not used: the plan still has credits (the metered route is for an empty plan)"
+        row["metered"] = "second route not used: the plan still has credits (a fallback is for an empty plan)"
         return row
     reserve = float(cfg["forever"].get("meteredReserveUsd") or 0)
-    left = budget.remaining()
-    if left < max(reserve, 0.01):
-        row["metered"] = f"second route not used: {budget.note()}"
-        return row
-    second = prober(fallback_player(player), cfg, live_dir, timeout)
-    if second.get("ok"):
-        second.update(metered=True, name=player["name"], primary_reason=row.get("reason", ""))
-        return second
-    row["metered"] = f"second route failed too: {second.get('reason', '')}"[:240]
+    for route in routes:
+        if route.get("metered") and budget.remaining() < max(reserve, 0.01):
+            row["metered"] = f"second route not used: {budget.note()}"
+            continue
+        second = prober(player_on_route(player, route), cfg, live_dir, timeout)
+        if second.get("ok"):
+            second.update(name=player["name"], primary_reason=row.get("reason", ""))
+            if route.get("metered"):
+                second["metered"] = True
+            return second
+        row["metered"] = f"second route failed too: {second.get('reason', '')}"[:240]
     return row
 
 
@@ -436,33 +456,47 @@ class ForeverHooks(swiss.GameHooks):
         """Asked once before every game. A player with a second route: the subscription is checked with one
         real move and used when it answers; when it is down the metered route plays this game, as long as
         today's cap has room. With no route allowed the game waits here and both are checked again."""
-        if not player.get("fallback") or player.get("provider") == "uci" or BUDGET is None:
+        routes = fallbacks_of(player)
+        if not routes or player.get("provider") == "uci" or BUDGET is None:
             return player
         fv = self.cfg["forever"]
         prober = self.prober or probe_player
         name = player["name"]
+        check_timeout = float(fv.get("routeCheckTimeoutSeconds") or 120)
         while True:
-            row = prober(player, self.cfg, self.live_dir, float(fv.get("routeCheckTimeoutSeconds") or 120))
+            row = prober(player, self.cfg, self.live_dir, check_timeout)
             if row.get("ok"):
                 log(f"ROUTE {name}: the subscription route {player.get('provider')} answers, it plays this game")
                 return player
             if not plan_out_of_credits(player, row):
                 wait = float(fv.get("routeErrorRetrySeconds") or 60)
                 log(f"ROUTE {name}: subscription route failed but the plan still has credits "
-                    f"({row.get('reason', '')[:120]}); the metered route is only for an empty plan, "
+                    f"({row.get('reason', '')[:120]}); a fallback is only for an empty plan, "
                     f"asking the subscription again in {wait:.0f}s")
                 self.sleep(wait)
                 continue
-            left = BUDGET.remaining()
-            second = fallback_player(player)
-            if left > 0:
-                log(f"ROUTE {name}: subscription route down ({row.get('kind') or row.get('reason', '')}); "
-                    f"metered route {second.get('provider')} {second.get('model')} plays this game "
-                    f"(${left:.2f} of today's cap left)")
-                return second
+            reason = row.get("kind") or row.get("reason", "")
+            for route in routes:
+                if route.get("metered"):
+                    left = BUDGET.remaining()
+                    if left <= 0:
+                        continue
+                    second = player_on_route(player, route)
+                    log(f"ROUTE {name}: subscription route down ({reason}); metered route "
+                        f"{second.get('provider')} {second.get('model')} plays this game "
+                        f"(${left:.2f} of today's cap left)")
+                    return second
+                second = player_on_route(player, route)
+                check = prober(second, self.cfg, self.live_dir, check_timeout)
+                if check.get("ok"):
+                    log(f"ROUTE {name}: subscription route down ({reason}); free route "
+                        f"{route.get('provider')} {route.get('model')} answers, it plays this game")
+                    return second
+                log(f"ROUTE {name}: free route {route.get('provider')} {route.get('model')} did not answer "
+                    f"({check.get('reason', '')[:120]})")
             wait = float(fv.get("routeRetrySeconds") or 600)
-            log(f"ROUTE {name}: subscription route down and no metered money allowed ({BUDGET.note()}); "
-                f"checking both again in {wait:.0f}s")
+            log(f"ROUTE {name}: subscription route down and no fallback allowed ({BUDGET.note()}); "
+                f"checking every route again in {wait:.0f}s")
             self.sleep(wait)
 
     @staticmethod
@@ -472,7 +506,7 @@ class ForeverHooks(swiss.GameHooks):
         route = (game.get("route") or {}).get(side)
         if not route or (route.get("provider"), route.get("model")) == (player.get("provider"), player.get("model")):
             return player
-        return fallback_player(player) if route.get("metered") else dict(player, **route)
+        return player_on_route(player, route)
 
     def ladder_view(self) -> dict:
         with self.lock:
@@ -505,9 +539,10 @@ class ForeverHooks(swiss.GameHooks):
             write_text_retry(path, json.dumps(context, indent=1), delays=(1, 3, 10, 20, 30))
             engine.send(f"setoption name GameContextFile value {path}")
             with ts.lock:
-                game.setdefault("route", {})[side] = {"provider": engine.player.get("provider"),
-                                                      "model": engine.player.get("model"),
-                                                      "metered": bool(engine.player.get("metered"))}
+                used = {k: engine.player.get(k) for k in ("provider", "model", "metered", "effort", "maxPrice")
+                        if engine.player.get(k) is not None}
+                used["metered"] = bool(engine.player.get("metered"))
+                game.setdefault("route", {})[side] = used
                 game.setdefault("memory_bytes", {})[side] = len(memory.encode("utf-8"))
                 game.setdefault("memory_read", {})[side] = {
                     "player": engine.name, "folder": self.repo.folder_of(engine.name),
