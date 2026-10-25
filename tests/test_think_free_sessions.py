@@ -377,11 +377,14 @@ class ConfigAndRunnerTest(unittest.TestCase):
         self.assertEqual(cfg["compaction"]["provider"], "opencode-go")
         self.assertIn(cfg["compaction"]["model"], ("glm-5.3-flash", "deepseek-v4.1-flash"))
         players = {p["name"]: p for p in cfg["players"]}
-        for name in ("Sonnet 5.5", "GPT-6.1 Sol", "DeepSeek V4.1 Flash", "GLM 5.3 Flash"):
+        for name in ("Sonnet 5.5", "Haiku 5.5", "DeepSeek V4.1 Flash", "GLM 5.3 Flash"):
             self.assertEqual(players[name]["effort"], "high", name)
             self.assertGreater(players[name].get("maxOutputTokens", 0), 0, name)
-        self.assertEqual(players["DeepSeek V4.1 Flash"]["provider"], "opencode-go")
-        self.assertEqual(players["GLM 5.3 Flash"]["provider"], "opencode-go")
+        # Owner 2026-10-25: the free OpenCode Zen tier of his subscription plays first.
+        self.assertEqual(players["DeepSeek V4.1 Flash"]["provider"], "opencode-zen")
+        self.assertEqual(players["DeepSeek V4.1 Flash"]["model"], "deepseek-v4.1-flash-free")
+        self.assertEqual(players["GLM 5.3 Flash"]["provider"], "opencode-zen")
+        self.assertEqual(players["GLM 5.3 Flash"]["model"], "glm-5.3-flash-free")
 
     def test_runner_deadline_moves_out_on_an_infrastructure_wait(self):
         class Engine:

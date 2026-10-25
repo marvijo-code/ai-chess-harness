@@ -149,7 +149,7 @@ class LadderTest(unittest.TestCase):
         state = swiss.new_state(cfg, "t-ladder")
         state["number"] = 1
         games = {}
-        for i, (white, black) in enumerate([("Sonnet 5.5", self.SF), (self.SF, "Sonnet 5.5"), (self.SF, "DeepSeek V4.1 Flash 1017"),
+        for i, (white, black) in enumerate([("Sonnet 5.5", self.SF), (self.SF, "Sonnet 5.5"), (self.SF, "DeepSeek V4.1 Flash"),
                                             ("Sonnet 5.5", self.SF)], start=1):
             games[f"r{i}b1"] = {"id": f"r{i}b1", "round": i, "board": 1, "white": white, "black": black,
                                 "result": "*", "moves": []}
@@ -191,7 +191,7 @@ class LadderTest(unittest.TestCase):
         self.assertIn("search depth 5", header)
         md = mem.tournament_markdown(state)
         self.assertIn("- Sonnet 5.5: depth 5, streak 0 of 2", md)
-        self.assertIn("- DeepSeek V4.1 Flash 1017: depth 4, streak 0 of 2", md)
+        self.assertIn("- DeepSeek V4.1 Flash: depth 4, streak 0 of 2", md)
         # A restart loads the ladder from the repo, not from the config.
         again = forever.ForeverHooks(cfg, mem.MemoryRepo(root), None, root / "live")
         self.assertEqual(again.ladder["players"]["Sonnet 5.5"]["depth"], 5)

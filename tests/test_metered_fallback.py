@@ -306,3 +306,42 @@ class ChainBudgetTest(unittest.TestCase):
         self.assertIn("GLM 5.3 Flash", names)
         self.assertNotIn("Stockfish 19", names)
         self.assertNotIn("Muse Spark 1.3", names, "a player with no fallback needs no budget")
+
+
+class LiveRosterTest(unittest.TestCase):
+    """The roster the owner asked for on 2026-10-25: DeepSeek V4.1 Flash and GLM 5.3 Flash play on the free
+    OpenCode Zen tier of his subscription, which serves deepseek-v4.1-flash-free (the 1017 snapshot) and
+    glm-5.3-flash-free; the OpenCode Go subscription is next and metered OpenRouter is last."""
+
+    def setUp(self):
+        self.cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
+
+    def player(self, name):
+        for player in self.cfg["players"]:
+            if player["name"] == name:
+                return player
+        self.fail(f"{name} is not in the roster")
+
+    def routes(self, player):
+        return [(player["provider"], player["model"])] + [
+            (route["provider"], route["model"]) for route in player.get("fallbacks") or []]
+
+    def test_there_is_one_deepseek_player_and_it_is_the_free_1017_snapshot(self):
+        deepseeks = [p for p in self.cfg["players"] if "DeepSeek" in p["name"]]
+        self.assertEqual([p["name"] for p in deepseeks], ["DeepSeek V4.1 Flash"])
+        self.assertEqual(self.routes(deepseeks[0]),
+                         [("opencode-zen", "deepseek-v4.1-flash-free"),
+                          ("opencode-go", "deepseek-v4.1-flash"),
+                          ("openrouter-chat", "deepseek/deepseek-v4.1-flash-1017")])
+
+    def test_glm_plays_the_free_tier_first_then_its_subscription_then_metered(self):
+        self.assertEqual(self.routes(self.player("GLM 5.3 Flash")),
+                         [("opencode-zen", "glm-5.3-flash-free"),
+                          ("opencode-go", "glm-5.3-flash"),
+                          ("openrouter-chat", "z-ai/glm-5.3-flash")])
+
+    def test_only_the_last_route_of_a_chain_is_metered(self):
+        for name in ("DeepSeek V4.1 Flash", "GLM 5.3 Flash"):
+            player = self.player(name)
+            metered = [bool(route.get("metered")) for route in player["fallbacks"]]
+            self.assertEqual(metered, [False, True], f"{name} must spend money only on its last route")
