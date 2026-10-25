@@ -47,6 +47,14 @@ def tmpdir(test) -> Path:
     return path
 
 
+def budget_with_room(test) -> None:
+    """A metered cap with room, restored after the test (2026-10-25: a metered first route needs one)."""
+    before = forever.BUDGET
+    forever.BUDGET = forever.MeteredBudget(10.0, 0.5, fetch=lambda path: (
+        {"usage_daily": 0.0} if path == "/key" else {"total_credits": 100.0, "total_usage": 0.0}))
+    test.addCleanup(setattr, forever, "BUDGET", before)
+
+
 class LadderTest(unittest.TestCase):
     SF = "Stockfish 19"
 
@@ -780,6 +788,11 @@ class BinaryResolutionTest(unittest.TestCase):
 
 
 class RosterTest(unittest.TestCase):
+    def setUp(self):
+        # Muse Spark 1.3 spends money on its first route, so the roster check needs a budget with room
+        # (2026-10-25). These tests are about which players answer, not about the cap.
+        budget_with_room(self)
+
     def cfg(self):
         cfg = forever.load_forever_config(ROOT / "configs" / "ai-chess-vps.json")
         cfg["forever"]["reflection"] = False

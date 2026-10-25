@@ -177,8 +177,48 @@ class RosterFallbackTest(unittest.TestCase):
         self.assertFalse(row["ok"])
 
 
-if __name__ == "__main__":
-    unittest.main()
+class MeteredFirstRouteTest(unittest.TestCase):
+    """A player whose FIRST route is metered (Muse Spark 1.3 on OpenRouter) is held to the same daily cap
+    (owner 2026-10-25: $13.66 was spent on a $10.28 day because only metered FALLBACK routes asked)."""
+
+    CFG = {"forever": {"meteredReserveUsd": 1.0}}
+    MUSE = {"name": "Muse Spark 1.3", "memoryFolder": "muse", "provider": "openrouter-chat",
+            "model": "meta/muse-spark-1.3-contributor", "effort": "high", "route": "OpenRouter, metered"}
+
+    def probe(self, calls):
+        def prober(player, cfg, live_dir, timeout):
+            calls.append(player["provider"])
+            return {"name": player["name"], "ok": True, "route": f"{player['provider']} {player['model']}",
+                    "reason": "", "kind": None}
+        return prober
+
+    def test_it_plays_while_the_cap_has_room_for_a_tournament(self):
+        calls = []
+        row = forever.probe_with_fallback(self.MUSE, self.CFG, Path("."), 5, budget(spent=2.0), self.probe(calls))
+        self.assertTrue(row["ok"])
+        self.assertEqual(calls, ["openrouter-chat"])
+        self.assertEqual(forever.players_with_metered_route({"players": [self.MUSE]}), ["Muse Spark 1.3"])
+
+    def test_it_is_benched_once_the_cap_is_spent_and_not_one_call_is_made(self):
+        calls = []
+        row = forever.probe_with_fallback(self.MUSE, self.CFG, Path("."), 5, budget(spent=13.66), self.probe(calls))
+        self.assertFalse(row["ok"])
+        self.assertEqual(calls, [])
+        self.assertEqual(row["kind"], "daily metered cap reached")
+        self.assertIn("spent today $13.66 of $10.00", row["reason"])
+
+    def test_no_budget_at_all_benches_it_too(self):
+        calls = []
+        row = forever.probe_with_fallback(self.MUSE, self.CFG, Path("."), 5, None, self.probe(calls))
+        self.assertFalse(row["ok"])
+        self.assertEqual(calls, [])
+        self.assertIn("metered routes are off", row["reason"])
+
+    def test_the_floor_still_applies_when_the_cap_is_nearly_used(self):
+        calls = []
+        row = forever.probe_with_fallback(self.MUSE, self.CFG, Path("."), 5, budget(spent=9.6), self.probe(calls))
+        self.assertFalse(row["ok"])
+        self.assertEqual(calls, [])
 
 
 CHAIN = {"name": "DeepSeek V4.1 Flash", "memoryFolder": "deepseek", "provider": "opencode-go",
@@ -305,7 +345,11 @@ class ChainBudgetTest(unittest.TestCase):
         self.assertIn("DeepSeek V4.1 Flash", names)
         self.assertIn("GLM 5.3 Flash", names)
         self.assertNotIn("Stockfish 19", names)
-        self.assertNotIn("Muse Spark 1.3", names, "a player with no fallback needs no budget")
+        # 2026-10-25: Muse Spark 1.3 has no fallback and still spends money on its first route, so it needs the
+        # budget too (only the free and local players may be left out).
+        self.assertIn("Muse Spark 1.3", names)
+        for free in ("Sonnet 5.5", "Haiku 5.5"):
+            self.assertNotIn(free, names, f"{free} plays on a subscription, so it needs no budget")
 
 
 class LiveRosterTest(unittest.TestCase):
@@ -345,3 +389,13 @@ class LiveRosterTest(unittest.TestCase):
             player = self.player(name)
             metered = [bool(route.get("metered")) for route in player["fallbacks"]]
             self.assertEqual(metered, [False, True], f"{name} must spend money only on its last route")
+
+    def test_a_metered_first_route_is_known_to_the_budget(self):
+        """Muse Spark 1.3 spends money on its FIRST route, so the runner must build the daily budget for it."""
+        self.assertIn("Muse Spark 1.3", forever.players_with_metered_route(self.cfg))
+        for name in ("DeepSeek V4.1 Flash", "GLM 5.3 Flash"):
+            self.assertIn(name, forever.players_with_metered_route(self.cfg))
+
+
+if __name__ == "__main__":
+    unittest.main()
