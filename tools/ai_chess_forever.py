@@ -397,22 +397,30 @@ def fallback_player(player: dict) -> dict:
     return player_on_route(player, routes[-1]) if routes else dict(player)
 
 
+def players_with_metered_route(cfg: dict) -> list[str]:
+    """The players that carry a metered fallback route: only they need the daily budget."""
+    return [p["name"] for p in cfg.get("players") or []
+            if any(r.get("metered") for r in fallbacks_of(p))]
+
+
 def probe_with_fallback(player: dict, cfg: dict, live_dir: Path, timeout: float, budget: MeteredBudget | None,
                         prober) -> dict:
     """Roster check of one player: the subscription route first; when it is down and today's cap leaves
     room for a tournament, the metered route. The row says which route answered."""
     row = prober(player, cfg, live_dir, timeout)
     routes = fallbacks_of(player)
-    if row.get("ok") or not routes or budget is None:
+    if row.get("ok") or not routes:
         return row
     if not plan_out_of_credits(player, row):
         row["metered"] = "second route not used: the plan still has credits (a fallback is for an empty plan)"
         return row
     reserve = float(cfg["forever"].get("meteredReserveUsd") or 0)
     for route in routes:
-        if route.get("metered") and budget.remaining() < max(reserve, 0.01):
-            row["metered"] = f"second route not used: {budget.note()}"
-            continue
+        if route.get("metered"):
+            if budget is None or budget.remaining() < max(reserve, 0.01):
+                row["metered"] = "second route not used: " + (
+                    budget.note() if budget else "metered routes are off (meteredDailyBudgetUsd 0)")
+                continue
         second = prober(player_on_route(player, route), cfg, live_dir, timeout)
         if second.get("ok"):
             second.update(name=player["name"], primary_reason=row.get("reason", ""))
@@ -457,7 +465,9 @@ class ForeverHooks(swiss.GameHooks):
         real move and used when it answers; when it is down the metered route plays this game, as long as
         today's cap has room. With no route allowed the game waits here and both are checked again."""
         routes = fallbacks_of(player)
-        if not routes or player.get("provider") == "uci" or BUDGET is None:
+        if not routes or player.get("provider") == "uci":
+            return player
+        if BUDGET is None and not [r for r in routes if not r.get("metered")]:
             return player
         fv = self.cfg["forever"]
         prober = self.prober or probe_player
@@ -478,7 +488,7 @@ class ForeverHooks(swiss.GameHooks):
             reason = row.get("kind") or row.get("reason", "")
             for route in routes:
                 if route.get("metered"):
-                    left = BUDGET.remaining()
+                    left = BUDGET.remaining() if BUDGET is not None else 0.0
                     if left <= 0:
                         continue
                     second = player_on_route(player, route)
@@ -1015,7 +1025,7 @@ def main(argv: list[str] | None = None) -> int:
         pusher.request("Memory folders by model family: " + "; ".join(moved))
     log(f"memory repo {repo_root} (push {'on' if push else 'off'}), live dir {live_dir}")
     global BUDGET
-    second = [p["name"] for p in cfg["players"] if p.get("fallback")]
+    second = players_with_metered_route(cfg)
     if second and float(fv.get("meteredDailyBudgetUsd") or 0) > 0:
         BUDGET = MeteredBudget(fv["meteredDailyBudgetUsd"], fv.get("meteredFloorUsd"))
         log(f"metered second route for {', '.join(second)}: at most ${BUDGET.daily_usd:.2f} a day, used only while "
