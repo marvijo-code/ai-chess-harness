@@ -397,16 +397,36 @@ def fallback_player(player: dict) -> dict:
     return player_on_route(player, routes[-1]) if routes else dict(player)
 
 
+def first_route_is_metered(player: dict) -> bool:
+    """True when the player's FIRST route spends money: an explicit metered flag, or OpenRouter credit."""
+    return bool(player.get("metered")) or player.get("provider") == "openrouter-chat"
+
+
 def players_with_metered_route(cfg: dict) -> list[str]:
-    """The players that carry a metered fallback route: only they need the daily budget."""
+    """The players that can spend money, on their first route or on a metered fallback: only they need the
+    daily budget (2026-10-25: a metered FIRST route was never asked, so its player ignored the cap)."""
     return [p["name"] for p in cfg.get("players") or []
-            if any(r.get("metered") for r in fallbacks_of(p))]
+            if first_route_is_metered(p) or any(r.get("metered") for r in fallbacks_of(p))]
+
+
+def cap_note(budget: MeteredBudget | None) -> str:
+    return budget.note() if budget else "metered routes are off (meteredDailyBudgetUsd 0)"
 
 
 def probe_with_fallback(player: dict, cfg: dict, live_dir: Path, timeout: float, budget: MeteredBudget | None,
                         prober) -> dict:
     """Roster check of one player: the subscription route first; when it is down and today's cap leaves
-    room for a tournament, the metered route. The row says which route answered."""
+    room for a tournament, the metered route. The row says which route answered.
+
+    A player whose first route is metered is held back here too, before a single call: with no room left the
+    owner's daily cap would be spent by a tournament the budget never saw."""
+    reserve = float(cfg["forever"].get("meteredReserveUsd") or 0)
+    if first_route_is_metered(player):
+        left = budget.remaining() if budget is not None else 0.0
+        if left < max(reserve, 0.01):
+            return {"name": player["name"], "ok": False, "route": player.get("route"), "metered": True,
+                    "reason": "the metered first route needs today's cap: " + cap_note(budget),
+                    "kind": "daily metered cap reached"}
     row = prober(player, cfg, live_dir, timeout)
     routes = fallbacks_of(player)
     if row.get("ok") or not routes:
@@ -414,12 +434,10 @@ def probe_with_fallback(player: dict, cfg: dict, live_dir: Path, timeout: float,
     if not plan_out_of_credits(player, row):
         row["metered"] = "second route not used: the plan still has credits (a fallback is for an empty plan)"
         return row
-    reserve = float(cfg["forever"].get("meteredReserveUsd") or 0)
     for route in routes:
         if route.get("metered"):
             if budget is None or budget.remaining() < max(reserve, 0.01):
-                row["metered"] = "second route not used: " + (
-                    budget.note() if budget else "metered routes are off (meteredDailyBudgetUsd 0)")
+                row["metered"] = "second route not used: " + cap_note(budget)
                 continue
         second = prober(player_on_route(player, route), cfg, live_dir, timeout)
         if second.get("ok"):
@@ -463,7 +481,11 @@ class ForeverHooks(swiss.GameHooks):
     def player_for_game(self, player: dict) -> dict:
         """Asked once before every game. A player with a second route: the subscription is checked with one
         real move and used when it answers; when it is down the metered route plays this game, as long as
-        today's cap has room. With no route allowed the game waits here and both are checked again."""
+        today's cap has room. With no route allowed the game waits here and both are checked again.
+
+        A player whose FIRST route is metered is not asked here: the cap is asked when the roster is checked,
+        so a running tournament is never stalled between moves, and one tournament of overspend is the most
+        a spent cap can cost."""
         routes = fallbacks_of(player)
         if not routes or player.get("provider") == "uci":
             return player
@@ -1028,8 +1050,8 @@ def main(argv: list[str] | None = None) -> int:
     second = players_with_metered_route(cfg)
     if second and float(fv.get("meteredDailyBudgetUsd") or 0) > 0:
         BUDGET = MeteredBudget(fv["meteredDailyBudgetUsd"], fv.get("meteredFloorUsd"))
-        log(f"metered second route for {', '.join(second)}: at most ${BUDGET.daily_usd:.2f} a day, used only while "
-            f"the subscription route is down ({BUDGET.note()})")
+        log(f"metered routes for {', '.join(second)}: at most ${BUDGET.daily_usd:.2f} a day, used only while "
+            f"a subscription or free route is down, or by a metered first route ({BUDGET.note()})")
 
     if args.preflight:
         # The same check every new tournament starts with: one real move per enabled player, limits bench.
