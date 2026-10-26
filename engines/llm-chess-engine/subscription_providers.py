@@ -475,11 +475,16 @@ def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejectio
         legal = list(board.legal_moves)
         lines.append("Legal moves (SAN): " + " ".join(board.san(move) for move in legal))
         lines.append("Legal moves (UCI): " + " ".join(move.uci() for move in legal))
+        if tactics_facts_enabled():
+            lines.append("Computed tactics facts (exact, from the rules - trust these over eyeballing the board):")
+            lines.append(tactics_facts(board))
     for index, reason in enumerate(rejections, start=1):
         lines.append(f"Attempt {index} was rejected: {reason}. Choose again.")
     lines.append(
         'Reply with ONLY one JSON object: {"move": "<SAN or UCI>", "comment": "<one or two short sentences>"}'
     )
+    if show_legal and tactics_facts_enabled():
+        lines.append("Verify your chosen move against the tactics facts above (never leave a piece hanging) before replying.")
     return "\n".join(lines)
 
 
@@ -794,6 +799,95 @@ def move_from_text(raw: str, board: chess.Board) -> chess.Move | None:
 
 def marker_text(value: str) -> str:
     return MARKER_UNSAFE.sub("_", value)[:24] or "_"
+
+
+PIECE_VALUES = {chess.PAWN: 100, chess.KNIGHT: 300, chess.BISHOP: 300,
+                chess.ROOK: 500, chess.QUEEN: 900, chess.KING: 0}
+PIECE_LETTERS = {chess.PAWN: "P", chess.KNIGHT: "N", chess.BISHOP: "B",
+                 chess.ROOK: "R", chess.QUEEN: "Q", chess.KING: "K"}
+
+
+def tactics_facts_enabled() -> bool:
+    """Harness-computed tactics facts for the move prompt. Kill switch: LLM_TACTICS_FACTS=0."""
+    return os.environ.get("LLM_TACTICS_FACTS", "true").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _piece_tag(piece: chess.Piece | None) -> str:
+    if piece is None:
+        return "-"
+    return ("w" if piece.color == chess.WHITE else "b") + PIECE_LETTERS[piece.piece_type]
+
+
+def _square_pressure(board: chess.Board, square: chess.Square, victim_color: chess.Color) -> tuple[int, int, str, str]:
+    """(attackers, defenders, lowest-attacker tag, lowest-defender tag) for a square."""
+    attackers = [board.piece_at(s) for s in board.attackers(not victim_color, square)]
+    defenders = [board.piece_at(s) for s in board.attackers(victim_color, square)]
+    attackers = [p for p in attackers if p is not None]
+    defenders = [p for p in defenders if p is not None]
+    low_att = min(attackers, key=lambda p: PIECE_VALUES[p.piece_type]) if attackers else None
+    low_def = min(defenders, key=lambda p: PIECE_VALUES[p.piece_type]) if defenders else None
+    return len(attackers), len(defenders), _piece_tag(low_att), _piece_tag(low_def)
+
+
+def tactics_facts(board: chess.Board) -> str:
+    """Computed, exact position facts: hanging pieces plus per-legal-move safety.
+
+    Facts only - no scores, no marks, no advice. The model verifies its reply
+    against these instead of eyeballing the FEN. Cheap 1-ply reads; a full
+    static exchange evaluation is deliberately out of scope.
+    """
+    own = board.turn
+    hanging, contested, quiet_hanging_pawns = [], [], 0
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece is None or piece.color != own or piece.piece_type == chess.KING:
+            continue
+        n_att, n_def, low_att, low_def = _square_pressure(board, square, own)
+        if not n_att:
+            continue
+        name = f"{_piece_tag(piece)}{chess.square_name(square)}"
+        detail = f"{name} attacked by {n_att} (lowest {low_att}), defended by {n_def} (lowest {low_def})"
+        if n_def == 0:
+            if piece.piece_type == chess.PAWN:
+                quiet_hanging_pawns += 1
+            else:
+                hanging.append(detail + " -> HANGING")
+        elif PIECE_VALUES[piece.piece_type] >= 300:
+            contested.append(detail)
+    move_lines = []
+    for move in board.legal_moves:
+        san = board.san(move)
+        captured = board.piece_at(move.to_square)
+        if board.is_en_passant(move):
+            captured = chess.Piece(chess.PAWN, not own)
+        check = board.gives_check(move)
+        board.push(move)
+        n_att, n_def, low_att, low_def = _square_pressure(board, move.to_square, own)
+        board.pop()
+        bits = []
+        if captured is not None:
+            bits.append(f"takes {_piece_tag(captured)}")
+        if check:
+            bits.append("gives check")
+        bits.append(f"lands attacked by {n_att} (lowest {low_att}), defended by {n_def} (lowest {low_def})")
+        moved = board.piece_at(move.from_square)
+        if moved is not None and moved.piece_type != chess.KING and n_att and not n_def:
+            bits.append("-> HANGS")
+        move_lines.append(f"{san} ({move.uci()}): " + ", ".join(bits))
+    lines = []
+    if hanging:
+        lines.append("Hanging pieces (attacked, undefended - capturing them is free):")
+        lines.extend(f"  {h}" for h in hanging)
+    if contested:
+        lines.append("Attacked but defended (check the lowest values before trading):")
+        lines.extend(f"  {c}" for c in contested[:12])
+        if len(contested) > 12:
+            lines.append(f"  ... plus {len(contested) - 12} more contested pieces")
+    if quiet_hanging_pawns:
+        lines.append(f"  ... plus {quiet_hanging_pawns} hanging pawn(s)")
+    lines.append(f"Legal-move landing safety ({len(move_lines)} moves):")
+    lines.extend(f"  {m}" for m in move_lines)
+    return "\n".join(lines)
 
 
 class SubscriptionChessClient:
