@@ -88,6 +88,23 @@ class BridgeTests(unittest.TestCase):
         row = [r for r in state["standings"] if r["name"] == "DeepSeek V4.1 Flash"][0]
         self.assertEqual(row["invalid_attempts"], 2)
 
+    def test_series_in_progress_is_not_reported_finished(self):
+        # A 3-game match after one result must still look live on the page.
+        three = PGN.replace('[Result "0-1"]', '[Result "0-1"]\n[SeriesGames "3"]\n[SeriesGame "1"]')
+        with tempfile.TemporaryDirectory() as tmp:
+            state = bridge.build_state(write(Path(tmp), three), "m")
+        self.assertFalse(state["finished"], "one game of three must not end the tournament")
+        self.assertIsNone(state["winner"])
+        self.assertEqual(state["games_total"], 3)
+        self.assertEqual(state["config"]["rounds"], 3)
+
+    def test_series_complete_is_finished(self):
+        three = PGN.replace('[Result "0-1"]', '[Result "0-1"]\n[SeriesGames "1"]\n[SeriesGame "1"]')
+        with tempfile.TemporaryDirectory() as tmp:
+            state = bridge.build_state(write(Path(tmp), three), "m")
+        self.assertTrue(state["finished"])
+        self.assertEqual(state["games_total"], 1)
+
     def test_missing_or_empty_file_is_none(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(bridge.build_state(Path(tmp) / "nope.pgn", "m"))

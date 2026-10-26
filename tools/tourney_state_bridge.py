@@ -162,10 +162,17 @@ def build_state(live_pgn: Path, slug: str) -> dict | None:
         standings.append({**row, "rank": rank, "elo": 1500, "elo_delta": 0, "forfeits": 0, "flags": 0})
 
     last = games[-1]
-    finished = last.headers.get("Result", "*") != "*"
+    # A series writes SeriesGames on every game, so a match in progress is not
+    # mistaken for a finished tournament after its first result.
+    try:
+        total_games = max(len(games), int(games[0].headers.get("SeriesGames", len(games))))
+    except (TypeError, ValueError):
+        total_games = len(games)
+    all_played = len(games) >= total_games and last.headers.get("Result", "*") != "*"
+    finished = all_played
     winner = None
-    if finished and standings:
-        winner = standings[0]["name"] if standings[0]["points"] > standings[-1]["points"] else None
+    if finished and standings and standings[0]["points"] > standings[-1]["points"]:
+        winner = standings[0]["name"]
 
     return {
         "id": slug,
@@ -174,10 +181,11 @@ def build_state(live_pgn: Path, slug: str) -> dict | None:
         "standings": standings,
         "players": [{"name": n, "provider": ""} for n in table],
         "config": {"timeControlMs": 1200000, "incrementMs": 10000, "maxAttempts": 3,
-                   "startElo": 1500, "eloK": 32, "rounds": len(games)},
+                   "startElo": 1500, "eloK": 32, "rounds": total_games},
         "current_round": len(games),
         "rounds": rounds,
-        "finished": finished and len(state_games) == len(games),
+        "games_total": total_games,
+        "finished": finished,
         "winner": winner,
         "updated_epoch_ms": int(time.time() * 1000),
     }

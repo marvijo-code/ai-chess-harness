@@ -52,17 +52,30 @@ def read(path: Path) -> str:
         return ""
 
 
-def ask(prompt: str, timeout: int = 420) -> str:
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/140.0 Safari/537.36")
+
+
+def ask(prompt: str, timeout: int = 420, attempts: int = 3) -> str:
+    """One review call. The gateway rejects urllib's default User-Agent with 403."""
     key = os.environ["OPENCODE_GO_API_KEY"]
     payload = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "max_tokens": 8000}
-    req = urllib.request.Request(API, data=json.dumps(payload).encode(),
-                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
-                                          "x-opencode-session": "self-review"},
-                                 method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        data = json.loads(response.read().decode())
-    choices = data.get("choices") or [{}]
-    return (choices[0].get("message") or {}).get("content") or ""
+    body = json.dumps(payload).encode()
+    last = ""
+    for attempt in range(1, attempts + 1):
+        req = urllib.request.Request(API, data=body, method="POST", headers={
+            "Authorization": f"Bearer {key}", "Content-Type": "application/json",
+            "User-Agent": BROWSER_UA, "x-opencode-session": "self-review"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                data = json.loads(response.read().decode())
+            choices = data.get("choices") or [{}]
+            return (choices[0].get("message") or {}).get("content") or ""
+        except Exception as exc:                     # noqa: BLE001 - reported per attempt
+            last = f"{type(exc).__name__}: {exc}"
+            log(f"  review attempt {attempt}/{attempts} failed: {last[:160]}")
+            time.sleep(3 * attempt)
+    raise RuntimeError(f"review call failed after {attempts} attempts ({last[:160]})")
 
 
 def review_prompt(game_text: str, summary: str) -> str:
@@ -159,9 +172,12 @@ def main() -> int:
             if number == games:
                 break
             game_text = str(writer.games[-1])
-            said = ask(review_prompt(game_text, f"{summary['result']} ({summary['termination']})"))
-            log("review returned, applying")
-            apply_edits(said)
+            try:
+                said = ask(review_prompt(game_text, f"{summary['result']} ({summary['termination']})"))
+                log("review returned, applying")
+                apply_edits(said)
+            except Exception as exc:                 # noqa: BLE001 - a review failure is not a game failure
+                log(f"REVIEW FAILED ({type(exc).__name__}: {str(exc)[:160]}); playing on with the current tools")
             log(f"tools now: {sorted(p.stem for p in ptools.discover(TOOLS).values())}")
             # New game, new engines: the next game must load the rewritten tools.
             for key in (1, 2):
