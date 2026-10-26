@@ -2864,8 +2864,19 @@ class Analyzer:
         if shared is not None:
             self.engine = shared
         else:
-            self.engine = chess.engine.SimpleEngine.popen_uci(str(path))
-            self.engine.configure({"Threads": threads, "Hash": hash_mb})
+            # The engine can be slow to answer uci under load (a match using the same
+            # binary): retry instead of leaving the page with no analysis at all.
+            last: Exception | None = None
+            for attempt in range(3):
+                try:
+                    self.engine = chess.engine.SimpleEngine.popen_uci(str(path))
+                    self.engine.configure({"Threads": threads, "Hash": hash_mb})
+                    break
+                except Exception as exc:      # noqa: BLE001 - report the last failure below
+                    last = exc
+                    time.sleep(2 + 2 * attempt)
+            else:
+                raise RuntimeError(f"analysis engine did not start: {last}")
         self.name = self.engine.id.get("name", "Stockfish")
         self.slice_s = slice_s
         self.target_depth = target_depth
