@@ -117,7 +117,21 @@ body.stream .side > .card, body.stream .boards { transform-origin: top left; }
 .pbar .clock { font: 600 18px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 4px 8px; border-radius: 6px; background: #0b0d10; min-width: 64px; text-align: center; }
 .pbar.to-move .clock { background: #fff; color: #000; }
 .pbar .think { font-size: 12px; color: var(--accent); min-width: 88px; text-align: right; font-variant-numeric: tabular-nums; }
+/* The board and the result card that sits over it once the game is decided (owner 2026-10-26: "after a
+   game the winner is shown in the middle of the board"). The box is the size reference for the card. */
+.board-box { position: relative; min-width: 0; container-type: inline-size; }
 .board { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(8, minmax(0, 1fr)); aspect-ratio: 1; width: 100%; border-radius: 6px; overflow: hidden; user-select: none; }
+.bwin { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: .18em; padding: 7%; text-align: center; border-radius: 6px; pointer-events: none; overflow: hidden;
+  background: radial-gradient(ellipse at center, rgba(10, 12, 15, .9) 0%, rgba(10, 12, 15, .8) 52%, rgba(10, 12, 15, .45) 100%);
+  box-shadow: inset 0 0 0 1px rgba(245, 185, 66, .45); }
+.bwin[hidden] { display: none; }
+.bwin .r { font: 800 clamp(17px, 9.5cqw, 62px)/1 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #ffd479; letter-spacing: .01em; }
+.bwin .n { display: flex; align-items: center; justify-content: center; gap: .25em; flex-wrap: wrap; font-weight: 700; font-size: clamp(11px, 4.6cqw, 30px); line-height: 1.15; color: var(--text); overflow-wrap: anywhere; }
+.bwin .n .plogo { width: 1.1em; height: 1.1em; }
+.bwin .why { font-size: clamp(9px, 3cqw, 19px); line-height: 1.2; color: var(--muted); overflow-wrap: anywhere; }
+.bwin .k { font-size: clamp(9px, 2.9cqw, 18px); text-transform: uppercase; letter-spacing: .14em; color: #ffd479; font-weight: 700; }
+.bwin.draw .r { color: var(--text); }
 .sq { position: relative; display: flex; align-items: center; justify-content: center; container-type: size; min-width: 0; min-height: 0; overflow: hidden; }
 .sq.l { background: var(--sq-light); } .sq.d { background: var(--sq-dark); }
 .sq.hl::after { content: ""; position: absolute; inset: 0; background: var(--hl); }
@@ -131,10 +145,20 @@ body.stream .side > .card, body.stream .boards { transform-origin: top left; }
 .evalbar { position: relative; border-radius: 5px; overflow: hidden; background: #111; border: 1px solid var(--line); }
 .evalbar .white { position: absolute; left: 0; right: 0; bottom: 0; height: 50%; background: #f2f2f2; transition: height .6s ease; }
 .evalbar .mid { position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(255, 85, 85, .7); }
+/* No number for this position yet: the bar shows a hatched "no reading" band, never a made up 50% middle
+   (owner 2026-10-26: "the analysis bar goes to the centre randomly"). */
+.evalbar.unknown { background: repeating-linear-gradient(45deg, #15181d 0 5px, #1e232b 5px 10px); }
+.evalbar.unknown .white, .evalbar.unknown .mid { display: none; }
+/* Game over: the bar is the result (full for the winner, half for a draw), not an engine score. */
+.evalbar.done { border-color: rgba(245, 185, 66, .65); }
+.evalbar.done .mid { background: rgba(245, 185, 66, .5); }
 .evalline { margin-top: 8px; padding: 7px 10px; border-radius: 10px; background: #12161c; border: 1px solid var(--line); font-size: 13px; color: var(--muted); display: flex; gap: 10px; align-items: baseline; min-width: 0; }
 .evalline .score { font: 700 16px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--text); min-width: 58px; }
 .evalline .pv { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .evalline .eng { white-space: nowrap; }
+.evalline.result { border-color: rgba(245, 185, 66, .5); background: rgba(245, 185, 66, .07); }
+.evalline.result .score { color: #ffd479; }
+.evalline.result .pv { color: var(--text); }
 .evalline.hold .score { opacity: .6; }   /* the score of the position before: the new one is on its way */
 .chip.btn { cursor: pointer; user-select: none; } .chip.btn.on { color: var(--accent); border-color: rgba(91, 157, 255, .5); }
 .chip.btn.gesture { color: var(--warn); border-color: rgba(245, 185, 66, .45); }
@@ -797,18 +821,49 @@ function onHistory() {
 window.addEventListener("popstate", onHistory);
 window.addEventListener("hashchange", onHistory);
 
+// EVAL-BAR-START
 function evalText(a) {
   if (!a) return "...";
-  if (a.over) return "game over";
+  if (a.result) return a.text.replace("1/2-1/2", "\u00bd-\u00bd");   // the game's own score: 1-0, 0-1, ½-½
+  if (a.over) return "...";                          // decided but no score of its own: never "game over" in the bar
   if (a.mate !== null && a.mate !== undefined) return (a.mate > 0 ? "+M" : "-M") + (a.trackMate ? "" : Math.abs(a.mate));
   if (a.cp === null || a.cp === undefined) return "...";
   return (a.cp > 0 ? "+" : "") + (a.cp / 100).toFixed(2);
 }
+// The share of the bar that is White's: a number, or null for "no reading". Never 50 out of ignorance: a
+// made up middle reads as an even game, and the owner sees it as the bar jumping to the centre (2026-10-26).
 function whiteShare(a) {
-  if (!a || a.over) return 50;
+  if (!a) return null;
+  if (a.result) return a.draw ? 50 : (a.side === "w" ? 100 : 0);   // a finished game: the winner's colour
+  if (a.over) return null;
   if (a.mate !== null && a.mate !== undefined) return a.mate > 0 ? 100 : 0;
-  if (a.cp === null || a.cp === undefined) return 50;
+  if (a.cp === null || a.cp === undefined) return null;
   return 100 / (1 + Math.exp(-a.cp / 250));
+}
+// A real engine number for this position (not "this position is decided", not an engine error, not a result).
+function hasScore(a) {
+  return !!a && !a.over && !a.error && !a.result && (typeof a.cp === "number" || typeof a.mate === "number");
+}
+// A finished game's score, from the state: {s: 1|0.5|0, text, side: "w"|"b"|null}. null while it is not decided.
+function gameScore(game) {
+  const r = String((game && game.result) || "");
+  if (r === "1-0") return { s: 1, text: "1-0", side: "w" };
+  if (r === "0-1") return { s: 0, text: "0-1", side: "b" };
+  if (r === "1/2-1/2") return { s: 0.5, text: "1/2-1/2", side: null };
+  return null;
+}
+function gameOver(game) { return !!game && game.status === "finished" && !!gameScore(game); }
+function winnerOf(game) {
+  const sc = gameScore(game);
+  return sc && sc.side ? String(game[sc.side === "w" ? "white" : "black"] || "") : "";
+}
+// The bar of a finished game says who won: full for the winner, half for a draw, with the game's own score.
+// An engine score of the final position would sit in the middle (a mate position has no number at all).
+function resultEval(game) {
+  const sc = gameScore(game);
+  if (!sc) return null;
+  return { result: true, draw: sc.s === 0.5, side: sc.side, text: sc.text, winner: winnerOf(game),
+    why: String(game.termination || "") };
 }
 let analyzeOff = false;       // /api/analyze said {"enabled": false}: no replay analysis (hosted page)
 // data.eval_track[game] = {depth, cp: [White-side score per ply], best: [best move per ply]}: the pusher
@@ -825,20 +880,21 @@ function trackEval(game, ply) {
 }
 function evalFor(game, ply, total) {
   if (!analysisOn) return null;
+  if (ply >= total && gameOver(game)) return resultEval(game);   // the final position: the result, not a score
   if (ply >= total && game.status === "live") {
     const cur = (data.analysis || {})[game.id];
-    if (cur) { liveEvalHold[game.id] = cur; return cur; }
-    // A move was just played and the engine has no number for the new position yet. Keep the bar and the
-    // score of the position before it until the new number comes; never jump back to the middle.
+    if (hasScore(cur)) { liveEvalHold[game.id] = cur; return cur; }
+    // A move was just played and the engine has no number for the new position yet (or the position is
+    // decided). Keep the bar and the score of the position before it until a real number comes; never the middle.
     const held = liveEvalHold[game.id];
-    return held && !held.over && !held.error ? { ...held, best: "", pv: "", depth: 0, hold: true } : null;
+    return hasScore(held) ? { ...held, best: "", pv: "", depth: 0, hold: true } : null;
   }
   const tracked = trackEval(game, ply);
-  if (tracked !== undefined) return tracked;
+  if (tracked !== undefined) return hasScore(tracked) ? tracked : null;
   if (analyzeOff) return undefined;
   const key = `${game.id}|${ply}`;
   const have = replayEval[key];
-  if ((!have || ((have.depth || 0) < 20 && !have.over)) && Date.now() - replayFetchAt > 700) {
+  if ((!hasScore(have) || ((have.depth || 0) < 20 && !have.over)) && Date.now() - replayFetchAt > 700) {
     replayFetchAt = Date.now();
     fetch(`${API_BASE}/api/analyze?game=${encodeURIComponent(game.id)}&ply=${ply}${archiveId ? `&id=${encodeURIComponent(archiveId)}` : ""}`, { cache: "no-store" })
       .then(r => r.ok ? r.json() : null).then(j => {
@@ -846,8 +902,33 @@ function evalFor(game, ply, total) {
         if (j && !j.pending) replayEval[key] = j;
       }).catch(() => {});
   }
-  return have || null;
+  return hasScore(have) ? have : null;
 }
+// The card over the board of a finished game: the score, the winner and why it ended (owner 2026-10-26).
+function resultCard(game) {
+  const sc = gameScore(game);
+  if (!sc) return null;
+  const why = String(game.termination || "");
+  const score = sc.side ? sc.text : "&frac12;-&frac12;";
+  const tail = why ? `<div class="why">${esc(why)}</div>` : "";
+  if (!sc.side) return { draw: true, html: `<div class="r">${score}</div><div class="n">Draw</div>${tail}` };
+  return { draw: false, html: `<div class="k">Winner</div><div class="r">${score}</div><div class="n">${pn(winnerOf(game))}</div>${tail}` };
+}
+// The line beside the score: the best move while the game goes on, who won once it is decided.
+function evalPv(ev) {
+  if (!ev) return "analysing...";
+  if (ev.result) return esc(ev.draw ? "Draw" : `${ev.winner || "the winner"} won`) + (ev.why ? " - " + esc(ev.why) : "");
+  if (ev.over) return "position decided";
+  if (ev.best) return "best " + esc(ev.best) + (ev.pv ? " - " + esc(ev.pv) : "");
+  if (ev.track) return "";
+  return "analysing...";
+}
+function evalEngine(ev) {
+  if (ev && ev.result) return "result";
+  return esc((ev && ev.engine) || data.analysis_engine || "Stockfish")
+    + (ev && ev.depth && ev.depth < 99 ? " d" + ev.depth : "");
+}
+// EVAL-BAR-END
 
 // ---- maker logos: who made each model. The sprite sits at the top of <body>; a name that matches no
 // rule gets no logo (nothing is made up). The model id counts too, the route does not: DeepSeek served
@@ -1008,7 +1089,7 @@ function cardFor(id) {
   el.dataset.game = id;
   el.innerHTML = `<div class="game-head" data-focus-head></div>
     <div class="boardcol"><div class="pbar" data-part="black"></div>
-      <div class="board-wrap" data-part="wrap"><div class="evalbar" data-part="evalbar" title="Stockfish evaluation, White at the bottom"><div class="white" data-part="evalwhite"></div><div class="mid"></div></div><div class="board" data-part="board"></div></div>
+      <div class="board-wrap" data-part="wrap"><div class="evalbar unknown" data-part="evalbar" title="Stockfish evaluation, White at the bottom"><div class="white" data-part="evalwhite"></div><div class="mid"></div></div><div class="board-box"><div class="board" data-part="board"></div><div class="bwin" data-part="boardwin" hidden></div></div></div>
       <div class="pbar" data-part="white"></div><div class="caption" data-part="caption" style="display:none"></div><div class="lb lb-under" data-part="lbunder"></div></div>
     <div class="infocol"><div class="lstrip" data-part="strip"><div data-part="striphead"></div><div class="ls-grid" data-part="stripgrid"></div></div><div class="mini-bk" data-part="minibk"></div><div class="evalline" data-part="evalline"></div><div class="comment" data-part="comment"></div>
       <div class="comment" data-part="result" style="display:none"></div><div class="moves" data-part="moves"></div><div class="nav" data-part="nav"></div>
@@ -1234,16 +1315,31 @@ function updateCard(c, game, now) {
     const pos = ply < total ? fenAt(game, ply) : { squares: fenBoard(game.fen), last: total ? moves[total - 1].uci : null };
     p.board.innerHTML = boardHtml(pos.squares, pos.last);
   }
-  // undefined = analysis panel hidden; null = waiting for the first result.
-  const ev = analysisOn && data.analysis_engine ? evalFor(game, ply, total) : undefined;
+  // A finished game shows its winner in the middle of the board (until the viewer replays an earlier move).
+  const won = ply >= total && gameOver(game) ? resultCard(game) : null;
+  p.boardwin.hidden = !won;
+  if (won) {
+    p.boardwin.classList.toggle("draw", !!won.draw);
+    setHTML(p.boardwin, won.html);
+  }
+  // undefined = analysis panel hidden; null = no number for this position (the bar keeps its last fill).
+  // A finished game shows its result even when this page has no engine (an earlier tournament on marvijo.com).
+  const ev = analysisOn && (data.analysis_engine || won) ? evalFor(game, ply, total) : undefined;
   p.wrap.classList.toggle("no-eval", ev === undefined);
   p.evalbar.style.display = ev === undefined ? "none" : "";
   p.evalline.style.display = ev === undefined ? "none" : "";
   if (ev !== undefined) {
-    const h = whiteShare(ev).toFixed(1) + "%";
-    if (p.evalwhite.style.height !== h) p.evalwhite.style.height = h;
+    const share = whiteShare(ev);
+    // No reading: a hatched bar, never a made up 50% (the middle reads as an even game).
+    p.evalbar.classList.toggle("unknown", share === null);
+    p.evalbar.classList.toggle("done", !!(ev && ev.result));
+    if (share !== null) {
+      const h = Math.max(0, Math.min(100, share)).toFixed(1) + "%";
+      if (p.evalwhite.style.height !== h) p.evalwhite.style.height = h;
+    }
     p.evalline.classList.toggle("hold", !!(ev && ev.hold));
-    setHTML(p.evalline, `<span class="score">${evalText(ev)}</span><span class="pv">${ev && ev.best ? "best " + esc(ev.best) + (ev.pv ? " - " + esc(ev.pv) : "") : (ev && (ev.over || ev.track) ? "" : "analysing...")}</span><span class="eng">${esc((ev && ev.engine) || data.analysis_engine || "Stockfish")}${ev && ev.depth && ev.depth < 99 ? " d" + ev.depth : ""}</span>`);
+    p.evalline.classList.toggle("result", !!(ev && ev.result));
+    setHTML(p.evalline, `<span class="score">${evalText(ev)}</span><span class="pv">${evalPv(ev)}</span><span class="eng">${evalEngine(ev)}</span>`);
   }
   const shownMove = ply > 0 ? moves[ply - 1] : null;
   const commentWho = shownMove ? `${esc(game[shownMove.side])} - ${Math.ceil(shownMove.ply / 2)}${shownMove.side === "white" ? "." : "..."} ${esc(shownMove.san)}${nagHtml(ann[ply])}`

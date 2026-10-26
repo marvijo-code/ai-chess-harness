@@ -2,6 +2,7 @@
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,7 @@ import aichess_export_page as exporter  # noqa: E402
 import llm_tournament_viewer as viewer  # noqa: E402
 
 FLAGS = '<script>window.AICHESS_API_BASE="/api/aichess"; window.AICHESS_HOSTED=true;</script>'
+NODE = shutil.which("node")
 
 
 class ExporterTest(unittest.TestCase):
@@ -73,11 +75,30 @@ class ExporterTest(unittest.TestCase):
 
     def test_live_eval_holds_the_last_number_while_the_new_position_has_none(self):
         # after every move the engine has no result for the new position for a moment: the bar must stay
-        # where it was, not jump to the middle (owner 2026-10-11)
+        # where it was, not jump to the middle (owner 2026-10-11, again 2026-10-26)
         self.assertIn("const liveEvalHold = {};", self.page)
-        self.assertIn("if (cur) { liveEvalHold[game.id] = cur; return cur; }", self.page)
+        self.assertIn("if (hasScore(cur)) { liveEvalHold[game.id] = cur; return cur; }", self.page)
         self.assertIn('{ ...held, best: "", pv: "", depth: 0, hold: true }', self.page)
         self.assertIn("for (const k of Object.keys(liveEvalHold)) delete liveEvalHold[k];", self.page)
+
+    def test_the_bar_never_invents_the_middle(self):
+        # the middle (50%) reads as an even game, so it may only come from the engine or from a draw
+        self.assertIn("function hasScore(a) {", self.page)
+        self.assertIn("if (!a) return null;", self.page)
+        self.assertIn("if (a.over) return null;", self.page)
+        self.assertIn('p.evalbar.classList.toggle("unknown", share === null);', self.page)
+        self.assertIn('<div class="evalbar unknown" data-part="evalbar"', self.page)   # first paint: hatched, not 50%
+        self.assertIn(".evalbar.unknown .white, .evalbar.unknown .mid { display: none; }", self.page)
+
+    def test_a_finished_game_shows_its_winner_on_the_board_and_in_the_bar(self):
+        self.assertIn('<div class="board-box"><div class="board" data-part="board"></div><div class="bwin" data-part="boardwin" hidden></div></div>', self.page)
+        self.assertIn("function resultCard(game) {", self.page)
+        self.assertIn("function resultEval(game) {", self.page)
+        self.assertIn("if (ply >= total && gameOver(game)) return resultEval(game);", self.page)
+        self.assertIn('const won = ply >= total && gameOver(game) ? resultCard(game) : null;', self.page)
+        self.assertIn(".bwin { position: absolute; inset: 0;", self.page)
+        # the bar needs no engine to say who won (an earlier tournament on marvijo.com has none)
+        self.assertIn("const ev = analysisOn && (data.analysis_engine || won) ? evalFor(game, ply, total) : undefined;", self.page)
 
     def test_phone_header_is_one_row_of_chips_and_one_row_of_links(self):
         phone = self.page[self.page.index("@media (max-width: 700px) {\n  header { gap: 6px;"):]
@@ -103,6 +124,109 @@ class ExporterTest(unittest.TestCase):
     def test_a_changed_page_shape_fails_loudly(self):
         with self.assertRaises(ValueError):
             exporter.build_page(page="<html><title>Other</title><script>x</script></html>")
+
+
+def evalbar_source() -> str:
+    page = viewer.PAGE
+    return page[page.index("// EVAL-BAR-START"):page.index("// EVAL-BAR-END")]
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class EvalBarTest(unittest.TestCase):
+    """The eval bar and the result card: the page's own functions, run in node.
+
+    Owner 2026-10-26: "the analysis bar goes to the centre randomly, like after every move" and "after a
+    game the winner is shown in the middle of the board, and the analysis bar shows who won".
+    """
+
+    PRELUDE = """
+function esc(s) { return String(s === null || s === undefined ? "" : s); }
+function pn(n) { return String(n === null || n === undefined ? "" : n); }
+var data = {}, analysisOn = true, liveEvalHold = {}, replayEval = {}, replayFetchAt = 0;
+var API_BASE = "", archiveId = null;
+function fetch() { return Promise.reject(new Error("no network in the test")); }
+"""
+
+    def run_js(self, body: str, state: dict | None = None) -> dict:
+        script = (self.PRELUDE + f"data = {json.dumps(state or {})};\n" + evalbar_source() + "\n" + body)
+        out = subprocess.run([NODE, "-e", script], capture_output=True, text=True, encoding="utf-8",
+                             timeout=60)
+        self.assertEqual(out.returncode, 0, out.stderr[-2000:])
+        return json.loads(out.stdout)
+
+    def test_no_number_is_never_the_middle(self):
+        got = self.run_js("""
+          const live = {id: "g", status: "live", white: "W", black: "B", result: "*"};
+          console.log(JSON.stringify({
+            missing: whiteShare(null),
+            decided: whiteShare({over: true}),
+            engineError: whiteShare({error: "boom"}),
+            noNumber: whiteShare({fen: "x"}),
+            even: whiteShare({cp: 0}),
+            liveWithoutHold: evalFor(live, 10, 10),
+          }));
+        """, {"analysis": {}, "analysis_engine": "Stockfish 19"})
+        self.assertEqual(got, {"missing": None, "decided": None, "engineError": None, "noNumber": None,
+                               "even": 50, "liveWithoutHold": None})
+
+    def test_the_last_real_number_is_held_after_a_move(self):
+        got = self.run_js("""
+          liveEvalHold["g"] = {cp: 320, mate: null, depth: 22, engine: "Stockfish 19"};
+          const held = evalFor({id: "g", status: "live", white: "W", black: "B", result: "*"}, 12, 12);
+          console.log(JSON.stringify({cp: held.cp, hold: held.hold, best: held.best, share: whiteShare(held)}));
+        """, {"analysis": {}, "analysis_engine": "Stockfish 19"})
+        self.assertEqual(got["cp"], 320)
+        self.assertTrue(got["hold"])
+        self.assertEqual(got["best"], "")
+        self.assertGreater(got["share"], 70)   # the bar keeps the number it had, not 50
+
+    def test_a_finished_game_says_who_won_in_the_bar(self):
+        got = self.run_js("""
+          const base = {status: "finished", result: "1-0", white: "White AI", black: "Black AI",
+                        termination: "checkmate"};
+          const draw = {status: "finished", result: "1/2-1/2", white: "A", black: "B",
+                        termination: "draw by agreement"};
+          const black = {status: "finished", result: "0-1", white: "A", black: "B", termination: "B won on time"};
+          const out = {};
+          for (const [k, g] of Object.entries({white: base, draw, black})) {
+            const ev = evalFor(g, 40, 40);
+            out[k] = {share: whiteShare(ev), text: evalText(ev), pv: evalPv(ev), eng: evalEngine(ev), result: !!ev.result};
+          }
+          const replay = evalFor(base, 10, 40);   // an earlier move of the same game: the engine's job
+          out.replay = replay === null || replay === undefined ? null : replay;
+          console.log(JSON.stringify(out));
+        """)
+        self.assertEqual(got["white"]["share"], 100)
+        self.assertEqual(got["white"]["text"], "1-0")
+        self.assertEqual(got["white"]["pv"], "White AI won - checkmate")
+        self.assertEqual(got["white"]["eng"], "result")
+        self.assertEqual(got["black"]["share"], 0)
+        self.assertEqual(got["black"]["text"], "0-1")
+        self.assertEqual(got["draw"]["share"], 50)
+        self.assertEqual(got["draw"]["text"], "\u00bd-\u00bd")
+        self.assertEqual(got["draw"]["pv"], "Draw - draw by agreement")
+        self.assertIsNone(got["replay"], "only the final position is the result; earlier plies are analysed")
+
+    def test_the_winner_card_names_the_score_the_player_and_the_reason(self):
+        got = self.run_js("""
+          const win = resultCard({status: "finished", result: "1-0", white: "White AI", black: "Black AI",
+                                  termination: "checkmate"});
+          const draw = resultCard({status: "finished", result: "1/2-1/2", white: "A", black: "B",
+                                   termination: "stalemate"});
+          const live = resultCard({status: "live", result: "*", white: "A", black: "B"});
+          const pending = resultCard({status: "pending", result: "*", white: "A", black: "B"});
+          console.log(JSON.stringify({win, draw, live, pending}));
+        """)
+        self.assertFalse(got["win"]["draw"])
+        self.assertIn("1-0", got["win"]["html"])
+        self.assertIn("White AI", got["win"]["html"])
+        self.assertIn("checkmate", got["win"]["html"])
+        self.assertIn("Winner", got["win"]["html"])
+        self.assertTrue(got["draw"]["draw"])
+        self.assertIn("Draw", got["draw"]["html"])
+        self.assertIn("&frac12;-&frac12;", got["draw"]["html"])
+        self.assertIsNone(got["live"])
+        self.assertIsNone(got["pending"])
 
 
 class LocalPageTest(unittest.TestCase):

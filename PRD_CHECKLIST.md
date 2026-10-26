@@ -290,3 +290,4 @@
 - [x] Player-authored verification tools: shared policy and runner in `tools/player_tools.py`, wired into the move path, the memory allowlist and the reflection prompt (PRD 195).
 - [x] Tool tests green (12 new, 112 across the LLM and tournament suites) plus a live opencode-go proof where the player's own hang-check tool ran and the model avoided the blunder (Validation 91).
 
+- [x] Viewer eval bar never falls back to the 50% middle and a finished game shows its winner in the middle of the board plus the result in the bar (PRD 196, Validation 92).
