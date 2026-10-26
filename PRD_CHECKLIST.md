@@ -278,3 +278,15 @@
 - [x] Disk-guard tests green (23 tests, ENOSPC simulated on the state write) and the before/after run: old main ends `finished` with a game still `live` after 1 move, this build finishes the same game 1-0 in 7 moves (Validation 84).
 - [x] Viewer poll health beacon plus frozen-page watchdog in `stream.sh` (reload, then Chrome restart), reported as `page_poll_age_s` in the stream status (PRD 188).
 - [ ] Live VPS check after deployment: `status.sh` shows a fresh page poll age and the streamed board matches the live tournament id (Validation 85).
+- [x] Add `codex` and `claude` subscription providers to `llm-chess-engine` with isolated calls, rejection feedback on retries, and the 3-attempt no-fallback forfeit (PRD 189, Validation 86).
+- [x] Add `tools\play_llm_series.py` best-of-3 series runner with alternating colours, early stop, series headers, rich move comments, and `out\llm-matches` archives (PRD 190, Validation 87).
+- [x] Add the one-command `run-llm-match.ps1` launcher with `llmMatch` config defaults, preflight, and a dedicated non-destructive port (PRD 191).
+- [x] Add the viewer series scoreboard, game switching, and player-labelled thinking panel (PRD 192, Validation 88).
+- [x] Add the viewer eval graph and move-quality marks from cached local Stockfish (PRD 193, Validation 88).
+- [x] Run a live GPT-6 Sol (high) vs Sonnet 5.5 (high) series and report the viewer link (Validation 89).
+- [x] Add a harness-computed `Tactics facts` block (hanging pieces, per-legal-move landing safety, check/capture flags - facts only, no scores or marks) to the shared LLM move prompt after the legal-moves list, with an `LLM_TACTICS_FACTS=0` kill switch (PRD 194).
+- [x] Add focused tests proving the facts block flags the 25.Nxf7?? hang from the DeepSeek-vs-SF4 diagnostic game and stays silent on safe positions (Validation 90).
+- [ ] Probe DeepSeek (opencode-go) on the pre-Nxf7 position with facts on and confirm the blunder line is rejected, then run a 1-game diagnostic and report hung-material rate (Validation 90).
+- [x] Player-authored verification tools: shared policy and runner in `tools/player_tools.py`, wired into the move path, the memory allowlist and the reflection prompt (PRD 195).
+- [x] Tool tests green (12 new, 112 across the LLM and tournament suites) plus a live opencode-go proof where the player's own hang-check tool ran and the model avoided the blunder (Validation 91).
+
