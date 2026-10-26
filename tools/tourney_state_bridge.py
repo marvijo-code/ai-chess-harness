@@ -68,83 +68,117 @@ def _record(points: float, finished: bool) -> tuple[int, int, int]:
     return 0, 0, 1
 
 
-def build_state(live_pgn: Path, slug: str) -> dict | None:
-    """Tournament-shaped state for the match in `live_pgn`, or None when unreadable."""
+def _read_games(live_pgn: Path) -> list[chess.pgn.Game]:
+    """Every game in the PGN, in order (a series writes them one after another)."""
     try:
         text = live_pgn.read_text(encoding="utf-8")
     except OSError:
-        return None
-    if not text.strip():
-        return None
-    try:
-        game = chess.pgn.read_game(io.StringIO(text))
-    except (ValueError, KeyError):
-        return None
-    if game is None:
-        return None
+        return []
+    games = []
+    handle = io.StringIO(text)
+    while True:
+        try:
+            game = chess.pgn.read_game(handle)
+        except (ValueError, KeyError):
+            break
+        if game is None:
+            break
+        if not game.headers.get("White") and not game.headers.get("Black"):
+            break
+        games.append(game)
+    return games
 
-    headers = game.headers
-    archive = _archive(slug, live_pgn)
-    extras, invalid = _move_extras(archive)
 
+def _moves_of(game: chess.pgn.Game, extras: dict[int, dict]) -> tuple[list[dict], str]:
     board = game.board()
     moves = []
     for ply, move in enumerate(game.mainline_moves(), start=1):
-        san = board.san(move)
         extra = extras.get(ply) or {}
-        moves.append({
-            "ply": ply,
-            "side": "white" if board.turn == chess.WHITE else "black",
-            "san": san,
-            "uci": move.uci(),
-            "tries": int(extra.get("tries", 1)),
-            "elapsed_ms": int(extra.get("elapsed_ms", 0)),
-            "comment": str(extra.get("comment") or ""),
-        })
+        moves.append({"ply": ply,
+                      "side": "white" if board.turn == chess.WHITE else "black",
+                      "san": board.san(move), "uci": move.uci(),
+                      "tries": int(extra.get("tries", 1)),
+                      "elapsed_ms": int(extra.get("elapsed_ms", 0)),
+                      "comment": str(extra.get("comment") or "")})
         board.push(move)
+    return moves, board.fen()
 
-    result = headers.get("Result", "*")
-    finished = result != "*"
-    white = headers.get("White", "White")
-    black = headers.get("Black", "Black")
-    try:
-        clocks = {"white": int(headers.get("WhiteClockMs", 600000)),
-                  "black": int(headers.get("BlackClockMs", 600000))}
-    except ValueError:
-        clocks = {"white": 600000, "black": 600000}
 
-    wpts, bpts = _points(result, finished)
-    ww, wd, wl = _record(wpts, finished)
-    bw, bd, bl = _record(bpts, finished)
+def build_state(live_pgn: Path, slug: str) -> dict | None:
+    """Tournament-shaped state for every game in `live_pgn`, or None when unreadable."""
+    games = _read_games(live_pgn)
+    if not games:
+        return None
+
+    archive = _archive(slug, live_pgn)
+    archived = archive.get("games") or []
+
+    state_games: dict[str, dict] = {}
+    rounds: list[dict] = []
+    table: dict[str, dict] = {}
+    title_white = title_black = ""
+
+    for index, game in enumerate(games, start=1):
+        gid = f"r{index}b1"
+        headers = game.headers
+        white = headers.get("White", "White")
+        black = headers.get("Black", "Black")
+        title_white, title_black = title_white or white, title_black or black
+        extras, invalid = _move_extras({"games": [archived[index - 1]]} if index - 1 < len(archived) else {})
+        moves, fen = _moves_of(game, extras)
+        result = headers.get("Result", "*")
+        finished = result != "*"
+        try:
+            clocks = {"white": int(headers.get("WhiteClockMs", 600000)),
+                      "black": int(headers.get("BlackClockMs", 600000))}
+        except ValueError:
+            clocks = {"white": 600000, "black": 600000}
+
+        state_games[gid] = {
+            "id": gid, "board": 1, "round": index, "white": white, "black": black,
+            "status": "finished" if finished else "live", "result": result,
+            "termination": headers.get("Termination", ""), "fen": fen, "moves": moves,
+            "clocks": clocks,
+        }
+        rounds.append({"round": index, "status": "finished" if finished else "live",
+                       "pairings": [{"game_id": gid, "white": white, "black": black}]})
+
+        wpts, bpts = _points(result, finished)
+        for name, pts, bad in ((white, wpts, invalid["white"]), (black, bpts, invalid["black"])):
+            row = table.setdefault(name, {"name": name, "points": 0.0, "played": 0,
+                                          "wins": 0, "draws": 0, "losses": 0,
+                                          "invalid_attempts": 0})
+            row["points"] += pts
+            if finished:
+                row["played"] += 1
+                wins, draws, losses = _record(pts, finished)
+                row["wins"] += wins
+                row["draws"] += draws
+                row["losses"] += losses
+            row["invalid_attempts"] += bad
+
+    standings = []
+    for rank, row in enumerate(sorted(table.values(), key=lambda r: -r["points"]), start=1):
+        standings.append({**row, "rank": rank, "elo": 1500, "elo_delta": 0, "forfeits": 0, "flags": 0})
+
+    last = games[-1]
+    finished = last.headers.get("Result", "*") != "*"
+    winner = None
+    if finished and standings:
+        winner = standings[0]["name"] if standings[0]["points"] > standings[-1]["points"] else None
 
     return {
         "id": slug,
-        "title": f"{white} vs {black}",
-        "games": {GAME_ID: {
-            "id": GAME_ID, "board": 1, "round": 1, "white": white, "black": black,
-            "status": "live" if not finished else "finished",
-            "result": result, "termination": headers.get("Termination", ""),
-            "fen": board.fen(), "moves": moves, "clocks": clocks,
-        }},
-        "standings": [
-            {"name": white, "rank": 1 if wpts >= bpts else 2, "points": wpts,
-             "played": 1 if finished else 0, "elo": 1500, "elo_delta": 0,
-             "wins": ww, "draws": wd, "losses": wl,
-             "forfeits": 0, "flags": 0, "invalid_attempts": invalid["white"]},
-            {"name": black, "rank": 1 if bpts > wpts else 2, "points": bpts,
-             "played": 1 if finished else 0, "elo": 1500, "elo_delta": 0,
-             "wins": bw, "draws": bd, "losses": bl,
-             "forfeits": 0, "flags": 0, "invalid_attempts": invalid["black"]},
-        ],
-        "players": [{"name": white, "provider": headers.get("WhiteProvider", "")},
-                    {"name": black, "provider": headers.get("BlackProvider", "")}],
-        "config": {"timeControlMs": 600000, "incrementMs": 10000, "maxAttempts": 3,
-                   "startElo": 1500, "eloK": 32, "rounds": 1},
-        "current_round": 1,
-        "rounds": [{"round": 1, "status": "finished" if finished else "live",
-                    "pairings": [{"game_id": GAME_ID, "white": white, "black": black}]}],
-        "finished": finished,
-        "winner": (white if result == "1-0" else black if result == "0-1" else None) if finished else None,
+        "title": f"{title_white} vs {title_black}",
+        "games": state_games,
+        "standings": standings,
+        "players": [{"name": n, "provider": ""} for n in table],
+        "config": {"timeControlMs": 1200000, "incrementMs": 10000, "maxAttempts": 3,
+                   "startElo": 1500, "eloK": 32, "rounds": len(games)},
+        "current_round": len(games),
+        "rounds": rounds,
+        "finished": finished and len(state_games) == len(games),
+        "winner": winner,
         "updated_epoch_ms": int(time.time() * 1000),
     }
 

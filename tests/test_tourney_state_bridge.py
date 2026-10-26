@@ -85,7 +85,8 @@ class BridgeTests(unittest.TestCase):
         move = state["games"]["r1b1"]["moves"][0]
         self.assertEqual(move["elapsed_ms"], 2171)
         self.assertEqual(move["comment"], "king pawn")
-        self.assertEqual(state["standings"][0]["invalid_attempts"], 2)
+        row = [r for r in state["standings"] if r["name"] == "DeepSeek V4.1 Flash"][0]
+        self.assertEqual(row["invalid_attempts"], 2)
 
     def test_missing_or_empty_file_is_none(self):
         with tempfile.TemporaryDirectory() as tmp:
