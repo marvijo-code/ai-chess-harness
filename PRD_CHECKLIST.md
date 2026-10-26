@@ -276,3 +276,5 @@
 - [x] Twitch-gate tests green and the keyless VPS pilot passed: main target 95.0 s of 95 s, the gate target received 24 s of a 34 s open window (10 s reconnect), nothing while closed, no key in any log (Validation 83).
 - [x] Full disk guard: state saves that never raise, quiet side-file writes, game threads replayed from saved moves, the round gate, the free-disk check before a tournament and every round, the viewer "disk low" chip (PRD 187).
 - [x] Disk-guard tests green (23 tests, ENOSPC simulated on the state write) and the before/after run: old main ends `finished` with a game still `live` after 1 move, this build finishes the same game 1-0 in 7 moves (Validation 84).
+- [x] Viewer poll health beacon plus frozen-page watchdog in `stream.sh` (reload, then Chrome restart), reported as `page_poll_age_s` in the stream status (PRD 188).
+- [ ] Live VPS check after deployment: `status.sh` shows a fresh page poll age and the streamed board matches the live tournament id (Validation 85).

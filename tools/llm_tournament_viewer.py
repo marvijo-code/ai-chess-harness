@@ -2732,6 +2732,20 @@ if (!STREAM) {
   pollMemory();
   setInterval(pollMemory, 120000);   // a file changes once per game
 }
+// Liveness beacon for the stream watchdog. Chrome can lose its network silently while the page's
+// timers keep running: fetch() then throws, poll() keeps the last frame, and the encoder keeps
+// sending that frozen frame. stream.sh reads these stamps over CDP and reloads or restarts the
+// browser when no poll has reached the viewer for a while.
+window.__aichessHealth = { startedAt: Date.now(), pollOkAt: 0, pollErrAt: 0, pollOk: 0, pollErr: 0, id: null };
+function healthOk() {
+  const h = window.__aichessHealth;
+  h.pollOkAt = Date.now(); h.pollOk++;
+  h.id = (data && data.id) || null;
+}
+function healthErr() {
+  const h = window.__aichessHealth;
+  h.pollErrAt = Date.now(); h.pollErr++;
+}
 async function poll() {
   const want = archiveId;
   if (want && isArchive()) return;   // an earlier tournament never changes: it is loaded once
@@ -2740,6 +2754,7 @@ async function poll() {
     // Hosted: ask only for a newer state; the answer is a tiny {"unchanged": true} when nothing moved.
     if (HOSTED && data && data.updated_epoch_ms) q += `${q ? "&" : "?"}since=${encodeURIComponent(data.updated_epoch_ms)}`;
     const res = await fetch(`${API_BASE}/api/tournament${q}`, { cache: "no-store" });
+    healthOk();   // any HTTP answer proves the page can still reach the viewer
     const sentAt = Date.now();
     if (want !== archiveId) return;   // another tournament was picked while this answer was on its way
     if (want && res.status === 404) { archiveMissing = true; renderArchiveBar(); return; }
@@ -2778,6 +2793,7 @@ async function poll() {
       renderBanner();
     }
   } catch (e) {
+    healthErr();
     if (HOSTED) { feedFailed = true; renderBanner(); }
     /* keep the last frame */
   }

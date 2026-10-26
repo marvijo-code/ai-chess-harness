@@ -8,8 +8,9 @@
 # Everything it starts is its own: its own X display, its own PulseAudio daemon (socket in the run dir),
 # its own Chrome profile. On exit it stops exactly those processes.
 # Supervision inside: ffmpeg is restarted on exit (RTMP drop) with backoff; Chrome is restarted when it
-# dies, shows a Chrome error page while the viewer is up, or grows past AICHESS_CHROME_MAX_MB. If Xvfb or
-# PulseAudio dies the script exits non-zero and systemd restarts the whole unit.
+# dies, shows a Chrome error page while the viewer is up, grows past AICHESS_CHROME_MAX_MB, or keeps a page
+# that can no longer poll the viewer (Chrome can lose its network silently, and the frozen page would be
+# encoded forever). If Xvfb or PulseAudio dies the script exits non-zero and systemd restarts the whole unit.
 #
 # The stream key is read from $AICHESS_STREAM_KEY_FILE (default ~/.config/ai-chess/youtube-stream.env,
 # lines YOUTUBE_RTMP_URL=... and YOUTUBE_STREAM_KEY=...). It is never exported to Chrome and never
@@ -276,17 +277,33 @@ FF_RESTARTS=0
 TWITCH_ON=0
 RTMP_CONNS=0
 LAST_CONNS=""
+# Frozen-page detection. The page publishes window.__aichessHealth.pollOkAt on every answer from the
+# viewer. Chrome can lose its network while its timers keep running: poll() then keeps drawing the last
+# frame and ffmpeg keeps encoding it, so the broadcast silently falls behind the tournament. The page is
+# not trusted to heal itself; this watchdog reloads it first and restarts Chrome if the reload does not
+# bring a fresh poll back.
+PAGE_STALE_SECONDS="${AICHESS_PAGE_STALE_SECONDS:-120}"
+PAGE_POLL_AGE=""
+PAGE_STALE_AT=0
+PAGE_RESTART_AT=0
+page_poll_age() {
+  local started now_ms
+  started="$(python3 "$HERE/cdp.py" --port "$CDP_PORT" eval 'window.__aichessHealth ? (window.__aichessHealth.pollOkAt||0) : 0' 2>/dev/null | tr -cd '0-9')"
+  [ -n "$started" ] && [ "$started" -gt 0 ] || return 0
+  now_ms="$(date +%s%3N)"
+  echo $(( (now_ms - started) / 1000 ))
+}
 # ffmpeg's only network connections are its RTMP targets (screen and sound come over local sockets)
 rtmp_conns() { alive "$FF_PID" || { echo 0; return; }; ss -Htnp state established 2>/dev/null | grep -c "pid=$FF_PID,"; }
 start_ffmpeg || true
 LAST_CHECK=0
 
 write_status() {
-  printf '{"updated":"%s","url":"%s","size":"%s","fps":%s,"preset":"%s","vbitrate_k":%s,"output":"%s","music":%s,"xvfb_pid":%s,"pulse_pid":%s,"chrome_pid":%s,"chrome_mb":%s,"chrome_restarts":%s,"ffmpeg_pid":%s,"ffmpeg_restarts":%s,"seeded":%s,"twitch":%s,"twitch_gate":%s,"rtmp_conns":%s}\n' \
+  printf '{"updated":"%s","url":"%s","size":"%s","fps":%s,"preset":"%s","vbitrate_k":%s,"output":"%s","music":%s,"xvfb_pid":%s,"pulse_pid":%s,"chrome_pid":%s,"chrome_mb":%s,"chrome_restarts":%s,"ffmpeg_pid":%s,"ffmpeg_restarts":%s,"seeded":%s,"twitch":%s,"twitch_gate":%s,"rtmp_conns":%s,"page_poll_age_s":%s}\n' \
     "$(date -Is)" "$URL" "$SIZE" "$FPS" "$PRESET" "$VB" "$([ "$OUTPUT" = rtmp ] && echo rtmp || echo "$OUTPUT")" \
     "$(alive "$MUSIC_PID" && echo true || echo false)" \
     "${XVFB_PID:-0}" "${PULSE_PID:-0}" "${CHROME_PID:-0}" "$(chrome_rss_mb)" "$CHROME_RESTARTS" "${FF_PID:-0}" "$FF_RESTARTS" "$SEEDED" \
-    "$([ "$TWITCH_ON" = 1 ] && echo true || echo false)" "$([ -n "$TWITCH_GATE" ] && echo true || echo false)" "${RTMP_CONNS:-0}" \
+    "$([ "$TWITCH_ON" = 1 ] && echo true || echo false)" "$([ -n "$TWITCH_GATE" ] && echo true || echo false)" "${RTMP_CONNS:-0}" "${PAGE_POLL_AGE:-null}" \
     >"$RUN/status.json.tmp" && mv "$RUN/status.json.tmp" "$RUN/status.json"
 }
 
@@ -327,6 +344,25 @@ while true; do
     if echo "$info" | grep -q 'chrome-error://' && curl -sf -o /dev/null --max-time 3 "$URL"; then
       log "chrome shows an error page and the viewer is up; reloading"
       python3 "$HERE/cdp.py" --port "$CDP_PORT" reload >/dev/null 2>&1 || true
+    fi
+    # A loaded page whose polls stopped is frozen even when Chrome itself looks healthy. Only judge a
+    # page that has reported at least once (old page JS has no beacon) and only while the viewer answers.
+    PAGE_POLL_AGE="$(page_poll_age)"
+    if [ -n "$PAGE_POLL_AGE" ] && curl -sf -o /dev/null --max-time 3 "$URL"; then
+      if [ "$PAGE_POLL_AGE" -gt "$PAGE_STALE_SECONDS" ]; then
+        if [ "$PAGE_STALE_AT" = 0 ]; then
+          PAGE_STALE_AT=$now
+          log "page has not polled the viewer for ${PAGE_POLL_AGE}s (frozen frame); reloading it"
+          python3 "$HERE/cdp.py" --port "$CDP_PORT" reload >/dev/null 2>&1 || true
+        elif [ $(( now - PAGE_STALE_AT )) -ge 90 ] && [ $(( now - PAGE_RESTART_AT )) -ge 600 ]; then
+          log "page still frozen ${PAGE_POLL_AGE}s after a reload; restarting chrome"
+          stop_chrome; CHROME_RESTARTS=$((CHROME_RESTARTS + 1)); start_chrome
+          PAGE_RESTART_AT=$now; PAGE_STALE_AT=0; PAGE_POLL_AGE=""
+        fi
+      elif [ "$PAGE_STALE_AT" != 0 ]; then
+        log "page polls again (${PAGE_POLL_AGE}s old); no restart needed"
+        PAGE_STALE_AT=0
+      fi
     fi
     mb="$(chrome_rss_mb)"
     if [ "$mb" -gt "$CHROME_MAX_MB" ]; then

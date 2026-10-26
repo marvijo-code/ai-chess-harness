@@ -535,6 +535,27 @@ class PageTest(unittest.TestCase):
         self.assertIn("body.stream.focus-mode .side { display: flex; }", viewer.PAGE)
         self.assertIn("body.stream .card.focused .lb-side, body.stream .card.focused .lb-under, body.stream .card.focused .mini-bk { display: none; }", viewer.PAGE)
 
+    def test_page_publishes_a_poll_health_beacon(self):
+        # Chrome can lose its network while its timers keep running; the stream watchdog needs a stamp
+        # that only moves when a real answer from the viewer arrived, not when the page merely repaints.
+        page = viewer.PAGE
+        self.assertIn("window.__aichessHealth = {", page)
+        self.assertIn("h.pollOkAt = Date.now(); h.pollOk++;", page)
+        self.assertIn("h.pollErrAt = Date.now(); h.pollErr++;", page)
+        body = page[page.index("async function poll() {"):page.index("// A header that wraps")]
+        self.assertIn("healthOk();", body)
+        self.assertLess(body.index("await fetch"), body.index("healthOk();"), "the stamp must follow the answer")
+        self.assertGreater(body.index("healthErr();"), body.index("catch (e) {"), "a failed fetch must move the error stamp")
+
+    def test_stream_watchdog_reloads_a_frozen_page_then_restarts_chrome(self):
+        script = (Path(__file__).resolve().parents[1] / "tools" / "aichess_stream" / "stream.sh").read_text(encoding="utf-8")
+        self.assertIn("window.__aichessHealth ? (window.__aichessHealth.pollOkAt||0) : 0", script)
+        self.assertIn('PAGE_STALE_SECONDS="${AICHESS_PAGE_STALE_SECONDS:-120}"', script)
+        self.assertIn("page has not polled the viewer for", script)
+        self.assertIn("page still frozen", script)
+        self.assertIn("restarting chrome", script)
+        self.assertIn('"page_poll_age_s":%s', script)
+
     def test_no_external_assets(self):
         self.assertNotIn("http://", viewer.PAGE.replace("http://www.w3.org", ""))
         self.assertNotIn("https://", viewer.PAGE)

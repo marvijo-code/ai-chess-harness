@@ -27,6 +27,9 @@ import json, sys, time, os
 s = json.load(open(sys.argv[1]))
 print(f"  {s['size']}@{s['fps']} {s['preset']} {s['vbitrate_k']}k -> {s['output']}  music={s['music']}  seeded={s['seeded']}")
 print(f"  chrome {s['chrome_mb']} MB, restarts: chrome {s['chrome_restarts']}, ffmpeg {s['ffmpeg_restarts']}  (status {s['updated']})")
+poll_age = s.get("page_poll_age_s")
+if poll_age is not None:
+    print(f"  page polls: {poll_age}s old" + ("  <- FROZEN, the watchdog reloads or restarts Chrome" if poll_age > 120 else ""))
 if s.get("twitch"):
     n = s.get("rtmp_conns", 0)
     second = "Twitch gate" if s.get("twitch_gate") else "Twitch"
