@@ -183,6 +183,16 @@ answer then comes from the answer-from-thinking step).
   new tournament without a reload. Verified on the VPS with headless Chrome at 1920x1080: champion
   shown at load, closed after about 20 s, title switched from #2 to #3 live, no element outside
   1920x1080 in 36 checks over 3 minutes.
+- Eval bar and the result card (owner 2026-10-26, harness PR #77). The bar may only be painted from
+  a real engine number (`hasScore`) or from the game's own result; every "no number" case (first poll
+  of a game, the moment after a move, a decided position, an engine error, a finished game whose
+  final position has no score) keeps `liveEvalHold` or shows the hatched `evalbar unknown` band. A
+  card is born hatched, so the CSS 50% default is never the first paint. A finished game's last
+  position shows `.bwin` in the middle of the board (score, player with logo, reason; sizes in `cqw`,
+  so 306 px grid cards, 502 px focus, 692 px stream and 312 px phone all read) and its bar is the
+  result (100 / 0 / 50 with the game's score and "result" in place of the engine name). The card
+  belongs to the final ply only: stepping back hides it. No engine is needed for a result, so an
+  archived tournament on marvijo.com shows the same card (it has no `analysis_engine`).
 
 ## Viewer follow
 
