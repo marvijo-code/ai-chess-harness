@@ -89,10 +89,16 @@ def main() -> int:
     parser.add_argument("--effort", default="high")
     parser.add_argument("--history-uci", help="comma separated moves that lead to the trap, for in-context runs")
     parser.add_argument("--clock-ms", type=int, help="clock for the side to move (Black) at that point")
+    parser.add_argument("--provider", help="ad hoc route, e.g. openrouter-chat")
+    parser.add_argument("--model-id", help="ad hoc model id, e.g. openai/gpt-6-luna")
     args = parser.parse_args()
 
+    models = list(MODELS)
+    if args.provider and args.model_id:
+        label = f"{args.model_id} ({args.provider})"
+        models = [(label, args.provider, args.model_id)]
     rows = []
-    for name, provider, model in MODELS:
+    for name, provider, model in models:
         if args.only and args.only.lower() not in name.lower():
             continue
         for run in range(1, args.runs + 1):
@@ -120,7 +126,7 @@ def main() -> int:
 
     print("\n=== SUMMARY ===")
     print(f"{'model':22s} {'runs':5s} {'lost queen':10s} {'lost material':13s} {'safe':5s}")
-    for name, _p, _m in MODELS:
+    for name, _p, _m in models:
         mine = [r for r in rows if r[0] == name]
         if not mine:
             continue

@@ -8,6 +8,7 @@ The unit tests pin the facts and the shared tool. The integration test runs a
 real tournament model on this exact position and is skipped unless
 RUN_LLM_LIVE=1 (it spends subscription time, so it never runs by accident).
 """
+import json
 import os
 import sys
 import unittest
@@ -23,7 +24,15 @@ import player_tools as pt  # noqa: E402
 import subscription_providers as sp  # noqa: E402
 
 FEN = "r4rk1/pbpq1p1p/1p3p2/1P1p1n2/3P2QP/2B1P1P1/P4PB1/R4RK1 b - - 1 19"
-HISTORY = []          # the position alone is enough: it is the trap, not the line
+# The position alone is enough to test the trap; GAME_HISTORY reproduces the context
+# it actually arrived in (round 2, after 37 moves, Black's clock at 12:15).
+HISTORY = []
+GAME_HISTORY = ["d2d4", "g8f6", "c2c4", "e7e6", "g1f3", "b7b6", "g2g3", "c8b7", "f1g2", "f8e7",
+                "e1g1", "e8g8", "b1c3", "f6e4", "c1d2", "e7f6", "h2h4", "d7d5", "c4d5", "e4c3",
+                "d2c3", "e6d5", "b2b4", "b8c6", "e2e3", "c6e7", "f3e5", "e7c6", "b4b5", "c6e7",
+                "e5g4", "e7f5", "d1f3", "d8d7", "g4f6", "g7f6", "f3g4"]
+GAME_BLACK_CLOCK_MS = 735017
+LIVE_RUNS = 3
 TRAP_MOVES = {"f5g7", "b7b5"}   # Ng7 (the blunder) and any knight hop off f5
 
 
@@ -90,20 +99,81 @@ class QueenTrapFactsTests(unittest.TestCase):
         self.assertIn("queen on d7", report.output)
 
 
-@unittest.skipUnless(os.environ.get("RUN_LLM_LIVE") == "1", "live model test: set RUN_LLM_LIVE=1")
-class QueenTrapLiveTests(unittest.TestCase):
-    """One real model on the trap position. Asserts the harness, reports the choice."""
+def _queen_loss(board_after: chess.Board) -> int:
+    return loses_the_queen(board_after)
 
-    def test_model_reply_is_legal_and_tool_ran(self):
-        provider = os.environ.get("TRAP_PROVIDER", "opencode-go")
-        model = os.environ.get("TRAP_MODEL", "deepseek-v4.1-flash")
-        client = sp.SubscriptionChessClient(provider, lambda _m: None)
-        client.tools_dir = None
-        move, _comment = client.choose_move(
-            chess.Board(FEN), {"wtime": 600000, "btime": 600000, "winc": 10000, "binc": 10000}, HISTORY)
-        self.assertNotEqual(move, "0000", "the model forfeited instead of answering")
-        self.assertIn(chess.Move.from_uci(move), chess.Board(FEN).legal_moves)
-        self.assertIn("loose-piece-check", [r["name"] for r in client.last_report.get("tools", [])])
+
+def _verdict(move_uci: str) -> tuple[str, str]:
+    board = chess.Board(FEN)
+    if not move_uci or move_uci == "0000":
+        return "no reply", "provider failed or forfeited"
+    try:
+        move = chess.Move.from_uci(move_uci)
+    except ValueError:
+        return "bad reply", "not a move"
+    if move not in board.legal_moves:
+        return "bad reply", "illegal"
+    san = board.san(move)
+    board.push(move)
+    loss = _queen_loss(board)
+    if loss >= 5:
+        return "LOST QUEEN", f"{san} (-{loss})"
+    if loss >= 2:
+        return "lost material", f"{san} (-{loss})"
+    return "safe", san
+
+
+@unittest.skipUnless(os.environ.get("RUN_LLM_LIVE") == "1",
+                     "live model test: set RUN_LLM_LIVE=1 (spends subscription or API credit)")
+class QueenTrapLiveTests(unittest.TestCase):
+    """The trap position, in its real context, RUNS times on one real model.
+
+    Skipped by default so the suite never bills anyone. Run at will:
+
+        RUN_LLM_LIVE=1 TRAP_PROVIDER=claude TRAP_MODEL=claude-haiku-5-5 python -m pytest tests/test_queen_trap_position.py -q
+
+    It asserts the harness (a legal reply, the shared tool ran). The model's choice
+    is recorded, not asserted: the point is to measure which models walk into it.
+    """
+
+    provider = os.environ.get("TRAP_PROVIDER", "opencode-go")
+    model = os.environ.get("TRAP_MODEL", "deepseek-v4.1-flash")
+
+    def test_three_contextual_runs(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        sys.path.insert(0, str(ROOT / "engines" / "llm-chess-engine"))
+        import subscription_providers as providers
+
+        results = []
+        for run in range(1, LIVE_RUNS + 1):
+            client = providers.SubscriptionChessClient(self.provider, lambda _m: None)
+            client.tools_dir = None                      # shared tools only, as in a game
+            client.model = self.model
+            client.effort = "high"
+            move, comment = client.choose_move(
+                chess.Board(FEN),
+                {"wtime": 600000, "btime": GAME_BLACK_CLOCK_MS, "winc": 10000, "binc": 10000},
+                GAME_HISTORY)
+            verdict, detail = _verdict(move)
+            tools_run = [t["name"] for t in client.last_report.get("tools", [])]
+            results.append({"run": run, "move": move, "verdict": verdict, "detail": detail,
+                            "tools": tools_run, "comment": (comment or "")[:200]})
+            # A dead route is not a chess result: skip with the provider's own words.
+            if move == "0000" and providers.provider_unavailable(comment or ""):
+                self.skipTest(f"{self.provider} {self.model} is unavailable: {(comment or '')[:140]}")
+            self.assertNotEqual(move, "0000", f"{self.model} run {run} forfeited instead of answering: {comment[:160]}")
+            self.assertIn("loose-piece-check", tools_run, f"tools did not run on run {run}")
+
+        out = ROOT / "out" / "validation" / f"queen-trap-{self.model.replace('/', '-')}.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"provider": self.provider, "model": self.model,
+                                   "history_plies": len(GAME_HISTORY), "clock_ms": GAME_BLACK_CLOCK_MS,
+                                   "results": results}, indent=2), encoding="utf-8")
+
+        lost = [r for r in results if r["verdict"] == "LOST QUEEN"]
+        print(f"\n{self.model}: {len(lost)}/{len(results)} lost the queen -> {out}")
+        for r in results:
+            print(f"  run {r['run']}: {r['verdict']:12s} {r['detail']}")
 
 
 if __name__ == "__main__":

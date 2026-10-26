@@ -163,7 +163,8 @@ OPENROUTER_QUANTIZATIONS = ("fp8", "fp16", "bf16", "fp32", "unknown")
 UNAVAILABLE_MARKERS = ("usagelimit", "usage limit", "usage_limit", "insufficient balance", "insufficient_quota",
                        "accessdenied.unpurchased", "throttling.allocationquota",
                        "exceeded your current quota", "credit balance", "payment required", "not logged in",
-                       "please run /login", "invalid api key", "unauthorized", "http 401", "http 402", "http 403",
+                       "please run /login", "oauth session expired", "failed to authenticate",
+                       "invalid api key", "unauthorized", "http 401", "http 402", "http 403",
                        "no allowed providers")
 # A subscription usage or rate limit (forever tournament, LLM_LIMIT_WAIT=1): the engine waits and asks the
 # SAME move again once the limit resets. Never a forfeit, never a fallback move, never charged to the clock.
