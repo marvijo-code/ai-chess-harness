@@ -87,6 +87,8 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--only", help="substring of the model name to run")
     parser.add_argument("--effort", default="high")
+    parser.add_argument("--history-uci", help="comma separated moves that lead to the trap, for in-context runs")
+    parser.add_argument("--clock-ms", type=int, help="clock for the side to move (Black) at that point")
     args = parser.parse_args()
 
     rows = []
@@ -99,9 +101,11 @@ def main() -> int:
             client.effort = args.effort
             client.model = model
             started = time.monotonic()
+            history = [u for u in (args.history_uci or "").split(",") if u]
+            clock = args.clock_ms or 600000
             try:
                 move, comment = client.choose_move(
-                    chess.Board(FEN), {"wtime": 600000, "btime": 600000, "winc": 10000, "binc": 10000}, [])
+                    chess.Board(FEN), {"wtime": 600000, "btime": clock, "winc": 10000, "binc": 10000}, history)
             except Exception as exc:         # noqa: BLE001 - report, never crash the sweep
                 rows.append((name, run, "ERROR", f"{type(exc).__name__}: {exc}"[:80], 0, 0.0))
                 continue
