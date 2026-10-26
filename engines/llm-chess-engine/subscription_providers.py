@@ -57,6 +57,9 @@ HTTP_ROUTES = {
     # cache_read_input_tokens (input_tokens is then only the uncached part).
     "alibaba": {"url": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/v1/messages",
                 "key": "ALIBABA_TOKEN_PLAN_API_KEY", "style": "anthropic"},
+    # Anthropic API credits (x-api-key) for when the Claude subscription is out of quota (owner 2026-10-27).
+    "anthropic": {"url": "https://api.anthropic.com/v1/messages", "key": "ANTHROPIC_API_KEY",
+                  "style": "anthropic"},
 }
 # Anthropic-wire thinking budget per effort; max_tokens stays HTTP_MAX_TOKENS, so at least half of the output
 # room is left for the answer after the longest thinking (DeepSeek can otherwise spend it all on reasoning).
