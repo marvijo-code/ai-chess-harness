@@ -549,7 +549,7 @@ class PageTest(unittest.TestCase):
 
     def test_stream_watchdog_reloads_a_frozen_page_then_restarts_chrome(self):
         script = (Path(__file__).resolve().parents[1] / "tools" / "aichess_stream" / "stream.sh").read_text(encoding="utf-8")
-        self.assertIn("window.__aichessHealth ? (window.__aichessHealth.pollOkAt||0) : 0", script)
+        self.assertIn("Math.round((Date.now()-window.__aichessHealth.pollOkAt)/1000) : null", script)
         self.assertIn('PAGE_STALE_SECONDS="${AICHESS_PAGE_STALE_SECONDS:-120}"', script)
         self.assertIn("page has not polled the viewer for", script)
         self.assertIn("page still frozen", script)

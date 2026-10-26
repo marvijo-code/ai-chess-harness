@@ -287,11 +287,12 @@ PAGE_POLL_AGE=""
 PAGE_STALE_AT=0
 PAGE_RESTART_AT=0
 page_poll_age() {
-  local started now_ms
-  started="$(python3 "$HERE/cdp.py" --port "$CDP_PORT" eval 'window.__aichessHealth ? (window.__aichessHealth.pollOkAt||0) : 0' 2>/dev/null | tr -cd '0-9')"
-  [ -n "$started" ] && [ "$started" -gt 0 ] || return 0
-  now_ms="$(date +%s%3N)"
-  echo $(( (now_ms - started) / 1000 ))
+  # The page computes the age itself: its Date.now() and the stamp share one clock, and no host date
+  # format (%s%3N is not the same everywhere) can skew the answer.
+  local age
+  age="$(python3 "$HERE/cdp.py" --port "$CDP_PORT" eval 'window.__aichessHealth && window.__aichessHealth.pollOkAt ? Math.round((Date.now()-window.__aichessHealth.pollOkAt)/1000) : null' 2>/dev/null | tr -cd '0-9')"
+  [ -n "$age" ] || return 0
+  echo "$age"
 }
 # ffmpeg's only network connections are its RTMP targets (screen and sound come over local sockets)
 rtmp_conns() { alive "$FF_PID" || { echo 0; return; }; ss -Htnp state established 2>/dev/null | grep -c "pid=$FF_PID,"; }
