@@ -39,6 +39,9 @@ import chess
 # --- policy -----------------------------------------------------------------
 
 TOOL_PATH = re.compile(r"^tools/[a-z0-9][a-z0-9-]{0,47}\.py$")
+# One shared folder, versioned with the harness, that every player may use.
+# A player's own additions live in its memory-repo folder (agents/<folder>/tools).
+SHARED_DIR = Path(__file__).resolve().parent / "player-tools"
 TOOL_MAX_BYTES = 8192
 MAX_TOOL_FILES = 6
 RUN_TIMEOUT_SECONDS = 8.0
@@ -129,11 +132,22 @@ def validate_tool_edit(path: object, content: object) -> tuple[bool, str]:
     return True, ""
 
 
+def discover(own_dir: Path | None = None, include_shared: bool = True) -> dict[str, Path]:
+    """Tool files by name: the shared folder first, then the player's own (own wins a clash)."""
+    found: dict[str, Path] = {}
+    folders = ([SHARED_DIR] if include_shared else []) + ([Path(own_dir)] if own_dir else [])
+    for folder in folders:
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.glob("*.py")):
+            if TOOL_PATH.match(f"tools/{path.name}"):
+                found[path.stem] = path
+    return dict(list(found.items())[:MAX_TOOL_FILES])
+
+
 def existing_tools(tools_dir: Path | None) -> list[Path]:
-    if tools_dir is None or not Path(tools_dir).is_dir():
-        return []
-    found = sorted(p for p in Path(tools_dir).glob("*.py") if TOOL_PATH.match(f"tools/{p.name}"))
-    return found[:MAX_TOOL_FILES]
+    """Backwards-compatible list form."""
+    return list(discover(tools_dir).values())
 
 
 def position_payload(board: chess.Board, history: list[str], go_args: dict | None = None) -> dict:
@@ -200,28 +214,29 @@ def run_tool(path: Path, payload: dict, *, timeout: float = RUN_TIMEOUT_SECONDS,
 
 def run_tools(tools_dir: Path | None, board: chess.Board, history: list[str],
               go_args: dict | None = None, *, timeout: float = RUN_TIMEOUT_SECONDS,
-              python: str | None = None) -> ToolsBlock:
-    """Run every tool the agent owns, in name order, against this position."""
-    found = existing_tools(tools_dir)
+              python: str | None = None, include_shared: bool = True) -> ToolsBlock:
+    """Run the shared tools and the agent's own on this position, in name order."""
+    found = discover(tools_dir, include_shared=include_shared)
     if not found:
         return ToolsBlock()
     payload = position_payload(board, history, go_args)
-    return ToolsBlock(results=[run_tool(p, payload, timeout=timeout, python=python) for p in found],
-                      available=[tool_name(str(p)) for p in found])
+    results = [run_tool(path, payload, timeout=timeout, python=python) for path in found.values()]
+    return ToolsBlock(results=results, available=list(found.keys()))
 
 
 def render_block(block: ToolsBlock, board: chess.Board, history: list[str]) -> str:
     """Prompt text for tool output. Empty when there is nothing to show."""
     if not block.any_ran:
         return ""
-    lines = ["Your own verification tools ran on this position (your code, your checks - advisory, "
-             "you still choose the move):"]
+    lines = ["Your verification tools have already run on this position. What they found:"
+             if block.results else ""]
     for result in block.results:
         if result.ok:
             lines.append(f"[{result.name}] {result.output}")
         else:
-            lines.append(f"[{result.name}] did not run: {result.error}")
-    return "\n".join(lines)
+            lines.append(f"[{result.name}] could not run: {result.error}")
+    lines.append("These are your own checks, not orders: you still choose the move.")
+    return "\n".join(line for line in lines if line)
 
 
 def describe_for_prompt(tools_dir: Path | None) -> str:

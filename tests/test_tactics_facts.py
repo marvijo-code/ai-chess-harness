@@ -33,29 +33,51 @@ class TacticsFactsTests(unittest.TestCase):
         facts = sp.tactics_facts(board)
         nxf7 = [line for line in facts.splitlines() if line.strip().startswith("Nxf7 ")]
         self.assertEqual(len(nxf7), 1)
-        self.assertIn("takes bP", nxf7[0])
-        self.assertIn("HANGS", nxf7[0])
+        self.assertIn("takes their pawn", nxf7[0])
+        self.assertIn("you would lose it", nxf7[0])
 
     def test_safe_alternative_is_not_flagged(self):
         board = play(BLUNDER_GAME)
         facts = sp.tactics_facts(board)
         nge4 = [line for line in facts.splitlines() if line.strip().startswith("Nge4 ")]
         self.assertEqual(len(nge4), 1)
-        self.assertNotIn("HANGS", nge4[0])
+        self.assertNotIn("you would lose it", nge4[0])
 
     def test_hanging_knight_named_in_pieces_section(self):
         board = play(BLUNDER_GAME)
         facts = sp.tactics_facts(board)
-        self.assertIn("Hanging pieces", facts)
-        hanging = [line for line in facts.splitlines() if "wNg5" in line]
-        self.assertTrue(any("HANGING" in line for line in hanging),
-                        f"wNg5 lines: {hanging}")
+        self.assertIn("Hanging right now", facts)
+        hanging = [line for line in facts.splitlines() if "knight on g5" in line]
+        self.assertTrue(any("nothing of yours defends it" in line for line in hanging),
+                        f"g5-knight lines: {hanging}")
+
+    def test_every_attacker_is_named_not_just_the_cheapest(self):
+        # 2026-10-26 move 10: Black's knight on d6 and king on g8 both cover f7.
+        # The old line named only the king (value 0 won the "lowest" comparison),
+        # the model reasoned only about the king, and the knight recaptured.
+        board = chess.Board("r1bqr1k1/ppp1bppp/2pn4/4N3/8/5Q2/PPPP1PPP/RNB1R1K1 w - - 5 10")
+        facts = sp.tactics_facts(board)
+        line = [l for l in facts.splitlines() if l.strip().startswith("Nxf7 ")][0]
+        self.assertIn("their knight on d6", line)
+        self.assertIn("their king on g8", line)
+        self.assertIn("your queen on f3", line)
+
+    def test_king_is_not_treated_as_cheapest(self):
+        board = chess.Board("r1bqr1k1/ppp1bppp/2pn4/4N3/8/5Q2/PPPP1PPP/RNB1R1K1 w - - 5 10")
+        line = [l for l in sp.tactics_facts(board).splitlines() if l.strip().startswith("Nxf7 ")][0]
+        self.assertLess(line.index("their knight on d6"), line.index("their king on g8"))
+
+    def test_hanging_section_is_plain_words(self):
+        board = play(BLUNDER_GAME)
+        facts = sp.tactics_facts(board)
+        self.assertIn("Hanging right now", facts)
+        self.assertIn("nothing of yours defends it", facts)
 
     def test_startpos_has_no_hanging_section(self):
         facts = sp.tactics_facts(chess.Board())
-        self.assertNotIn("Hanging pieces", facts)
-        self.assertNotIn("HANGS", facts)
-        self.assertIn("Legal-move landing safety (20 moves):", facts)
+        self.assertNotIn("Hanging right now", facts)
+        self.assertNotIn("you would lose it", facts)
+        self.assertIn("Safety of every legal move (20 moves):", facts)
 
     def test_check_and_capture_flags(self):
         board = play(["e2e4", "e7e5", "d1h5", "b8c6", "f1c4", "g8f6"])
@@ -68,8 +90,8 @@ class TacticsFactsTests(unittest.TestCase):
         board = play(BLUNDER_GAME)
         prompt = sp.build_prompt(board, {"wtime": 600000, "btime": 600000}, BLUNDER_GAME, [])
         self.assertIn("Computed tactics facts", prompt)
-        self.assertIn("HANGS", prompt)
-        self.assertIn("never leave a piece hanging", prompt)
+        self.assertIn("you would lose it", prompt)
+        self.assertIn("forbidden this turn", prompt)
 
     def test_facts_use_no_engine_only_rules(self):
         # The facts block must never cheat: no engine process, no search, no
@@ -103,7 +125,7 @@ class TacticsFactsTests(unittest.TestCase):
             else:
                 os.environ["LLM_TACTICS_FACTS"] = old
         self.assertNotIn("Computed tactics facts", prompt)
-        self.assertNotIn("never leave a piece hanging", prompt)
+        self.assertNotIn("forbidden this turn", prompt)
 
 
 if __name__ == "__main__":

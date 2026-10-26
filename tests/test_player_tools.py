@@ -84,7 +84,7 @@ class ToolRunnerTests(unittest.TestCase):
             tools = Path(tmp) / "tools"
             tools.mkdir()
             (tools / "hang-check.py").write_text(HANG_TOOL, encoding="utf-8")
-            block = pt.run_tools(tools, play(BLUNDER_GAME), BLUNDER_GAME)
+            block = pt.run_tools(tools, play(BLUNDER_GAME), BLUNDER_GAME, include_shared=False)
             self.assertEqual(len(block.results), 1)
             result = block.results[0]
             self.assertTrue(result.ok, result.error)
@@ -95,7 +95,7 @@ class ToolRunnerTests(unittest.TestCase):
             tools = Path(tmp) / "tools"
             tools.mkdir()
             (tools / "boom.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
-            block = pt.run_tools(tools, chess.Board(), [])
+            block = pt.run_tools(tools, chess.Board(), [], include_shared=False)
             self.assertFalse(block.results[0].ok)
             self.assertIn("exit", block.results[0].error)
 
@@ -109,7 +109,7 @@ class ToolRunnerTests(unittest.TestCase):
             cwd = Path.cwd()
             try:
                 os.chdir(tmp)
-                result = pt.run_tools(Path("tools"), chess.Board(), []).results[0]
+                result = pt.run_tools(Path("tools"), chess.Board(), [], include_shared=False).results[0]
             finally:
                 os.chdir(cwd)
             self.assertTrue(result.ok, result.error)
@@ -117,14 +117,14 @@ class ToolRunnerTests(unittest.TestCase):
 
     def test_empty_folder_is_silent(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertFalse(pt.run_tools(Path(tmp) / "none", chess.Board(), []).any_ran)
+            self.assertFalse(pt.run_tools(Path(tmp) / "none", chess.Board(), [], include_shared=False).any_ran)
 
     def test_source_is_rechecked_at_run_time(self):
         with tempfile.TemporaryDirectory() as tmp:
             tools = Path(tmp) / "tools"
             tools.mkdir()
             (tools / "sneaky.py").write_text("import socket\nprint('x')\n", encoding="utf-8")
-            result = pt.run_tools(tools, chess.Board(), []).results[0]
+            result = pt.run_tools(tools, chess.Board(), [], include_shared=False).results[0]
             self.assertFalse(result.ok)
             self.assertIn("blocked", result.error)
 
@@ -136,10 +136,10 @@ class PromptWiringTests(unittest.TestCase):
             tools.mkdir()
             (tools / "hang-check.py").write_text(HANG_TOOL, encoding="utf-8")
             board = play(BLUNDER_GAME)
-            block = pt.run_tools(tools, board, BLUNDER_GAME)
+            block = pt.run_tools(tools, board, BLUNDER_GAME, include_shared=False)
             text = pt.render_block(block, board, BLUNDER_GAME)
             prompt = sp.position_block(board, {"wtime": 600000, "btime": 600000}, True, tools_text=text)
-        self.assertIn("your own verification tools", text.lower())
+        self.assertIn("verification tools have already run", text.lower())
         self.assertIn("g5f7", text)
         self.assertIn("g5f7", prompt)
         self.assertTrue(prompt.rstrip().endswith("Reply with ONLY the JSON object."))

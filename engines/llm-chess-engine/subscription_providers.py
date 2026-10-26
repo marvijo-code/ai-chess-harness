@@ -494,7 +494,8 @@ def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejectio
         'Reply with ONLY one JSON object: {"move": "<SAN or UCI>", "comment": "<one or two short sentences>"}'
     )
     if show_legal and tactics_facts_enabled():
-        lines.append("Verify your chosen move against the tactics facts above (never leave a piece hanging) before replying.")
+        lines.append("Hard rule: if the facts above, or your own tools, say a move loses material, that move is "
+                     "forbidden this turn. Pick a different move; a plan that needs a losing move is the wrong plan.")
     return "\n".join(lines)
 
 
@@ -816,8 +817,17 @@ def marker_text(value: str) -> str:
 
 PIECE_VALUES = {chess.PAWN: 100, chess.KNIGHT: 300, chess.BISHOP: 300,
                 chess.ROOK: 500, chess.QUEEN: 900, chess.KING: 0}
-PIECE_LETTERS = {chess.PAWN: "P", chess.KNIGHT: "N", chess.BISHOP: "B",
-                 chess.ROOK: "R", chess.QUEEN: "Q", chess.KING: "K"}
+PIECE_WORDS = {chess.PAWN: "pawn", chess.KNIGHT: "knight", chess.BISHOP: "bishop",
+               chess.ROOK: "rook", chess.QUEEN: "queen", chess.KING: "king"}
+# A king is not "cheap": scoring it 0 made it win every "lowest attacker" comparison
+# and hid the piece that actually does the work (2026-10-26 Nxf7: the facts named
+# only the king, the model reasoned only about the king, and the knight recaptured).
+KING_ORDER = 10000
+
+
+def tactics_facts_enabled() -> bool:
+    """Harness-computed tactics facts for the move prompt. Kill switch: LLM_TACTICS_FACTS=0."""
+    return os.environ.get("LLM_TACTICS_FACTS", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def tactics_facts_enabled() -> bool:
@@ -842,31 +852,61 @@ def _square_pressure(board: chess.Board, square: chess.Square, victim_color: che
     return len(attackers), len(defenders), _piece_tag(low_att), _piece_tag(low_def)
 
 
-def tactics_facts(board: chess.Board) -> str:
-    """Computed, exact position facts: hanging pieces plus per-legal-move safety.
+def _order(piece: chess.Piece) -> int:
+    return KING_ORDER if piece.piece_type == chess.KING else PIECE_VALUES[piece.piece_type]
 
-    Facts only - no scores, no marks, no advice. The model verifies its reply
-    against these instead of eyeballing the FEN. Cheap 1-ply reads; a full
-    static exchange evaluation is deliberately out of scope.
+
+def _pieces_on(board: chess.Board, squares, own: bool) -> list[str]:
+    """Plain words for a set of squares: 'your knight on d6, their king on g8'."""
+    owner = "your" if own else "their"
+    out = []
+    for square in sorted(squares):
+        piece = board.piece_at(square)
+        if piece is not None:
+            out.append(f"{owner} {PIECE_WORDS[piece.piece_type]} on {chess.square_name(square)}")
+    return out
+
+
+def _square_pressure(board: chess.Board, square: chess.Square, victim_color: chess.Color) -> tuple[str, str]:
+    """Human words for who attacks and who defends a square, cheapest first."""
+    def named(squares, own_side: bool) -> list[str]:
+        owner = "your" if own_side else "their"
+        pairs = [(s, board.piece_at(s)) for s in squares]
+        pairs = [(s, p) for s, p in pairs if p is not None]
+        pairs.sort(key=lambda pair: _order(pair[1]))
+        return [f"{owner} {PIECE_WORDS[p.piece_type]} on {chess.square_name(s)}" for s, p in pairs]
+
+    attackers = named(board.attackers(not victim_color, square), own_side=False)
+    defenders = named(board.attackers(victim_color, square), own_side=True)
+    return (", ".join(attackers) or "nobody", ", ".join(defenders) or "nobody")
+
+
+def tactics_facts(board: chess.Board) -> str:
+    """Computed, exact position facts in plain words: hanging pieces and per-move safety.
+
+    Facts only - no scores, no marks, no advice. Every attacker and defender is
+    named, because a count alone let a model reason about the wrong piece.
     """
     own = board.turn
-    hanging, contested, quiet_hanging_pawns = [], [], 0
+    hanging, contested, quiet_pawns = [], [], 0
     for square in chess.SQUARES:
         piece = board.piece_at(square)
         if piece is None or piece.color != own or piece.piece_type == chess.KING:
             continue
-        n_att, n_def, low_att, low_def = _square_pressure(board, square, own)
+        n_att, n_def = len(board.attackers(not own, square)), len(board.attackers(own, square))
         if not n_att:
             continue
-        name = f"{_piece_tag(piece)}{chess.square_name(square)}"
-        detail = f"{name} attacked by {n_att} (lowest {low_att}), defended by {n_def} (lowest {low_def})"
         if n_def == 0:
             if piece.piece_type == chess.PAWN:
-                quiet_hanging_pawns += 1
+                quiet_pawns += 1
             else:
-                hanging.append(detail + " -> HANGING")
+                att, _ = _square_pressure(board, square, own)
+                hanging.append(f"your {PIECE_WORDS[piece.piece_type]} on {chess.square_name(square)} "
+                               f"can be taken by {att} and nothing of yours defends it")
         elif PIECE_VALUES[piece.piece_type] >= 300:
-            contested.append(detail)
+            att, dfn = _square_pressure(board, square, own)
+            contested.append(f"your {PIECE_WORDS[piece.piece_type]} on {chess.square_name(square)}: "
+                             f"{att} can take it, {dfn} defends it")
     move_lines = []
     for move in board.legal_moves:
         san = board.san(move)
@@ -874,33 +914,35 @@ def tactics_facts(board: chess.Board) -> str:
         if board.is_en_passant(move):
             captured = chess.Piece(chess.PAWN, not own)
         check = board.gives_check(move)
+        mover = board.piece_at(move.from_square)
         board.push(move)
-        n_att, n_def, low_att, low_def = _square_pressure(board, move.to_square, own)
+        att, dfn = _square_pressure(board, move.to_square, own)
         board.pop()
         bits = []
         if captured is not None:
-            bits.append(f"takes {_piece_tag(captured)}")
+            bits.append(f"takes their {PIECE_WORDS[captured.piece_type]}")
         if check:
             bits.append("gives check")
-        bits.append(f"lands attacked by {n_att} (lowest {low_att}), defended by {n_def} (lowest {low_def})")
-        moved = board.piece_at(move.from_square)
-        if moved is not None and moved.piece_type != chess.KING and n_att and not n_def:
-            bits.append("-> HANGS")
+        bits.append(f"after it they can take on {chess.square_name(move.to_square)} with {att}, "
+                    f"and you defend with {dfn}")
+        if mover is not None and mover.piece_type != chess.KING and "nobody" in dfn and "nobody" not in att:
+            bits.append("so you would lose it")
         move_lines.append(f"{san} ({move.uci()}): " + ", ".join(bits))
     lines = []
     if hanging:
-        lines.append("Hanging pieces (attacked, undefended - capturing them is free):")
+        lines.append("Hanging right now (nothing of yours defends them):")
         lines.extend(f"  {h}" for h in hanging)
     if contested:
-        lines.append("Attacked but defended (check the lowest values before trading):")
+        lines.append("Attacked but defended (count who can take before trading):")
         lines.extend(f"  {c}" for c in contested[:12])
         if len(contested) > 12:
-            lines.append(f"  ... plus {len(contested) - 12} more contested pieces")
-    if quiet_hanging_pawns:
-        lines.append(f"  ... plus {quiet_hanging_pawns} hanging pawn(s)")
-    lines.append(f"Legal-move landing safety ({len(move_lines)} moves):")
+            lines.append(f"  plus {len(contested) - 12} more like these")
+    if quiet_pawns:
+        lines.append(f"  plus {quiet_pawns} pawn(s) of yours that can be taken for free")
+    lines.append(f"Safety of every legal move ({len(move_lines)} moves):")
     lines.extend(f"  {m}" for m in move_lines)
     return "\n".join(lines)
+
 
 
 class SubscriptionChessClient:
@@ -1909,7 +1951,7 @@ class SubscriptionChessClient:
         Once per position: a retry of the same move reuses the same output, so a tool
         never runs twice for one decision and never eats the clock twice.
         """
-        if not self.tools_dir:
+        if not self.tools_dir and not player_tools_mod.SHARED_DIR.is_dir():
             return ""
         fen = board.fen()
         if self._tools_cache[0] == fen:
@@ -1919,6 +1961,10 @@ class SubscriptionChessClient:
             text = player_tools_mod.render_block(block, board, history)
             self.last_report["tools"] = [{"name": r.name, "ok": r.ok, "ms": r.elapsed_ms,
                                           "error": r.error[:120]} for r in block.results]
+            if block.any_ran:
+                summary = ", ".join(f"{r.name}={'ok' if r.ok else 'failed'}({r.elapsed_ms}ms)"
+                                    for r in block.results)
+                self.log(f"tools: {summary}")
         except Exception as exc:  # a broken tool folder must never cost the game
             self.log(f"tools: {type(exc).__name__}: {exc}")
             text = ""
