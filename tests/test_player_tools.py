@@ -4,6 +4,7 @@ The point of these tests is the contract, not a specific tool: an agent writes
 python-chess checks in its own tools/ folder, the harness runs them on the real
 board before the move, and the output reaches the prompt. No engine, no network.
 """
+import os
 import sys
 import tempfile
 import textwrap
@@ -97,6 +98,22 @@ class ToolRunnerTests(unittest.TestCase):
             block = pt.run_tools(tools, chess.Board(), [])
             self.assertFalse(block.results[0].ok)
             self.assertIn("exit", block.results[0].error)
+
+    def test_relative_tools_dir_still_runs(self):
+        # Regression: cwd becomes the tool's folder, so a relative path must be
+        # resolved first or the child cannot find its own script.
+        with tempfile.TemporaryDirectory() as tmp:
+            tools = Path(tmp) / "tools"
+            tools.mkdir()
+            (tools / "ok.py").write_text("import json, sys\nprint('ran')\n", encoding="utf-8")
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmp)
+                result = pt.run_tools(Path("tools"), chess.Board(), []).results[0]
+            finally:
+                os.chdir(cwd)
+            self.assertTrue(result.ok, result.error)
+            self.assertEqual(result.output, "ran")
 
     def test_empty_folder_is_silent(self):
         with tempfile.TemporaryDirectory() as tmp:

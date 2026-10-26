@@ -161,6 +161,7 @@ def run_tool(path: Path, payload: dict, *, timeout: float = RUN_TIMEOUT_SECONDS,
     """Run one agent tool against one position. Never raises."""
     name = tool_name(str(path))
     started = time.monotonic()
+    path = Path(path).resolve()   # cwd becomes the tool's folder, so the path must be absolute first
     try:
         source = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
