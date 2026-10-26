@@ -123,6 +123,8 @@ def engine_env(player: dict, cfg: dict) -> dict[str, str]:
     }
     if player.get("maxPrice"):
         env["LLM_MAX_PRICE"] = json.dumps(player["maxPrice"])
+    if player.get("toolsDir"):
+        env["LLM_TOOLS_DIR"] = str(player["toolsDir"])
     # Forever tournament: one provider session per game (cache) and waiting out usage limits.
     # moveCap false = think until the move is made (only the clock limits it); keepReasoning = the reasoning stays
     # in the game's session from move to move (owner 2026-10-16).

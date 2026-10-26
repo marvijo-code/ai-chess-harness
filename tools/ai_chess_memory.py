@@ -39,6 +39,11 @@ MAX_NOTE_FILES = 8
 MAX_EDITS = 6
 NOTE_PATH = re.compile(r"^notes/[a-z0-9][a-z0-9-]{0,47}\.md$")
 
+# Tool policy lives in one place and is reused here, so a reflection edit that
+# writes a verification tool is judged by the same rules the runner enforces.
+import player_tools as _player_tools  # noqa: E402  (shared, engine-agnostic)
+TOOL_PATH = _player_tools.TOOL_PATH
+
 # Lines (runs of consecutive moves). Owner 2026-10-11: "llms shouldn't save long lines, but prefer learning like
 # humans ... humans learn lines, but not so many lines". A file may hold a few short lines (the opening moves a
 # human player knows by heart); everything else is kept as patterns: what to check, what was missed, how an
@@ -150,10 +155,26 @@ def validate_edits(edits: object, existing_notes: list[str],
         path = edit.get("path")
         if isinstance(path, str) and (path.startswith(("agents/", "../", "/")) or "/../" in path):
             rejected.append(f"edit {index}: {path[:60]!r} is outside your own folder; you can read the other players' "
-                            "memory but write only your own MEMORY.md and notes/")
+                            "memory but write only your own MEMORY.md, notes/ and tools/")
+            continue
+        if isinstance(path, str) and TOOL_PATH.match(path):
+            if edit.get("delete") is True:
+                accepted.append({"path": path, "delete": True})
+                continue
+            ok, why = _player_tools.validate_tool_edit(path, edit.get("content"))
+            if not ok:
+                rejected.append(f"edit {index}: {why}")
+                continue
+            tools = {p for p in (current or {}) if TOOL_PATH.match(p)} | {a["path"] for a in accepted if TOOL_PATH.match(a["path"])}
+            if path not in tools and len(tools) >= _player_tools.MAX_TOOL_FILES:
+                rejected.append(f"edit {index}: {path} would be tool file {len(tools) + 1}, over the limit of "
+                                f"{_player_tools.MAX_TOOL_FILES}")
+                continue
+            accepted.append({"path": path, "content": edit["content"]})
             continue
         if not isinstance(path, str) or not (path == MEMORY_FILE or NOTE_PATH.match(path)):
-            rejected.append(f"edit {index}: path {str(path)[:60]!r} is not MEMORY.md or notes/<lowercase-topic>.md")
+            rejected.append(f"edit {index}: path {str(path)[:60]!r} is not MEMORY.md, notes/<lowercase-topic>.md "
+                            "or tools/<lowercase-name>.py")
             continue
         if edit.get("delete") is True:
             if path == MEMORY_FILE:

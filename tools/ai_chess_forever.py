@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engines" / "llm-chess-engine"))
 import play_llm_swiss as swiss  # noqa: E402
 from harness_version import HARNESS_VERSION  # noqa: E402
+import player_tools  # noqa: E402  (shared tool policy)
 from ai_chess_memory import (GitPusher, MemoryRepo, MEMORY_MAX_BYTES, MEMORY_TARGET_BYTES, MAX_NOTE_FILES,  # noqa: E402
                              NOTE_MAX_BYTES,
                              LADDER_WINS_TO_STEP, LINE_COUNTED_PLIES, LINE_MAX_PLIES, MAX_LINES_PER_FILE, ensure_repo, game_markdown, ladder_depth, ladder_entry, ladder_step, line_allowance, line_shape, parse_reflection, player_folders, slugify,
@@ -66,6 +67,19 @@ REFLECTION_SYSTEM = (
 
 def log(message: str) -> None:
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+
+
+def attach_player_tools(cfg: dict, repo: "MemoryRepo") -> None:
+    """Point every AI player at its own tools/ folder in the memory repo.
+
+    One seam: the engines read `toolsDir` when they are built, so a player can
+    write, sharpen or delete its verification tools between games and the next
+    game uses them with no restart.
+    """
+    for player in cfg.get("players") or []:
+        if player.get("provider") == "uci":
+            continue
+        player["toolsDir"] = str(repo.agent_dir(player["name"]) / "tools")
 
 
 def load_forever_config(path: Path) -> dict:
@@ -160,6 +174,10 @@ def reflection_prompt(player: str, state: dict, game: dict, memory: str, notes: 
         "appending. List your note files in it, one line each.",
         f"- notes/<topic>.md (lowercase letters, digits and hyphens): optional topic notes, at most {NOTE_MAX_BYTES} "
         f"bytes each and at most {MAX_NOTE_FILES} files. They are not shown during games; MEMORY.md is.",
+        "- tools/<name>.py: your own verification tools, run by the harness before every move of your next "
+        f"games (at most {player_tools.MAX_TOOL_FILES} files, {player_tools.TOOL_MAX_BYTES} bytes each). They are the "
+        "answer to a check you keep missing: instead of writing the same rule again, write the check once. "
+        + player_tools.TOOL_CONTRACT,
         "Write only what helps your chess: openings that worked or failed, recurring tactical misses, time use, "
         "how specific opponents play. No praise, no filler. You may adopt a lesson from another player's memory "
         "when it is good chess; write it in your own words in your own files.",
@@ -173,7 +191,8 @@ def reflection_prompt(player: str, state: dict, game: dict, memory: str, notes: 
         "Reply with ONLY this JSON object:",
         '{"summary": "<one or two sentences: what you learned from this game>", "edits": ['
         '{"path": "MEMORY.md", "content": "<the full new MEMORY.md>"}, '
-        '{"path": "notes/<topic>.md", "content": "<the full file>"}, {"path": "notes/<topic>.md", "delete": true}]}',
+        '{"path": "notes/<topic>.md", "content": "<the full file>"}, {"path": "notes/<topic>.md", "delete": true}, '
+        '{"path": "tools/<name>.py", "content": "<the full python file>"}]}',
         "An edit replaces the whole file. Leave out files you do not change. An empty edits list is allowed.",
         "",
         "YOUR CURRENT MEMORY.md",
@@ -539,7 +558,6 @@ class ForeverHooks(swiss.GameHooks):
         if not route or (route.get("provider"), route.get("model")) == (player.get("provider"), player.get("model")):
             return player
         return player_on_route(player, route)
-
     def ladder_view(self) -> dict:
         with self.lock:
             players = {name: {"depth": int(p.get("depth") or 0), "streak": int(p.get("streak") or 0)}
@@ -1040,6 +1058,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = (args.memory_repo or Path(fv["memoryRepo"])).resolve()
     ensure_repo(repo_root, None if args.memory_repo else fv.get("memoryRemote"), log)
     repo = MemoryRepo(repo_root, log, player_folders(cfg["players"]))
+    attach_player_tools(cfg, repo)
     moved = repo.migrate_folders()
     push = bool(fv.get("push", True)) and not args.no_push
     pusher = GitPusher(repo, push=push, log=log)

@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -32,6 +33,9 @@ from pathlib import Path
 from typing import Callable
 
 import chess
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+import player_tools as player_tools_mod  # noqa: E402  (shared policy: validate, run, render)
 
 # CLI routes run a local subscription CLI; HTTP routes post the SAME prompt to an
 # OpenAI-compatible chat endpoint, so every player in a tournament sees one prompt.
@@ -100,7 +104,8 @@ STRIPPED_ENV = {
 SYSTEM_PROMPT = (
     "You are a strong chess player in a game against another AI. You get the position and must answer "
     'with only one JSON object: {"move": "<a move from the legal list, SAN or UCI>", "comment": "<one or two short sentences about your idea>"}. '
-    "Choose the move with your own reasoning: do not run code, call tools, or write or use a chess engine."
+    "Choose the move with your own reasoning. You may not call tools yourself: write your own verification "
+    "tools in your tools folder between games, and the harness runs them for you and shows the output."
 )
 # After the move cap the model gets its own thinking back and answers: first at the configured effort,
 # then (only if that brings no move) at the lowest effort the route allows. Measured 2026-10-06 with the
@@ -441,7 +446,8 @@ def board_png(board: chess.Board) -> bytes:
 
 
 def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejections: list[str], show_legal: bool = True,
-                 cap_seconds: float | None = None, nudge: str | None = None, image: bool = True) -> str:
+                 cap_seconds: float | None = None, nudge: str | None = None, image: bool = True,
+                 tools_block: "player_tools_mod.ToolsBlock | None" = None) -> str:
     side = "White" if board.turn == chess.WHITE else "Black"
     own, opp = ("wtime", "btime") if board.turn == chess.WHITE else ("btime", "wtime")
     # Stable, append-only text first (side, then the game so far) so input caching reuses the
@@ -478,6 +484,10 @@ def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejectio
         if tactics_facts_enabled():
             lines.append("Computed tactics facts (exact, from the rules - trust these over eyeballing the board):")
             lines.append(tactics_facts(board))
+    if tools_block is not None:
+        tool_text = player_tools_mod.render_block(tools_block, board, history)
+        if tool_text:
+            lines.append(tool_text)
     for index, reason in enumerate(rejections, start=1):
         lines.append(f"Attempt {index} was rejected: {reason}. Choose again.")
     lines.append(
@@ -522,7 +532,8 @@ def game_header_section(context: dict) -> str:
 
 
 def position_block(board: chess.Board, go_args: dict, show_legal: bool, cap_seconds: float | None = None,
-                   nudge: str | None = None, image: bool = False) -> str:
+                   nudge: str | None = None, image: bool = False,
+                   tools_text: str = "") -> str:
     """The only part of a turn that changes on every move. Always the last part of a request."""
     side = "White" if board.turn == chess.WHITE else "Black"
     own, opp = ("wtime", "btime") if board.turn == chess.WHITE else ("btime", "wtime")
@@ -548,6 +559,8 @@ def position_block(board: chess.Board, go_args: dict, show_legal: bool, cap_seco
                          "you are shown all of it, and you must give your move at once.")
     if nudge:
         lines.append(nudge)
+    if tools_text:
+        lines.append(tools_text)
     lines.append("Reply with ONLY the JSON object.")
     return "\n".join(lines)
 
@@ -581,27 +594,27 @@ def carried_thoughts_section(thoughts: str) -> str:
 
 def build_full_turn(context: dict, board: chess.Board, go_args: dict, history: list[str], show_legal: bool = True,
                     cap_seconds: float | None = None, nudge: str | None = None, image: bool = False,
-                    notes: list[dict] | None = None, summary: dict | None = None) -> str:
+                    notes: list[dict] | None = None, summary: dict | None = None, tools_text: str = "") -> str:
     """The whole request text for a fresh session: rules, memory, game header, moves so far, the summary of
     this game's earlier thinking (after a compaction), position."""
     parts = [RULES_TEXT, memory_section(context), game_header_section(context), history_section(history, notes)]
     compacted = summary_section(summary)
     if compacted:
         parts.append(compacted)
-    parts.append(position_block(board, go_args, show_legal, cap_seconds, nudge, image))
+    parts.append(position_block(board, go_args, show_legal, cap_seconds, nudge, image, tools_text))
     return "\n\n".join(parts)
 
 
 def build_delta_turn(board: chess.Board, go_args: dict, history: list[str], seen_plies: int, show_legal: bool = True,
                      cap_seconds: float | None = None, nudge: str | None = None, image: bool = False,
-                     carried: str = "") -> str:
+                     carried: str = "", tools_text: str = "") -> str:
     """A later turn of the same session: the carried thinking (if any), the moves since the last turn, the position."""
     since = san_moves_since(history, seen_plies)
     head = f"MOVES SINCE YOUR LAST TURN\n{since}" if since else "MOVES SINCE YOUR LAST TURN\n(none)"
     carried_text = carried_thoughts_section(carried)
     if carried_text:
         head = carried_text + "\n\n" + head
-    return head + "\n\n" + position_block(board, go_args, show_legal, cap_seconds, nudge, image)
+    return head + "\n\n" + position_block(board, go_args, show_legal, cap_seconds, nudge, image, tools_text)
 
 
 def compact_prompt(header: str, history: list[str], turns: list[dict], previous: dict | None) -> str:
@@ -903,6 +916,10 @@ class SubscriptionChessClient:
         self.show_legal = os.environ.get("LLM_SHOW_LEGAL_MOVES", "true").strip().lower() not in {"0", "false", "no", "off"}
         # Text-only models (Mercury 2.5) get the FEN and the diagram but no picture.
         self.board_image = os.environ.get("LLM_BOARD_IMAGE", "true").strip().lower() not in {"0", "false", "no", "off"}
+        # The agent's own verification tools: a folder it writes into between games. Empty = none.
+        tools_env = os.environ.get("LLM_TOOLS_DIR", "").strip()
+        self.tools_dir: Path | None = Path(tools_env) if tools_env else None
+        self._tools_cache: tuple[str, str] = ("", "")   # (fen, rendered text) for this move
         self.invalid_model_moves = 0
         self.last_report: dict = {}
         self.runner: Callable[[list[str], str, int, Path | None], str] = self._run_cli
@@ -1005,6 +1022,7 @@ class SubscriptionChessClient:
     def new_game(self) -> None:
         self.invalid_model_moves = 0
         self._nudge = None
+        self._tools_cache = ("", "")
         self._wait_compaction(announce=False)
         self.end_session()
         self.context = None
@@ -1141,8 +1159,10 @@ class SubscriptionChessClient:
                    cap: float | None) -> str:
         """The request text for this attempt. The old single-prompt layout when no game context is set."""
         image = self.board_image and self._image is not None
+        tools_text = self._tools_text(board, go_args, history)
         if self.context is None:
-            return build_prompt(board, go_args, history, rejections, self.show_legal, cap, self._nudge, self.board_image)
+            return build_prompt(board, go_args, history, rejections, self.show_legal, cap, self._nudge, self.board_image,
+                                tools_block=None)
         # Proof of read: the fingerprint of the memory that is inside this request (or its session).
         memory = self.context.get("memory") or ""
         self.last_report["memory"] = {"sha": hashlib.sha256(memory.encode("utf-8")).hexdigest()[:12],
@@ -1156,9 +1176,9 @@ class SubscriptionChessClient:
             # Routes that drop passed-back reasoning get their own previous thinking as text, once.
             carried = conv.pop("carry", "") if self.keep_reasoning else ""
             return build_delta_turn(board, go_args, history, conv.get("seen", 0), self.show_legal, cap, self._nudge,
-                                    image, carried)
+                                    image, carried, tools_text)
         text = build_full_turn(self.context, board, go_args, history, self.show_legal, cap, self._nudge, image,
-                               self._notes, self._summary)
+                               self._notes, self._summary, tools_text)
         for index, reason in enumerate(rejections, start=1):
             text += f"\nAttempt {index} was rejected: {reason}. Choose again."
         return text
@@ -1882,6 +1902,28 @@ class SubscriptionChessClient:
                 raise subprocess.TimeoutExpired(url, timeout)
             raise CliCrash(f"{type(exc).__name__}: {exc}")
         return result["data"]
+
+    def _tools_text(self, board: chess.Board, go_args: dict, history: list[str]) -> str:
+        """Run the agent's own tools on this position and render the output for the prompt.
+
+        Once per position: a retry of the same move reuses the same output, so a tool
+        never runs twice for one decision and never eats the clock twice.
+        """
+        if not self.tools_dir:
+            return ""
+        fen = board.fen()
+        if self._tools_cache[0] == fen:
+            return self._tools_cache[1]
+        try:
+            block = player_tools_mod.run_tools(self.tools_dir, board, history, go_args)
+            text = player_tools_mod.render_block(block, board, history)
+            self.last_report["tools"] = [{"name": r.name, "ok": r.ok, "ms": r.elapsed_ms,
+                                          "error": r.error[:120]} for r in block.results]
+        except Exception as exc:  # a broken tool folder must never cost the game
+            self.log(f"tools: {type(exc).__name__}: {exc}")
+            text = ""
+        self._tools_cache = (fen, text)
+        return text
 
     def _run_cli(self, argv: list[str], prompt: str, timeout: int, workdir: Path | None) -> str:
         env = os.environ.copy()
