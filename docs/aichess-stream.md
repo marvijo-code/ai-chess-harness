@@ -141,7 +141,7 @@ All units: system units with `User=marvijo`, `Restart=always`, no start limit. A
 1920x1080, 30 fps, x264 `veryfast` + `zerolatency`, CBR 4500 kbit/s, keyframe every 2 s, AAC 128 kbit/s 48 kHz.
 Other knobs (see the header of `stream.sh`): `AICHESS_STREAM_URL`, `AICHESS_STREAM_SCALE` (Chrome zoom),
 `AICHESS_STREAM_DISPLAY` (`:87`), `AICHESS_CDP_PORT` (`9223`, 127.0.0.1 only), `AICHESS_CHROME_MAX_MB`
-(Chrome restart threshold, 1400), `AICHESS_STREAM_MUSIC_GAIN` (0.07), `AICHESS_STREAM_LOCALSTORAGE`
+(Chrome restart threshold, 1400), `AICHESS_PAGE_STALE_SECONDS` (frozen-page threshold, 120), `AICHESS_STREAM_MUSIC_GAIN` (0.07), `AICHESS_STREAM_LOCALSTORAGE`
 (viewer settings seeded into the page, default `{"swissCommentary":"on"}`: the local viewer plays
 commentary only when this is on), `AICHESS_STREAM_OUTPUT` (`rtmp`, `null` for a CPU test, or a `.flv` path).
 
@@ -177,6 +177,7 @@ Logic: `waitPlan()` in the page (between `WAIT-PLAN-START` and `WAIT-PLAN-END`, 
 
 - ffmpeg exits (RTMP drop): restarted after 3 s, doubling to 60 s.
 - Chrome exits, shows a Chrome error page while the viewer is up, or grows past `AICHESS_CHROME_MAX_MB`: restarted (fresh profile, settings re-seeded).
+- The page stops polling while the viewer still answers (Chrome can lose its network while its timers keep running, so the encoder would send one frozen frame forever): `stream.sh` reads `window.__aichessHealth.pollOkAt` over CDP every 15 s. After `AICHESS_PAGE_STALE_SECONDS` (default 120) it reloads the page; if polls are still missing 90 s later it restarts Chrome (at most once per 10 minutes). `status.sh` prints `page polls: Ns old`.
 - Xvfb or PulseAudio exits: the script exits, systemd restarts the unit.
 - The bed player exits: restarted.
 - Status: `/run/ai-chess-stream/status.json` and `progress.txt` (newest ffmpeg progress block); `status.sh` prints both.
