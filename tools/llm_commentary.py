@@ -1569,6 +1569,9 @@ class Commentator:
                 "messages": [{"role": "system", "content": HOST_PROMPT}, {"role": "user", "content": user}]}
         request = urllib.request.Request(OPENCODE_GO_URL, data=json.dumps(body).encode("utf-8"), method="POST",
                                          headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                                                  # The go endpoint refuses a call with no session id (HTTP 400
+                                                  # MissingSessionID). One stable id keeps its routing warm.
+                                                  "x-opencode-session": "ai-chess-commentary",
                                                   "User-Agent": BROWSER_UA})
         try:
             with urllib.request.urlopen(request, timeout=CLI_TIMEOUT_SECONDS) as response:

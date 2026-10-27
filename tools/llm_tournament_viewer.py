@@ -220,7 +220,8 @@ td .route { display: block; color: var(--muted); font-size: 11px; font-weight: 4
 .think-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); animation: think-pulse 1.4s ease-in-out infinite; }
 @keyframes think-pulse { 0%, 100% { opacity: .25; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .think-dot { animation: none; } }
-.think-body { border-top: 1px solid var(--line); padding: 6px 10px 8px; max-height: 240px; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+/* Owner 2026-10-27: the panel must be resizable so a long chain of thought can be read in full. */
+.think-body { border-top: 1px solid var(--line); padding: 6px 10px 8px; height: 240px; max-height: 70vh; min-height: 60px; overflow-y: auto; resize: vertical;
   font: 11.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #8a93a0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .think-body[hidden] { display: none; }
 .think-body .think-note { font-family: "Segoe UI", system-ui, sans-serif; font-style: italic; color: var(--muted); white-space: normal; }
@@ -588,6 +589,13 @@ a.chip.pub { text-decoration: none; }
 .pl1 { white-space: nowrap; }
 .plogo { display: inline-block; width: 1.05em; height: 1.05em; vertical-align: -.17em; margin-right: .36em; flex: none; color: var(--text); border-radius: 3px; overflow: hidden; }
 .hdr-links { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-left: auto; min-width: 0; }
+/* Road to the final, projected: one compact strip at the top, left of the livestream link. */
+.hdr-road { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.hdr-road .rlabel { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.hdr-road .rpair { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line);
+  border-radius: 999px; font-size: 12.5px; background: var(--panel); white-space: nowrap; }
+.hdr-road .rpair b { color: var(--text); font-weight: 600; }
+.hdr-road .rpair .vs { color: var(--muted); }
 .hdr-links [hidden], .extras[hidden], .archive-bar[hidden] { display: none !important; }
 a.chip, button.chip { text-decoration: none; font: inherit; font-size: 13px; cursor: pointer; }
 .hdr-links .chip { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
@@ -693,6 +701,7 @@ body.stream .hdr-links, body.stream .extras, body.stream .archive-bar { display:
   <h1 id="title">AI Chess Swiss</h1>
   <div class="chips" id="chips"></div>
   <div class="hdr-links" id="hdrLinks">
+    <div class="hdr-road" id="hdrRoad" hidden></div>
     <a class="chip yt" id="liveLink" href="#" target="_blank" rel="noopener" hidden title="Open the YouTube livestream of this tournament" aria-label="Watch the livestream"><svg viewBox="0 0 24 17" aria-hidden="true"><path fill="#f00" d="M23.5 2.65A3.02 3.02 0 0 0 21.38.5C19.5 0 12 0 12 0S4.5 0 2.62.5A3.02 3.02 0 0 0 .5 2.65C0 4.53 0 8.46 0 8.46s0 3.93.5 5.81a3.02 3.02 0 0 0 2.12 2.14c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 0 0 2.12-2.14c.5-1.88.5-5.81.5-5.81s0-3.93-.5-5.81z"/><path fill="#fff" d="M9.55 12.03V4.89l6.27 3.57z"/></svg><span><span class="wide">Watch the </span>livestream</span></a>
     <label class="chip tsel" id="tourPick" hidden title="Watch an earlier tournament: every game can be replayed move by move"><span>Tournament</span><select id="tourSelect" aria-label="Choose a tournament to watch"></select></label>
     <button type="button" class="chip learn" id="learntBtn" hidden title="Each AI keeps a memory file between games: open it here">What each AI has learnt</button>
@@ -1582,10 +1591,29 @@ function bracketSlots() {
   }
   return out;
 }
+function renderHeaderRoad(sl) {
+  // The projected road to the final belongs at the top, left of the livestream link.
+  const box = document.getElementById("hdrRoad");
+  if (!box) return;
+  if (!sl || sl.ko) { box.hidden = true; box.innerHTML = ""; return; }
+  const pair = (label, a, b) => `<span class="rpair"><b>${esc(a || "seed")}</b>`
+    + `<span class="vs">v</span><b>${esc(b || "seed")}</b></span>`;
+  const rows = (data.standings || []).slice().sort((x, y) => (x.rank || 99) - (y.rank || 99));
+  const played = rows.some(r => (r.played || 0) > 0);
+  const cfg = data.config || {};
+  const size = (fmtInfo() && fmtInfo().ko_size) || cfg.knockoutSize || 4;
+  const name = i => (played && rows[i] ? rows[i].name : null);
+  setHTML(box, `<span class="rlabel">Road to the final${played ? " (projected)" : ""}</span>`
+    + pair("sf1", name(0), name(size - 1)) + pair("sf2", name(1), name(size - 2)));
+  box.hidden = false;
+  box.title = sl.note || "";
+}
 function renderBracket() {
   const card = document.getElementById("bracketCard");
   const sl = bracketSlots();
-  if (card.hidden === !!sl) card.hidden = !sl;
+  renderHeaderRoad(sl);
+  const sideShows = !!(sl && sl.ko);      // projection moved to the header
+  if (card.hidden === sideShows) card.hidden = !sideShows;
   document.getElementById("side").classList.toggle("ko-first", !!(sl && sl.ko));
   if (!sl) return;
   document.getElementById("bracketTitle").textContent = sl.ko ? "Knockout bracket" : "Road to the final (projected)";
