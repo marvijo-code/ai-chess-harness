@@ -235,14 +235,24 @@ body.focus-mode .boards { display: block; }
   grid-template-columns: var(--fboard) minmax(300px, 1fr); grid-template-areas: "head head" "boardcol infocol"; }
 .card.focused .game-head { grid-area: head; }
 .card.focused .boardcol { grid-area: boardcol; min-width: 0; }
-.card.focused .infocol { grid-area: infocol; min-width: 0; display: flex; flex-direction: column; height: calc(var(--fboard) + 64px); }
+.card.focused .infocol { grid-area: infocol; min-width: 0; display: flex; flex-direction: column; height: max(calc(var(--fboard) + 64px), 460px); }
 .card.focused .infocol .evalline { margin-top: 6px; }
 .card.focused .infocol > * { flex-shrink: 0; }   /* only the move list and the thinking panel give up height */
-.card.focused .moves { max-height: none; flex: 1 1 auto; min-height: 140px; font-size: 14px; }
-.card.focused .infocol > .thinking { flex: 0 1 auto; min-height: 34px; overflow: hidden; }
-.card.focused .think-body { max-height: 45vh; font-size: 12px; flex: 1 1 auto; min-height: 0; }
+.card.focused .moves { max-height: none; flex: 1 1 0; min-height: 140px; font-size: 14px; }
+/* The thinking panel keeps the larger share of the column, so a long chain of thought can be read
+   without hunting for the scrollbar (owner 2026-10-27: "i want more space for thinking"). */
+.card.focused .infocol > .thinking { flex: 1.6 1 0; min-height: 60px; overflow: hidden; }
+.card.focused .think-body { max-height: none; font-size: 12px; flex: 1 1 auto; min-height: 0; height: auto; resize: none; }
+/* The handle between the board and its panel column (wide screens, never the stream: it has one fixed
+   1920x1080 geometry). Drag it left for a wider move list and thinking panel, right for a bigger board. */
+.vsplit { display: none; position: relative; grid-area: split; align-self: stretch; cursor: col-resize; touch-action: none; border-radius: 8px; }
+.vsplit::before { content: ""; position: absolute; left: 50%; top: 4px; bottom: 4px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: rgba(255, 255, 255, .12); }
+.vsplit:hover::before, .vsplit:focus-visible::before, .card.focused.resizing .vsplit::before { background: rgba(91, 157, 255, .7); }
+.vsplit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.card.focused.resizing { user-select: none; cursor: col-resize; }
 @media (max-height: 820px) {
   .card.focused .moves { min-height: 56px; }
+  .card.focused .infocol { height: calc(var(--fboard) + 64px); }   /* a short window: no floor, the card must fit */
   .card.focused .infocol .comment { min-height: 0; margin-top: 6px; padding: 6px 10px; font-size: 13px; }
   .card.focused .infocol [data-part="result"] .who { display: inline; margin-right: 8px; }
   .card.focused .infocol { overflow-y: auto; overscroll-behavior: contain; }   /* last resort: scroll, never cut */
@@ -274,7 +284,7 @@ body.stream.focus-mode main { grid-template-columns: minmax(0, 1fr) 440px; }
 body.stream.focus-mode .side { display: flex; }
 body.stream .boards > .card.focused { max-width: none; --fboard: max(340px, min(calc(100vh - var(--chrome-h, 62px) - 262px), calc(100vw - 934px)));
   grid-template-columns: var(--fboard) minmax(0, 1fr); grid-template-areas: "head head" "boardcol infocol"; }
-body.stream .card.focused .lb-side, body.stream .card.focused .lb-under, body.stream .card.focused .mini-bk { display: none; }
+body.stream .card.focused .lb-side, body.stream .card.focused .lb-under { display: none; }
 /* ---- round robin + knockouts ---------------------------------------------------------------- */
 .chip.stage { color: var(--ok); border-color: rgba(52, 199, 123, .45); }
 .chip.stage.ko { color: #ffd479; border-color: rgba(245, 185, 66, .6); background: rgba(245, 185, 66, .09); font-weight: 600; }
@@ -428,9 +438,13 @@ body.stream .wt-champ { font-size: 76px; } body.stream .wt-lead { font-size: 22p
   .intro *, .champ-overlay * { animation-duration: .01s !important; animation-delay: 0s !important; }
 }
 @media (max-width: 700px) { .intro-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-/* Compact bracket beside the big board: focus mode on wide screens only (the side panel is hidden there). */
-.mini-bk { display: none; }
-@media (min-width: 1280px) { .card.focused .mini-bk:not(:empty) { display: block; flex: none; margin-bottom: 4px; } }
+/* The road to the final reads across the top of the page, above the boards, and only once
+   (owner 2026-10-27: "road to the final must be on top, and remove the top duplicate panel"). */
+.topbracket { display: none; padding: 14px 22px 0; }
+body:not(.stream) .topbracket:not([hidden]) { display: block; }
+@media (max-width: 1279px) { .topbracket { display: none !important; } }
+.topbracket .card { padding: 9px 12px 10px; }
+.topbracket .mb-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
 .mb-title { display: flex; justify-content: space-between; align-items: baseline; gap: 2px 10px; flex-wrap: wrap; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
 .mb-title .mb-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .mb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 6px; }
@@ -459,9 +473,12 @@ body.stream .wt-champ { font-size: 76px; } body.stream .wt-lead { font-size: 22p
 .card.focused .lb-under:not(:empty) { display: block; margin-top: 8px; }
 @media (min-width: 1280px) {
   .boards > .card.focused { --fboard: max(340px, min(calc(100vh - 290px - var(--hdr-extra, 0px)), calc(100vw - 822px)));
-    grid-template-columns: var(--fboard) minmax(300px, 1fr) clamp(240px, 18vw, 300px); grid-template-areas: "head head head" "boardcol infocol lbcol"; }
+    grid-template-columns: var(--fboard) 12px minmax(300px, 1fr) clamp(240px, 18vw, 300px); grid-template-areas: "head head head head" "boardcol split infocol lbcol"; }
+  .card.focused .vsplit { display: block; }
+  body.stream .boards > .card.focused { grid-template-areas: "head head" "boardcol infocol"; }
+  body.stream .card.focused .vsplit { display: none; }
   .card.focused .lb-under:not(:empty) { display: none; }
-  .card.focused .lb-side:not(:empty) { display: flex; flex-direction: column; grid-area: lbcol; height: calc(var(--fboard) + 64px); }
+  .card.focused .lb-side:not(:empty) { display: flex; flex-direction: column; grid-area: lbcol; height: max(calc(var(--fboard) + 64px), 460px); }
   .card.focused .lb-side .lb-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 }
 .lb-title { display: flex; justify-content: space-between; align-items: baseline; gap: 2px 8px; flex-wrap: wrap; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
@@ -589,13 +606,6 @@ a.chip.pub { text-decoration: none; }
 .pl1 { white-space: nowrap; }
 .plogo { display: inline-block; width: 1.05em; height: 1.05em; vertical-align: -.17em; margin-right: .36em; flex: none; color: var(--text); border-radius: 3px; overflow: hidden; }
 .hdr-links { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-left: auto; min-width: 0; }
-/* Road to the final, projected: one compact strip at the top, left of the livestream link. */
-.hdr-road { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
-.hdr-road .rlabel { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
-.hdr-road .rpair { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line);
-  border-radius: 999px; font-size: 12.5px; background: var(--panel); white-space: nowrap; }
-.hdr-road .rpair b { color: var(--text); font-weight: 600; }
-.hdr-road .rpair .vs { color: var(--muted); }
 .hdr-links [hidden], .extras[hidden], .archive-bar[hidden] { display: none !important; }
 a.chip, button.chip { text-decoration: none; font: inherit; font-size: 13px; cursor: pointer; }
 .hdr-links .chip { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
@@ -701,7 +711,6 @@ body.stream .hdr-links, body.stream .extras, body.stream .archive-bar { display:
   <h1 id="title">AI Chess Swiss</h1>
   <div class="chips" id="chips"></div>
   <div class="hdr-links" id="hdrLinks">
-    <div class="hdr-road" id="hdrRoad" hidden></div>
     <a class="chip yt" id="liveLink" href="#" target="_blank" rel="noopener" hidden title="Open the YouTube livestream of this tournament" aria-label="Watch the livestream"><svg viewBox="0 0 24 17" aria-hidden="true"><path fill="#f00" d="M23.5 2.65A3.02 3.02 0 0 0 21.38.5C19.5 0 12 0 12 0S4.5 0 2.62.5A3.02 3.02 0 0 0 .5 2.65C0 4.53 0 8.46 0 8.46s0 3.93.5 5.81a3.02 3.02 0 0 0 2.12 2.14c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 0 0 2.12-2.14c.5-1.88.5-5.81.5-5.81s0-3.93-.5-5.81z"/><path fill="#fff" d="M9.55 12.03V4.89l6.27 3.57z"/></svg><span><span class="wide">Watch the </span>livestream</span></a>
     <label class="chip tsel" id="tourPick" hidden title="Watch an earlier tournament: every game can be replayed move by move"><span>Tournament</span><select id="tourSelect" aria-label="Choose a tournament to watch"></select></label>
     <button type="button" class="chip learn" id="learntBtn" hidden title="Each AI keeps a memory file between games: open it here">What each AI has learnt</button>
@@ -709,6 +718,7 @@ body.stream .hdr-links, body.stream .extras, body.stream .archive-bar { display:
 </header>
 <div class="archive-bar" id="archiveBar" hidden role="status"></div>
 <div class="ticker" id="ticker" aria-label="Standings"></div>
+<section class="topbracket" id="topBracket" hidden aria-label="Road to the final"><div class="card" id="topBracketCard"><div id="bracketTop"></div></div></section>
 <main>
   <section class="boards" id="boards"><div class="empty card">Waiting for the tournament to start...</div></section>
   <aside class="side" id="side">
@@ -1100,12 +1110,14 @@ function cardFor(id) {
     <div class="boardcol"><div class="pbar" data-part="black"></div>
       <div class="board-wrap" data-part="wrap"><div class="evalbar unknown" data-part="evalbar" title="Stockfish evaluation, White at the bottom"><div class="white" data-part="evalwhite"></div><div class="mid"></div></div><div class="board-box"><div class="board" data-part="board"></div><div class="bwin" data-part="boardwin" hidden></div></div></div>
       <div class="pbar" data-part="white"></div><div class="caption" data-part="caption" style="display:none"></div><div class="lb lb-under" data-part="lbunder"></div></div>
-    <div class="infocol"><div class="lstrip" data-part="strip"><div data-part="striphead"></div><div class="ls-grid" data-part="stripgrid"></div></div><div class="mini-bk" data-part="minibk"></div><div class="evalline" data-part="evalline"></div><div class="comment" data-part="comment"></div>
+    <div class="vsplit" data-part="vsplit" role="separator" aria-orientation="vertical" aria-label="Resize the board and the panel beside it" title="Drag to make the board bigger or the panel wider. Double-click to reset." tabindex="0"></div>
+    <div class="infocol"><div class="lstrip" data-part="strip"><div data-part="striphead"></div><div class="ls-grid" data-part="stripgrid"></div></div><div class="evalline" data-part="evalline"></div><div class="comment" data-part="comment"></div>
       <div class="comment" data-part="result" style="display:none"></div><div class="moves" data-part="moves"></div><div class="nav" data-part="nav"></div>
       <div class="thinking" data-part="thinking"><button type="button" class="think-head" data-part="thinkhead" data-think-toggle aria-expanded="false"></button><div class="think-body" data-part="thinkbody" hidden></div></div></div>
     <div class="lb lb-side" data-part="lbside"></div>`;
   const parts = { head: el.querySelector("[data-focus-head]") };
   el.querySelectorAll("[data-part]").forEach(n => { parts[n.dataset.part] = n; });
+  if (parts.vsplit) wireSplitter(parts.vsplit);
   c = { id, el, parts, follow: true, top: 0, movesKey: null, boardKey: null, moveTotal: undefined, movePly: undefined, think: newThink(null) };
   parts.moves.addEventListener("scroll", () => {
     const box = parts.moves;
@@ -1310,7 +1322,6 @@ function updateCard(c, game, now) {
   setHTML(p.head, `<span class="tag ${koGame ? "ko" : ""}">${esc(label)}${pinned && ply < total ? " - replay" : ""}</span><span class="head-right">${onAir ? `<span class="air-tag" title="The spoken commentary is about this board">On commentary</span>` : ""}${pill}${btn}</span>${arma}`);
   updateBar(p.black, game, "black", now);
   updateBar(p.white, game, "white", now);
-  setHTML(p.minibk, focused ? miniBracketHtml(game.id) : "");
   const strip = focused && autoFocus && !focusPinned;   // only when the camera moves by itself
   p.strip.classList.toggle("on", strip);
   setHTML(p.striphead, strip ? liveStripHead(game.id, Date.now()) : "");
@@ -1441,6 +1452,7 @@ function render() {
   ].join(""));
   renderBanner();
   renderBoards();
+  applySplit();
   const games = data.games || {};
   document.getElementById("standingsTitle").textContent = fmt ? "Round robin table (Elo)" : "Standings (Elo)";
   renderTicker();
@@ -1591,30 +1603,18 @@ function bracketSlots() {
   }
   return out;
 }
-function renderHeaderRoad(sl) {
-  // The projected road to the final belongs at the top, left of the livestream link.
-  const box = document.getElementById("hdrRoad");
-  if (!box) return;
-  if (!sl || sl.ko) { box.hidden = true; box.innerHTML = ""; return; }
-  const pair = (label, a, b) => `<span class="rpair"><b>${esc(a || "seed")}</b>`
-    + `<span class="vs">v</span><b>${esc(b || "seed")}</b></span>`;
-  const rows = (data.standings || []).slice().sort((x, y) => (x.rank || 99) - (y.rank || 99));
-  const played = rows.some(r => (r.played || 0) > 0);
-  const cfg = data.config || {};
-  const size = (fmtInfo() && fmtInfo().ko_size) || cfg.knockoutSize || 4;
-  const name = i => (played && rows[i] ? rows[i].name : null);
-  setHTML(box, `<span class="rlabel">Road to the final${played ? " (projected)" : ""}</span>`
-    + pair("sf1", name(0), name(size - 1)) + pair("sf2", name(1), name(size - 2)));
-  box.hidden = false;
-  box.title = sl.note || "";
-}
 function renderBracket() {
   const card = document.getElementById("bracketCard");
   const sl = bracketSlots();
-  renderHeaderRoad(sl);
-  const sideShows = !!(sl && sl.ko);      // projection moved to the header
+  // The page reads the road to the final across the top; the stream keeps it in the side column (one screen).
+  const sideShows = !!sl && STREAM;
   if (card.hidden === sideShows) card.hidden = !sideShows;
   document.getElementById("side").classList.toggle("ko-first", !!(sl && sl.ko));
+  const top = document.getElementById("topBracket"), topBox = document.getElementById("bracketTop");
+  if (top && topBox) {
+    top.hidden = !sl;
+    setHTML(topBox, sl ? miniBracketHtml(focusId || selected || null) : "");
+  }
   if (!sl) return;
   document.getElementById("bracketTitle").textContent = sl.ko ? "Knockout bracket" : "Road to the final (projected)";
   const champ = sl.champion ? `<div class="bk-champ won">${crownSvg("", "bk")}<span><span class="bk-head" style="justify-content:center;margin:0">Champion</span><b>${esc(sl.champion)}</b></span></div>`
@@ -1625,7 +1625,8 @@ function renderBracket() {
     + (sl.third ? `<div class="bk-third">${bkMatchHtml(sl.third.m, sl.third.o)}</div>` : "");
   setHTML(document.getElementById("bracket"), html);
 }
-// Compact bracket beside the big board (focus mode, wide screens only; CSS hides it elsewhere).
+// The compact road to the final that reads across the top of the page (and the same slots the side panel
+// draws). `curId` marks the match the focused board belongs to.
 function miniMatch(m, o, curId) {
   const games = m ? matchGameList(m) : [];
   const live = games.find(g => g.status === "live");
@@ -2595,6 +2596,95 @@ async function pollCommentary() {
 }
 setInterval(pollCommentary, HOSTED ? 1500 : 1000);
 
+// ---- the handle between the board and its panel column ---------------------------------------
+// Dragging it right grows the board; dragging it left gives the move list and the thinking panel more
+// room. The board is square, so its height follows its width and everything beside it scales with it.
+// The width is remembered for the next visit; the stream keeps one fixed 1920x1080 geometry.
+const SPLIT_KEY = "aichessFocusBoard";
+let splitDrag = false;
+function splitCard() { return document.querySelector(".boards > .card.focused"); }
+function splitStored() { const v = parseFloat(store(SPLIT_KEY) || ""); return isFinite(v) && v >= 200 ? v : null; }
+function splitLimits(card) {
+  const cs = getComputedStyle(card);
+  const gap = parseFloat(cs.columnGap) || 0;
+  const tracks = (cs.gridTemplateColumns || "").trim().split(/\s+/).map(parseFloat).filter(isFinite);
+  const inner = card.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+  const handle = tracks.length >= 3 ? tracks[1] : 0;      // the handle's own column
+  const lb = tracks.length >= 4 ? tracks[3] : 0;          // the leaderboard column of a wide screen
+  const min = 320, panel = 300;
+  return { min, max: Math.max(min, inner - handle - lb - gap * Math.max(0, tracks.length - 1) - panel) };
+}
+function splitTo(px) {
+  const card = splitCard();
+  if (!card) return null;
+  const lim = splitLimits(card);
+  const w = Math.round(Math.min(lim.max, Math.max(lim.min, px)));
+  card.style.setProperty("--fboard", w + "px");
+  const h = card.querySelector(".vsplit");
+  if (h) h.setAttribute("aria-valuenow", String(w));
+  return w;
+}
+function splitCommit() {
+  const card = splitCard();
+  if (!card) return;
+  const w = parseFloat(getComputedStyle(card).getPropertyValue("--fboard"));
+  if (isFinite(w)) store(SPLIT_KEY, Math.round(w) + "px");
+}
+function applySplit() {
+  if (STREAM || splitDrag) return;   // a drag is the viewer's own hand; the stream never moves
+  const card = splitCard();
+  if (!card) return;
+  const w = splitStored();
+  if (w === null) card.style.removeProperty("--fboard");
+  else splitTo(w);
+}
+function wireSplitter(el) {
+  if (el.dataset.wired) return;
+  el.dataset.wired = "1";
+  const card = () => el.closest(".card.focused");
+  const now = () => { const c = card(); return c ? (c.querySelector(".boardcol") || c).getBoundingClientRect().width : 0; };
+  el.addEventListener("pointerdown", ev => {
+    const c = card();
+    if (!c) return;
+    ev.preventDefault();
+    const x0 = ev.clientX, start = now();
+    splitDrag = true;
+    c.classList.add("resizing");
+    try { el.setPointerCapture(ev.pointerId); } catch (e) { /* no pointer capture: still drags */ }
+    const move = e => { splitTo(start + (e.clientX - x0)); };
+    const end = () => {
+      splitDrag = false;
+      c.classList.remove("resizing");
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", end);
+      el.removeEventListener("pointercancel", end);
+      splitCommit();
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+  });
+  el.addEventListener("dblclick", () => {
+    const c = card();
+    if (!c) return;
+    c.style.removeProperty("--fboard");
+    store(SPLIT_KEY, "");
+  });
+  el.addEventListener("keydown", ev => {
+    const c = card();
+    if (!c) return;
+    const step = ev.shiftKey ? 80 : 24, cur = now();
+    if (ev.key === "ArrowLeft") splitTo(cur - step);
+    else if (ev.key === "ArrowRight") splitTo(cur + step);
+    else if (ev.key === "Home") splitTo(splitLimits(c).min);
+    else if (ev.key === "End") splitTo(splitLimits(c).max);
+    else return;
+    ev.preventDefault();
+    ev.stopPropagation();     // arrows on the handle never step through the moves
+    splitCommit();
+  });
+}
+
 // ---- input --------------------------------------------------------------------------------
 document.addEventListener("click", ev => {
   unlockAudio();
@@ -2928,12 +3018,13 @@ async function poll() {
   const hdr = document.querySelector("header"), tick = document.getElementById("ticker");
   const ban = document.getElementById("hostedBanner");   // hosted page only
   const arch = document.getElementById("archiveBar");
+  const top = document.getElementById("topBracket");      // the road to the final across the top
   const set = () => {
-    const bars = (ban ? ban.offsetHeight : 0) + arch.offsetHeight;
+    const bars = (ban ? ban.offsetHeight : 0) + arch.offsetHeight + (top && !top.hidden ? top.offsetHeight : 0);
     document.documentElement.style.setProperty("--hdr-extra", Math.max(0, hdr.offsetHeight + tick.offsetHeight + bars - 60) + "px");
     document.documentElement.style.setProperty("--chrome-h", (hdr.offsetHeight + tick.offsetHeight + bars) + "px");
   };
-  try { const ro = new ResizeObserver(set); ro.observe(hdr); ro.observe(tick); ro.observe(arch); if (ban) ro.observe(ban); } catch (e) { window.addEventListener("resize", set); }
+  try { const ro = new ResizeObserver(set); ro.observe(hdr); ro.observe(tick); ro.observe(arch); if (ban) ro.observe(ban); if (top) ro.observe(top); } catch (e) { window.addEventListener("resize", set); }
   set();
 })();
 poll();
