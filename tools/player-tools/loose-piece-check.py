@@ -74,15 +74,20 @@ def main():
     board = chess.Board(payload["fen"])
     mine = board.turn
     risky = []
+    risky_uci = []
     for move in board.legal_moves:
         san = board.san(move)
         note = offender(board, move, mine)
         if note:
             risky.append((san, note))
+            risky_uci.append((san, move.uci()))
     if risky:
         print("These moves lose material once the captures are played out, so avoid them:")
         for san, note in risky:
             print(f"  {san}: {note}.")
+        # Machine-readable verdict for the harness gate: the engine refuses a reply
+        # whose move appears here, and tells the player why.
+        print("AVOID: " + " ".join(uci for _san, uci in risky_uci))
     else:
         print("No move here loses material once the captures are played out.")
 

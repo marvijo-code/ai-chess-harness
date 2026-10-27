@@ -966,6 +966,11 @@ class SubscriptionChessClient:
         tools_env = os.environ.get("LLM_TOOLS_DIR", "").strip()
         self.tools_dir: Path | None = Path(tools_env) if tools_env else None
         self._tools_cache: tuple[str, str] = ("", "")   # (fen, rendered text) for this move
+        # A reply that the player's own tool flags is refused once per move, with the
+        # tool's sentence as the reason. LLM_TOOL_GATE=0 turns the gate off.
+        self.tool_gate = os.environ.get("LLM_TOOL_GATE", "true").strip().lower() not in {"0", "false", "no", "off"}
+        self._flagged: dict[str, str] = {}
+        self._gated: set[tuple[str, str]] = set()
         self.invalid_model_moves = 0
         self.last_report: dict = {}
         self.runner: Callable[[list[str], str, int, Path | None], str] = self._run_cli
@@ -1069,6 +1074,8 @@ class SubscriptionChessClient:
         self.invalid_model_moves = 0
         self._nudge = None
         self._tools_cache = ("", "")
+        self._flagged = {}
+        self._gated = set()
         self._wait_compaction(announce=False)
         self.end_session()
         self.context = None
@@ -1308,6 +1315,15 @@ class SubscriptionChessClient:
                     self._conv["turn_plies"] = len(history)
                     self._conv["seen"] = len(history)
                 move, comment, _raw = parse_reply(text, board)
+                gate_key = (board.fen(), move.uci())
+                if self._flagged.get(move.uci()) and gate_key not in self._gated:
+                    # The player's own tool listed this move. Refuse it once and say why,
+                    # through the same rejection path a bad reply uses.
+                    self._gated.add(gate_key)
+                    self.last_report["gated"] = self.last_report.get("gated", 0) + 1
+                    self._think(f"\n[tool gate refused {board.san(move)}: {self._flagged[move.uci()][:160]}]\n")
+                    self.log(f"{self.provider} {self.model} tool gate refused {move.uci()} on this move")
+                    raise ValueError(f"your own tool says that move loses material: {self._flagged[move.uci()]}")
                 note = parse_note(text)
                 if note:
                     self.last_report["note"] = note
@@ -1965,6 +1981,7 @@ class SubscriptionChessClient:
             text = player_tools_mod.render_block(block, board, history)
             self.last_report["tools"] = [{"name": r.name, "ok": r.ok, "ms": r.elapsed_ms,
                                           "error": r.error[:120]} for r in block.results]
+            self._flagged = player_tools_mod.flagged_moves(block.results) if self.tool_gate else {}
             if block.any_ran:
                 summary = ", ".join(f"{r.name}={'ok' if r.ok else 'failed'}({r.elapsed_ms}ms)"
                                     for r in block.results)

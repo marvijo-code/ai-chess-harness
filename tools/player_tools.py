@@ -224,6 +224,34 @@ def run_tools(tools_dir: Path | None, board: chess.Board, history: list[str],
     return ToolsBlock(results=results, available=list(found.keys()))
 
 
+AVOID_LINE = re.compile(r"^\s*AVOID:\s*(.+)$", re.M)
+UCI_MOVE = re.compile(r"\b([a-h][1-8][a-h][1-8][qrbn]?)\b")
+
+
+def flagged_moves(results: list[ToolResult]) -> dict[str, str]:
+    """Moves a tool says would lose material, with the sentence that says it.
+
+    A tool states its verdict on a line beginning `AVOID:` followed by UCI moves.
+    The sentence above that line is kept as the reason the engine gives back.
+    Any tool may do this; the engine only reads, it never invents a flag.
+    """
+    flagged: dict[str, str] = {}
+    for result in results:
+        if not result.ok or not result.output:
+            continue
+        lines = result.output.splitlines()
+        reasons = [line.strip() for line in lines if not line.strip().startswith("AVOID:")]
+        for index, line in enumerate(lines):
+            match = AVOID_LINE.match(line)
+            if not match:
+                continue
+            reason = next((r for r in reversed(reasons[:index]) if r), "")
+            reason = re.sub(r"^[-*\s]+", "", reason)[:200]
+            for uci in UCI_MOVE.findall(match.group(1)):
+                flagged.setdefault(uci, reason or f"{result.name} says this move loses material")
+    return flagged
+
+
 def render_block(block: ToolsBlock, board: chess.Board, history: list[str]) -> str:
     """Prompt text for tool output. Empty when there is nothing to show."""
     if not block.any_ran:
