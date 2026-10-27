@@ -112,8 +112,12 @@ def check_source(text: str) -> str | None:
     return None
 
 
-def validate_tool_edit(path: object, content: object) -> tuple[bool, str]:
-    """Is this reflection edit an acceptable tool? (ok, reason when not)."""
+def validate_tool_edit(path: object, content: object, lint: bool = True) -> tuple[bool, str]:
+    """Is this reflection edit an acceptable tool? (ok, reason when not).
+
+    Checks the name, the size, the banned imports, that it compiles, and -
+    when `lint` is on - that it actually runs on a test position.
+    """
     if not isinstance(path, str) or not isinstance(content, str):
         return False, "tool edit needs a string path and string content"
     if not TOOL_PATH.match(path):
@@ -129,6 +133,10 @@ def validate_tool_edit(path: object, content: object) -> tuple[bool, str]:
         compile(content, path, "exec")
     except SyntaxError as exc:
         return False, f"{path} does not compile: {exc.msg} (line {exc.lineno})"
+    if lint:
+        ok, reason = lint_tool_content(Path(path).stem, content)
+        if not ok:
+            return False, reason
     return True, ""
 
 
@@ -143,6 +151,32 @@ def discover(own_dir: Path | None = None, include_shared: bool = True) -> dict[s
             if TOOL_PATH.match(f"tools/{path.name}"):
                 found[path.stem] = path
     return dict(list(found.items())[:MAX_TOOL_FILES])
+
+
+SMOKE_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+
+def lint_tool_content(name: str, content: str, *, timeout: float = RUN_TIMEOUT_SECONDS,
+                      python: str | None = None) -> tuple[bool, str]:
+    """Run a proposed tool once on the start position before it is registered.
+
+    Compiling is not enough: a tool that imports fine can still crash, print
+    nothing, or hang, and the player would only find out mid-game. A tool that
+    cannot answer the start position is not accepted.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"{name}.py"
+        path.write_text(content, encoding="utf-8")
+        result = run_tool(path, {"fen": SMOKE_FEN, "moves": [], "side_to_move": "white",
+                                 "clocks": {"you_ms": 600000, "opponent_ms": 600000}},
+                          timeout=timeout, python=python)
+    if not result.ok:
+        return False, f"{name} did not run on a test position: {result.error}"
+    if not result.output.strip():
+        return False, f"{name} printed nothing on a test position"
+    return True, ""
 
 
 def existing_tools(tools_dir: Path | None) -> list[Path]:
