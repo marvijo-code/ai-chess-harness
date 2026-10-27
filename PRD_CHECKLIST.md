@@ -291,3 +291,4 @@
 - [x] Tool tests green (12 new, 112 across the LLM and tournament suites) plus a live opencode-go proof where the player's own hang-check tool ran and the model avoided the blunder (Validation 91).
 
 - [x] Viewer eval bar never falls back to the 50% middle and a finished game shows its winner in the middle of the board plus the result in the bar (PRD 196, Validation 92).
+- [ ] Road to the final across the top of the page, the duplicate header strip and the in-card copy removed, and a resizable handle between the board and its panel column (PRD 197).

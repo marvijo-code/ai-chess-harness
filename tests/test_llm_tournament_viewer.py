@@ -495,19 +495,40 @@ class PageTest(unittest.TestCase):
         self.assertIn("const want = focusId && focusPinned && data.games && data.games[focusId] ? focusId : null;", viewer.PAGE)
         self.assertIn("if (focusId && focusPinned && clip.game !== focusId) return false;", viewer.PAGE)
 
-    def test_compact_bracket_beside_focused_board(self):
-        # one bracket model drives the side panel and the compact focus-mode bracket
-        for needle in ("function bracketSlots()", "function miniBracketHtml(curId)", 'data-part="minibk"',
-                       "setHTML(p.minibk, focused ? miniBracketHtml(game.id) : \"\");", "Armageddon live", "To be crowned"):
+    def test_road_to_the_final_reads_across_the_top(self):
+        # one bracket model drives the top band and the stream's side panel
+        for needle in ("function bracketSlots()", "function miniBracketHtml(curId)", 'id="topBracket"', 'id="bracketTop"',
+                       'setHTML(topBox, sl ? miniBracketHtml(focusId || selected || null) : "");', "Armageddon live", "To be crowned"):
             self.assertIn(needle, viewer.PAGE, needle)
-        # wide screens only, so phones and narrow windows keep the bracket below the boards
-        self.assertIn(".mini-bk { display: none; }", viewer.PAGE)
-        self.assertIn("@media (min-width: 1280px) { .card.focused .mini-bk:not(:empty) { display: block;", viewer.PAGE)
-        # a one-row header leaves the focused board as large as before; a wrapped header shrinks it to fit
+        # the panel sits above the boards and nowhere else: no duplicate strip in the header, no copy in the card
+        self.assertLess(viewer.PAGE.index('id="topBracket"'), viewer.PAGE.index('<main>'))
+        self.assertNotIn("hdrRoad", viewer.PAGE)
+        self.assertNotIn("hdr-road", viewer.PAGE)
+        self.assertNotIn("mini-bk", viewer.PAGE)
+        self.assertNotIn("data-part=\"minibk\"", viewer.PAGE)
+        # wide screens only, so phones keep a small top; the stream keeps it in its side column
+        self.assertIn("body:not(.stream) .topbracket:not([hidden]) { display: block; }", viewer.PAGE)
+        self.assertIn("@media (max-width: 1279px) { .topbracket { display: none !important; } }", viewer.PAGE)
+        # a wrapped header or a tall top band shrinks the focused board, so the card still fits the screen
         self.assertIn("calc(100vh - 290px - var(--hdr-extra, 0px))", viewer.PAGE)
+        self.assertIn('const top = document.getElementById("topBracket");      // the road to the final across the top', viewer.PAGE)
         # compact matches reuse the bracket click (a manual pick: pins the commentator, Auto-focus off)
         mini = viewer.PAGE[viewer.PAGE.index("function miniMatch("):viewer.PAGE.index("function miniBracketHtml(")]
         self.assertIn("data-bk-game", mini)
+
+    def test_split_handle_between_the_board_and_its_panel(self):
+        page = viewer.PAGE
+        for needle in ('data-part="vsplit"', "function wireSplitter(el)", "function applySplit()", "applySplit();",
+                       'const SPLIT_KEY = "aichessFocusBoard";', "splitLimits(card)", 'card.style.setProperty("--fboard", w + "px");',
+                       "ev.stopPropagation();", 'card.style.removeProperty("--fboard");'):
+            self.assertIn(needle, page, needle)
+        # the handle has its own grid column between the board and the panel column
+        self.assertIn('grid-template-columns: var(--fboard) 12px minmax(300px, 1fr) clamp(240px, 18vw, 300px); grid-template-areas: "head head head head" "boardcol split infocol lbcol";', page)
+        # never on a phone, never on the stream (one fixed 1920x1080 geometry there)
+        self.assertIn("body.stream .card.focused .vsplit { display: none; }", page)
+        self.assertIn(".vsplit { display: none; position: relative; grid-area: split;", page)
+        # the thinking panel takes the larger share of the info column
+        self.assertIn(".card.focused .infocol > .thinking { flex: 1.6 1 0; min-height: 60px; overflow: hidden; }", page)
 
     def test_focus_mode_leaderboard_always_visible(self):
         page = viewer.PAGE
@@ -516,8 +537,8 @@ class PageTest(unittest.TestCase):
                        'const lb = focused ? leaderboardHtml(game) : "";'):
             self.assertIn(needle, page, needle)
         # wide screens: a third column beside the board, same height as the info column
-        self.assertIn('grid-template-areas: "head head head" "boardcol infocol lbcol"', page)
-        self.assertIn(".card.focused .lb-side:not(:empty) { display: flex; flex-direction: column; grid-area: lbcol; height: calc(var(--fboard) + 64px); }", page)
+        self.assertIn('grid-template-areas: "head head head head" "boardcol split infocol lbcol"', page)
+        self.assertIn(".card.focused .lb-side:not(:empty) { display: flex; flex-direction: column; grid-area: lbcol; height: max(calc(var(--fboard) + 64px), 460px); }", page)
         # the third column comes out of the width, never the height: a 1080p board keeps its size
         self.assertIn("calc(100vh - 290px - var(--hdr-extra, 0px)), calc(100vw - 822px)", page)
         # narrow screens: under the board (inside the board column, so above the move list)
@@ -533,7 +554,8 @@ class PageTest(unittest.TestCase):
         self.assertIn("if (HOSTED || STREAM) { tourPending = false; return; }", viewer.PAGE)
         # stream focus keeps the side column (standings, notes and cache) and drops the in-card copies
         self.assertIn("body.stream.focus-mode .side { display: flex; }", viewer.PAGE)
-        self.assertIn("body.stream .card.focused .lb-side, body.stream .card.focused .lb-under, body.stream .card.focused .mini-bk { display: none; }", viewer.PAGE)
+        self.assertIn("body.stream .card.focused .lb-side, body.stream .card.focused .lb-under { display: none; }", viewer.PAGE)
+        self.assertIn("body.stream .card.focused .vsplit { display: none; }", viewer.PAGE)
 
     def test_page_publishes_a_poll_health_beacon(self):
         # Chrome can lose its network while its timers keep running; the stream watchdog needs a stamp
