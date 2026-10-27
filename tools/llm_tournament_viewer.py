@@ -2611,7 +2611,7 @@ function splitLimits(card) {
   const inner = card.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
   const handle = tracks.length >= 3 ? tracks[1] : 0;      // the handle's own column
   const lb = tracks.length >= 4 ? tracks[3] : 0;          // the leaderboard column of a wide screen
-  const min = 320, panel = 300;
+  const min = 380, panel = 320;   // the page's own smallest board, so names still fit beside the clock
   return { min, max: Math.max(min, inner - handle - lb - gap * Math.max(0, tracks.length - 1) - panel) };
 }
 function splitTo(px) {
