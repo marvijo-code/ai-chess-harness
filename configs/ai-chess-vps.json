@@ -33,10 +33,6 @@
     "meteredDailyBudgetUsd": 10.28
   },
   "players": [
-    {"name": "Sonnet 5.5", "memoryFolder": "claude", "provider": "claude", "model": "claude-sonnet-5-5", "effort": "high", "image": false, "maxOutputTokens": 128000,
-     "route": "Claude subscription (claude CLI)"},
-    {"name": "Haiku 5.5", "memoryFolder": "haiku", "provider": "claude", "model": "claude-haiku-5-5", "effort": "high", "image": false, "maxOutputTokens": 128000,
-     "route": "Claude subscription (claude CLI)"},
     {"name": "DeepSeek V4.1 Flash", "memoryFolder": "deepseek", "provider": "opencode-zen", "model": "deepseek-v4.1-flash-free", "effort": "high", "image": false, "maxOutputTokens": 384000,
      "route": "OpenCode Zen free tier, deepseek-v4.1-flash-free: the 1017 snapshot the owner asked for, costs nothing (owner 2026-10-25)",
      "fallbacks": [
