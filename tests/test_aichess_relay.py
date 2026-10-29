@@ -455,10 +455,12 @@ def test_accounts_routes_server_paths_and_emails_never_reach_the_public(rl):
                 "route": "Claude subscription, account someone@example.com",
                 "fallbacks": [{"provider": "p", "route": "second account"}]},
                {"name": "SF", "provider": "uci", "path": "/home/x/stockfish"}]
-    rl.ingest("/ingest/state", json.dumps(state_payload(players=players, title="mail me at a.b@x.co")).encode())
+    config = {"forever": {"pauseSeconds": 120, "memoryRepo": "/home/x/mem", "memoryRemote": "git@alias:o/r.git"}}
+    rl.ingest("/ingest/state", json.dumps(state_payload(players=players, config=config,
+                                                        title="mail me at a.b@x.co")).encode())
     _, _, body = rl.get("/api/tournament")
     served = body.decode()
-    for secret in ("someone@example.com", "a.b@x.co", "route", "toolsDir", "/home/x", "second account"):
+    for secret in ("someone@example.com", "a.b@x.co", "route", "toolsDir", "/home/x", "second account", "git@alias"):
         assert secret not in served
     data = json.loads(served)
     assert data["players"][0]["memoryFolder"] == "claude" and data["players"][1]["provider"] == "uci"

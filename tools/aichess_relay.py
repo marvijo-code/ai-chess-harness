@@ -99,10 +99,16 @@ def scrub_public(obj):
     """Drop everything private from a state before it is served: account routes, server paths, email addresses."""
     for key in PRIVATE_KEYS:
         strip_key(obj, key)
-    for player in (obj.get("players") if isinstance(obj, dict) else None) or []:
+    if not isinstance(obj, dict):
+        return obj
+    for player in obj.get("players") or []:
         if isinstance(player, dict):
             for key in PRIVATE_PLAYER_KEYS:
                 player.pop(key, None)
+    forever = (obj.get("config") or {}).get("forever")
+    if isinstance(forever, dict):
+        forever.pop("memoryRepo", None)       # server folder and ssh alias of the memory repo
+        forever.pop("memoryRemote", None)
     return obj
 
 
