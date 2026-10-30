@@ -298,3 +298,5 @@
 - [x] Output cut marker and summary-first shared loose-piece-check (PRD 198d).
 - [x] Tool sandbox keeps SYSTEMDRIVE, committed %SystemDrive% junk removed and ignored (PRD 198e).
 - [x] Focused tool, gate, facts and series tests green: 82 passed, 1 skipped (Validation 94).
+- [x] Tool gate refuses only on reasons that say material is lost or mate; contract text updated (PRD 199).
+- [x] Focused gate and tool tests green: 54 passed; v8 game replay keeps the 4 real refusals and drops the 2 false ones (Validation 95).

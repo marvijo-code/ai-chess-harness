@@ -115,7 +115,7 @@ class ExactGateTests(unittest.TestCase):
     def test_list_form_with_a_reason_about_another_move_flags_only_that_move(self):
         # The real failure: one long AVOID list under one example sentence. The old code gave
         # that sentence to every listed move ("refused Re3 because of Qb3").
-        out = tool("Nf3: reply e5 wins a tempo on f3 (pin/fork, no fix)\nAVOID: g1f3 e2e4 d2d4")
+        out = tool("Nf3: reply e5 wins the knight on f3 (pin/fork, no fix)\nAVOID: g1f3 e2e4 d2d4")
         flagged = pt.flagged_moves([out], self.board)
         self.assertEqual(list(flagged), ["g1f3"])
         self.assertIn("Nf3: reply e5", flagged["g1f3"])
@@ -125,10 +125,10 @@ class ExactGateTests(unittest.TestCase):
         self.assertEqual(pt.flagged_moves([out], self.board), {})
 
     def test_per_move_form_flags_with_its_own_reason(self):
-        out = tool("Two checks below.\nAVOID: e2e4 - opens the long diagonal to the king\n"
-                   "AVOID: d2d4: leaves c4 weak")
+        out = tool("Two checks below.\nAVOID: e2e4 - loses the bishop on the long diagonal\n"
+                   "AVOID: d2d4: drops the c4 pawn")
         flagged = pt.flagged_moves([out], self.board)
-        self.assertEqual(flagged, {"e2e4": "opens the long diagonal to the king", "d2d4": "leaves c4 weak"})
+        self.assertEqual(flagged, {"e2e4": "loses the bishop on the long diagonal", "d2d4": "drops the c4 pawn"})
 
     def test_per_move_form_may_share_one_reason(self):
         out = tool("AVOID: e2e4 d2d4 - about 1 pawn down, your pawn would be captured")
@@ -138,14 +138,14 @@ class ExactGateTests(unittest.TestCase):
 
     def test_san_led_reason_line_flags_with_that_line(self):
         out = tool("Checked 20 moves.\n  - e4: the pawn on e4 hangs after the knight jump\n"
-                   "* Nc3+ blocks the c pawn\nAVOID: e2e4 b1c3 d2d4")
+                   "* Nc3+ drops the knight to b4\nAVOID: e2e4 b1c3 d2d4")
         flagged = pt.flagged_moves([out], self.board)
         self.assertEqual(set(flagged), {"e2e4", "b1c3"})
         self.assertEqual(flagged["e2e4"], "e4: the pawn on e4 hangs after the knight jump")
-        self.assertEqual(flagged["b1c3"], "Nc3+ blocks the c pawn")
+        self.assertEqual(flagged["b1c3"], "Nc3+ drops the knight to b4")
 
     def test_line_naming_several_moves_flags_each(self):
-        out = tool("Nf3, Nc3 and e4: each walks into the same fork\nAVOID: g1f3 b1c3 e2e4 d2d4")
+        out = tool("Nf3, Nc3 and e4: each walks into a fork that wins a piece\nAVOID: g1f3 b1c3 e2e4 d2d4")
         flagged = pt.flagged_moves([out], self.board)
         self.assertEqual(set(flagged), {"g1f3", "b1c3", "e2e4"})
 
@@ -154,18 +154,37 @@ class ExactGateTests(unittest.TestCase):
         self.assertEqual(pt.flagged_moves([out], self.board), {})
 
     def test_without_a_board_only_uci_led_lines_and_per_move_form_count(self):
-        out = tool("Nf3: loses a tempo\ne2e4 drops the pawn\nAVOID: g1f3 e2e4\nAVOID: d2d4 - weak c4")
+        out = tool("Nf3: loses a tempo\ne2e4 drops the pawn\nAVOID: g1f3 e2e4\nAVOID: d2d4 - drops the c4 pawn")
         flagged = pt.flagged_moves([out])
         self.assertEqual(set(flagged), {"e2e4", "d2d4"})
         self.assertEqual(flagged["e2e4"], "e2e4 drops the pawn")
 
     def test_reason_lines_come_from_the_same_tool_only(self):
-        first = tool("Nf3: reason from another tool", name="a")
+        first = tool("Nf3: loses the knight (another tool)", name="a")
         second = tool("AVOID: g1f3", name="b")
         self.assertEqual(pt.flagged_moves([first, second], self.board), {})
 
+    def test_reason_without_lost_material_flags_nothing(self):
+        # 2026-10-30, Sonnet v SF4 on v8: pawn-recapture-wreck refused 5.Nc3 and 23.Ng4, both the
+        # best move, because "a pawn recapture doubles my pawns". Advice is not a loss.
+        out = tool("Nc3 leaves my N capturable by d5c3 with only a pawn recapture that doubles my pawns\n"
+                   "Nf3: loses a tempo\nAVOID: b1c3 g1f3\nAVOID: e2e4 - weakens d4\nAVOID: d2d4: leaves c4 weak")
+        self.assertEqual(pt.flagged_moves([out], self.board), {})
+
+    def test_mate_reason_flags(self):
+        out = tool("AVOID: f2f3 - Qh4# follows\nAVOID: g2g4: walks into mate")
+        self.assertEqual(set(pt.flagged_moves([out], self.board)), {"f2f3", "g2g4"})
+
+    def test_says_material_loss(self):
+        for text in ("about 3 pawns down, your knight on f3 would be captured", "reply Qxh3+ wins a piece on b3",
+                     "hangs the queen", "gives up the exchange", "Qh4# next"):
+            self.assertTrue(pt.says_material_loss(text), text)
+        for text in ("doubles my pawns", "loses a tempo", "weakens the king", "Legal move count: 20",
+                     "Nc3 leaves my N capturable by d5c3 with only a pawn recapture that doubles my pawns"):
+            self.assertFalse(pt.says_material_loss(text), text)
+
     def test_failed_tool_flags_nothing(self):
-        broken = pt.ToolResult("t", False, output="AVOID: e2e4 - x", error="exit 1")
+        broken = pt.ToolResult("t", False, output="AVOID: e2e4 - loses a pawn", error="exit 1")
         self.assertEqual(pt.flagged_moves([broken], self.board), {})
 
 

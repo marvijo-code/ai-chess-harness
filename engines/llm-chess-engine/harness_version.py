@@ -13,8 +13,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-HARNESS_VERSION = 8
-SOURCES_SHA256 = "34f2bf144837244baeb1879996f345b27ea99d07c4042c3c95f0b60f5953d6b6"
+HARNESS_VERSION = 9
+SOURCES_SHA256 = "a41063519a82576052357496829b4fb1a9f14389f1e70a571447b8e75eb2f79b"
 
 ROOT = Path(__file__).resolve().parents[2]
 # Everything that decides how a game is played: the engine, the runner, its settings and its launcher.
@@ -29,6 +29,8 @@ SOURCES = (
     "tools/disk_guard.py",
     "tools/play_llm_series.py",
     "tools/play_llm_swiss.py",
+    "tools/player-tools/loose-piece-check.py",
+    "tools/player_tools.py",
 )
 
 

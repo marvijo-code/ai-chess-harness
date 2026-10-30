@@ -78,7 +78,9 @@ TOOL_CONTRACT = (
     'The harness runs it before your move and shows you the output. '
     f'Only the first {MAX_OUTPUT_CHARS} characters of its output are shown, so print the answer first. '
     'To have a move refused once when you pick it, print one line per losing move: '
-    '`AVOID: <uci> - <why that move loses>` (several moves may share a line when they lose for the same reason). '
+    '`AVOID: <uci> - <what material that move loses and how>` (several moves may share a line when they lose '
+    'for the same reason). A reason that names no lost pawn, piece, exchange or mate refuses nothing: put '
+    'advice such as doubled pawns on a normal line. '
     'No chess engine, no tablebase, no network, no files, no subprocesses.'
 )
 
@@ -295,6 +297,19 @@ UCI_MOVE = re.compile(r"\b([a-h][1-8][a-h][1-8][qrbn]?)\b")
 # The UCI moves at the start of an AVOID line, then whatever follows them.
 AVOID_BODY = re.compile(r"^((?:[a-h][1-8][a-h][1-8][qrbn]?\b[\s,]*)+)(.*)$")
 LEAD_TOKEN = re.compile(r"([^\s:,;()]+)[\s,]*")
+# A reason refuses a move only when it says material is lost: a loss word plus what is lost,
+# or mate. "doubles my pawns" or "loses a tempo" is advice, not a loss (2026-10-30: the gate
+# refused the best move twice on "a pawn recapture that doubles my pawns").
+LOSS_WORD = re.compile(r"\b(lose|loses|losing|lost|drops?|dropped|dropping|hangs?|hanging|hung|down|captured|"
+                       r"wins?|won|winning|takes?|taken|trapped|en prise|for free|loose|undefended|unprotected|"
+                       r"gives? up|giving up)\b", re.I)
+MATERIAL_WORD = re.compile(r"\b(pawns?|knights?|bishops?|rooks?|queens?|pieces?|exchange|material)\b", re.I)
+MATE_WORD = re.compile(r"\b(mate|mated|mates|checkmate)\b|#", re.I)
+
+
+def says_material_loss(reason: str) -> bool:
+    """True when a tool's reason says the move loses material (or gets mated)."""
+    return bool(MATE_WORD.search(reason) or (LOSS_WORD.search(reason) and MATERIAL_WORD.search(reason)))
 
 
 def _clean(line: str) -> str:
@@ -345,7 +360,8 @@ def flagged_moves(results: list[ToolResult], board: chess.Board | None = None) -
         the move's SAN (without +/#) or its UCI: that line is the reason.
     A listed move with no reason of its own is not flagged: the old guess (the nearest
     line above the list) refused good moves and named the wrong move (2026-10-30:
-    83 refusals for Sonnet, 5 of them really bad moves). Without a board only the
+    83 refusals for Sonnet, 5 of them really bad moves). A reason that does not say
+    material is lost (says_material_loss) flags nothing either. Without a board only the
     first form and UCI-led lines count. The engine only reads; it never invents a flag.
     """
     flagged: dict[str, str] = {}
@@ -366,11 +382,14 @@ def flagged_moves(results: list[ToolResult], board: chess.Board | None = None) -
             rest = body.group(2).strip()
             if rest[:1] in ("-", ":") and rest[1:].strip():
                 reason = rest[1:].strip()[:200]
-                for uci in ucis:
-                    flagged.setdefault(uci, reason)
+                if says_material_loss(reason):
+                    for uci in ucis:
+                        flagged.setdefault(uci, reason)
                 continue
             keys = _move_keys(ucis, board)
             for text in plain:
+                if not says_material_loss(text):
+                    continue
                 for uci in _leading_moves(text, keys):
                     flagged.setdefault(uci, text[:200])
     return flagged
