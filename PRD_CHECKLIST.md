@@ -292,3 +292,9 @@
 
 - [x] Viewer eval bar never falls back to the 50% middle and a finished game shows its winner in the middle of the board plus the result in the bar (PRD 196, Validation 92).
 - [x] Road to the final across the top of the page, the duplicate header strip and the in-card copy removed, and a resizable handle between the board and its panel column (PRD 197, Validation 93).
+- [x] Exact tool gate: per-move AVOID reasons, SAN/UCI-led reason lines only, refusals recorded as `gated` (PRD 198a).
+- [x] Facts value check: cheaper-attacker section and "so you would lose material" on losing trades (PRD 198b).
+- [x] Tool cap: shared tools never count, 8 own tools, extra ones named as not run, reflection counts own tools only (PRD 198c).
+- [x] Output cut marker and summary-first shared loose-piece-check (PRD 198d).
+- [x] Tool sandbox keeps SYSTEMDRIVE, committed %SystemDrive% junk removed and ignored (PRD 198e).
+- [x] Focused tool, gate, facts and series tests green: 82 passed, 1 skipped (Validation 94).

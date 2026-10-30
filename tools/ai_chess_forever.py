@@ -175,35 +175,38 @@ def reflection_prompt(player: str, state: dict, game: dict, memory: str, notes: 
         f"- notes/<topic>.md (lowercase letters, digits and hyphens): optional topic notes, at most {NOTE_MAX_BYTES} "
         f"bytes each and at most {MAX_NOTE_FILES} files. They are not shown during games; MEMORY.md is.",
         "- tools/<name>.py: your own verification tools, run by the harness before every move of your next "
-        f"games (at most {player_tools.MAX_TOOL_FILES} files, {player_tools.TOOL_MAX_BYTES} bytes each). They are the "
+        f"games (at most {player_tools.MAX_TOOL_FILES} files of your own; the shared tools do not count, "
+        f"{player_tools.TOOL_MAX_BYTES} bytes each). They are the "
         "answer to a check you keep missing: instead of writing the same rule again, write the check once. "
         + player_tools.TOOL_CONTRACT,
         "How to write one: read the JSON on stdin, build chess.Board(payload[\"fen\"]), loop over "
-        "board.legal_moves, and print one short sentence per finding. Finish with a line "
-        '`AVOID: <uci moves>` naming every move you judge losing. The engine reads that line: if you then '
-        "play one of those moves, your reply is refused once and that sentence is handed back to you as the "
-        "reason. So state honestly what you verified. A tool is checked before it is registered: it must "
-        "compile, use no engine, no network, no files, and it must actually run on the starting position "
-        "and print something, or it is rejected.",
+        "board.legal_moves, and print one short sentence per finding, the most important first (output past "
+        f"{player_tools.MAX_OUTPUT_CHARS} characters is cut). For every move you judge losing, print a line "
+        '`AVOID: <uci> - <why THAT move loses>`; moves that lose for the same reason may share one line '
+        '(`AVOID: <uci> <uci> - <why>`). The engine reads those lines: if you then play one of those moves, '
+        "your reply is refused once and that reason is handed back to you. A move named without its own "
+        "reason is not refused, so state honestly what you verified for each move. A tool is checked before "
+        "it is registered: it must compile, use no engine, no network, no files, and it must actually run on "
+        "the starting position and print something, or it is rejected.",
         "Worked example (a tool that flags moves leaving a piece undefended):",
         "```python",
         "import json, sys, chess",
         "payload = json.load(sys.stdin)",
         "board = chess.Board(payload[\"fen\"])",
         "mine = board.turn",
-        "bad = []",
+        "found = False",
         "for move in board.legal_moves:",
+        "    san = board.san(move)",
         "    board.push(move)",
         "    for square in chess.SQUARES:",
         "        piece = board.piece_at(square)",
         "        if piece and piece.color == mine and piece.piece_type != chess.KING:",
         "            if board.attackers(not mine, square) and not board.attackers(mine, square):",
-        "                bad.append(move.uci())",
-        "                print(f\"{board.san(move)} leaves your {piece.symbol()} on {chess.square_name(square)} loose\")",
+        "                found = True",
+        "                print(f\"AVOID: {move.uci()} - {san} leaves your {piece.symbol()} on {chess.square_name(square)} loose\")",
+        "                break",
         "    board.pop()",
-        "if bad:",
-        "    print(\"AVOID: \" + \" \".join(sorted(set(bad))))",
-        "else:",
+        "if not found:",
         "    print(\"no loose piece\")",
         "```",
         "Write only what helps your chess: openings that worked or failed, recurring tactical misses, time use, "
@@ -323,7 +326,16 @@ def reflect(player: dict, state: dict, game: dict, repo: MemoryRepo, cfg: dict, 
                          if isinstance(e, dict) and isinstance(e.get("path"), str) and "content" in e}
                 notes_now = set(repo.note_paths(name)) | {e["path"] for e in accepted if not e.get("delete")}
                 notes_now -= {e["path"] for e in accepted if e.get("delete")}
-                more, rejected = validate_edits(edits, sorted(notes_now), repo.current_texts(name))
+                # Tool edits accepted on an earlier try are not on disk yet: count them for the tool limit.
+                current = repo.current_texts(name)
+                for done_edit in accepted:
+                    if not player_tools.TOOL_PATH.match(done_edit["path"]):
+                        continue
+                    if done_edit.get("delete"):
+                        current.pop(done_edit["path"], None)
+                    else:
+                        current[done_edit["path"]] = done_edit.get("content", "")
+                more, rejected = validate_edits(edits, sorted(notes_now), current)
                 accepted += more
             out["attempts"].append({"bytes": sizes, "rejected": len(rejected), "error": "" if data is not None else why})
             if data is not None and not rejected:

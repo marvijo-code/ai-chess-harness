@@ -43,9 +43,11 @@ TOOL_PATH = re.compile(r"^tools/[a-z0-9][a-z0-9-]{0,47}\.py$")
 # A player's own additions live in its memory-repo folder (agents/<folder>/tools).
 SHARED_DIR = Path(__file__).resolve().parent / "player-tools"
 TOOL_MAX_BYTES = 8192
-MAX_TOOL_FILES = 6
+# The limit is on the player's OWN tools; the shared folder never counts against it.
+MAX_TOOL_FILES = 8
 RUN_TIMEOUT_SECONDS = 8.0
-MAX_OUTPUT_CHARS = 1200
+MAX_OUTPUT_CHARS = 1200     # shown to the player
+RAW_OUTPUT_CHARS = 20000    # read by the tool gate, so an AVOID line past the cut still counts
 
 # Imports and calls that would turn a "verification tool" into an engine or a
 # network client. Matched against the source text, so an obfuscated bypass is
@@ -74,6 +76,9 @@ TOOL_CONTRACT = (
     'It reads ONE JSON object on stdin: {"fen": <FEN>, "moves": <UCI list>, "side_to_move": "white"|"black", '
     '"clocks": {"you_ms": n, "opponent_ms": n}}. It prints its findings as plain text (at most a few lines). '
     'The harness runs it before your move and shows you the output. '
+    f'Only the first {MAX_OUTPUT_CHARS} characters of its output are shown, so print the answer first. '
+    'To have a move refused once when you pick it, print one line per losing move: '
+    '`AVOID: <uci> - <why that move loses>` (several moves may share a line when they lose for the same reason). '
     'No chess engine, no tablebase, no network, no files, no subprocesses.'
 )
 
@@ -85,6 +90,7 @@ class ToolResult:
     output: str = ""
     error: str = ""
     elapsed_ms: int = 0
+    raw: str = ""       # the whole output before the prompt cut; the gate reads this
 
 
 @dataclass
@@ -93,6 +99,7 @@ class ToolsBlock:
 
     results: list[ToolResult] = field(default_factory=list)
     available: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)     # own tools over the limit, not run
 
     @property
     def any_ran(self) -> bool:
@@ -140,17 +147,33 @@ def validate_tool_edit(path: object, content: object, lint: bool = True) -> tupl
     return True, ""
 
 
+def _tool_files(folder: Path | None) -> dict[str, Path]:
+    if folder is None or not Path(folder).is_dir():
+        return {}
+    return {path.stem: path for path in sorted(Path(folder).glob("*.py"))
+            if TOOL_PATH.match(f"tools/{path.name}")}
+
+
+def discover_with_skipped(own_dir: Path | None = None,
+                          include_shared: bool = True) -> tuple[dict[str, Path], list[str]]:
+    """(tools to run by name, own tool names over the limit).
+
+    Every shared tool runs; the player's own tools are capped at MAX_TOOL_FILES in
+    name order, and the shared ones never take one of those places. An own tool with
+    the same name as a shared one replaces it (own wins a clash).
+    """
+    shared = _tool_files(SHARED_DIR) if include_shared else {}
+    own = _tool_files(own_dir)
+    names = list(own)
+    kept, skipped = names[:MAX_TOOL_FILES], names[MAX_TOOL_FILES:]
+    found = {name: path for name, path in shared.items() if name not in own}
+    found.update((name, own[name]) for name in kept)
+    return found, skipped
+
+
 def discover(own_dir: Path | None = None, include_shared: bool = True) -> dict[str, Path]:
-    """Tool files by name: the shared folder first, then the player's own (own wins a clash)."""
-    found: dict[str, Path] = {}
-    folders = ([SHARED_DIR] if include_shared else []) + ([Path(own_dir)] if own_dir else [])
-    for folder in folders:
-        if not folder.is_dir():
-            continue
-        for path in sorted(folder.glob("*.py")):
-            if TOOL_PATH.match(f"tools/{path.name}"):
-                found[path.stem] = path
-    return dict(list(found.items())[:MAX_TOOL_FILES])
+    """Tool files by name: every shared tool, then at most MAX_TOOL_FILES of the player's own."""
+    return discover_with_skipped(own_dir, include_shared)[0]
 
 
 SMOKE_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -198,8 +221,10 @@ def position_payload(board: chess.Board, history: list[str], go_args: dict | Non
 
 def _restricted_env() -> dict:
     """A tool sees no credentials and no PYTHONPATH surprises."""
-    keep = ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PYTHONIOENCODING", "LOCALAPPDATA")
-    env = {k: v for k, v in os.environ.items() if k in keep}
+    # SYSTEMDRIVE matters on Windows: without it Python writes a folder literally named
+    # "%SystemDrive%" next to the tool. Windows env names are case-insensitive, so compare upper case.
+    keep = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "PYTHONIOENCODING", "LOCALAPPDATA")
+    env = {k: v for k, v in os.environ.items() if k.upper() in keep}
     env["PYTHONIOENCODING"] = "utf-8"
     return env
 
@@ -243,46 +268,111 @@ def run_tool(path: Path, payload: dict, *, timeout: float = RUN_TIMEOUT_SECONDS,
                           elapsed_ms=elapsed)
     if not out:
         return ToolResult(name, False, error="printed nothing", elapsed_ms=elapsed)
-    return ToolResult(name, True, output=out[:MAX_OUTPUT_CHARS], elapsed_ms=elapsed)
+    return ToolResult(name, True, output=cut_output(out), elapsed_ms=elapsed, raw=out[:RAW_OUTPUT_CHARS])
+
+
+def cut_output(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
+    """Text up to the limit; a cut text says so, so the player learns to print its answer first."""
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + f"\n[output cut at {limit} characters - put your answer first]"
 
 
 def run_tools(tools_dir: Path | None, board: chess.Board, history: list[str],
               go_args: dict | None = None, *, timeout: float = RUN_TIMEOUT_SECONDS,
               python: str | None = None, include_shared: bool = True) -> ToolsBlock:
     """Run the shared tools and the agent's own on this position, in name order."""
-    found = discover(tools_dir, include_shared=include_shared)
+    found, skipped = discover_with_skipped(tools_dir, include_shared=include_shared)
     if not found:
         return ToolsBlock()
     payload = position_payload(board, history, go_args)
     results = [run_tool(path, payload, timeout=timeout, python=python) for path in found.values()]
-    return ToolsBlock(results=results, available=list(found.keys()))
+    return ToolsBlock(results=results, available=list(found.keys()), skipped=skipped)
 
 
-AVOID_LINE = re.compile(r"^\s*AVOID:\s*(.+)$", re.M)
+AVOID_LINE = re.compile(r"^\s*AVOID:\s*(.*)$")
 UCI_MOVE = re.compile(r"\b([a-h][1-8][a-h][1-8][qrbn]?)\b")
+# The UCI moves at the start of an AVOID line, then whatever follows them.
+AVOID_BODY = re.compile(r"^((?:[a-h][1-8][a-h][1-8][qrbn]?\b[\s,]*)+)(.*)$")
+LEAD_TOKEN = re.compile(r"([^\s:,;()]+)[\s,]*")
 
 
-def flagged_moves(results: list[ToolResult]) -> dict[str, str]:
-    """Moves a tool says would lose material, with the sentence that says it.
+def _clean(line: str) -> str:
+    """A line without its leading bullet or spaces."""
+    return re.sub(r"^[\s*-]+", "", line).strip()
 
-    A tool states its verdict on a line beginning `AVOID:` followed by UCI moves.
-    The sentence above that line is kept as the reason the engine gives back.
-    Any tool may do this; the engine only reads, it never invents a flag.
+
+def _move_keys(ucis: list[str], board: chess.Board | None) -> dict[str, str]:
+    """{text a reason line may start with: uci}: the UCI, plus the SAN without +/# when the board is known."""
+    keys: dict[str, str] = {}
+    for uci in ucis:
+        keys[uci] = uci
+        if board is None:
+            continue
+        try:
+            move = chess.Move.from_uci(uci)
+        except ValueError:
+            continue
+        if move in board.legal_moves:
+            keys.setdefault(board.san(move).rstrip("+#"), uci)
+    return keys
+
+
+def _leading_moves(line: str, keys: dict[str, str]) -> list[str]:
+    """The listed moves a line starts with ("Ng7: ..." or "Nd4, Ng7 and Nh6: ..."), as UCI."""
+    led: list[str] = []
+    rest = line
+    while True:
+        match = LEAD_TOKEN.match(rest)
+        if not match:
+            break
+        token = match.group(1).rstrip("+#!?.")
+        if token in keys:
+            led.append(keys[token])
+        elif not (token == "and" and led):
+            break
+        rest = rest[match.end():]
+    return led
+
+
+def flagged_moves(results: list[ToolResult], board: chess.Board | None = None) -> dict[str, str]:
+    """Moves a tool says would lose material, with the tool's reason for THAT move.
+
+    A tool flags a move in one of two ways:
+      - `AVOID: e2e4 - reason` (or `AVOID: e2e4: reason`): the reason is that text;
+        several UCI moves may share one reason on one line.
+      - `AVOID: e2e4 d2d4` plus, elsewhere in the same output, a line that starts with
+        the move's SAN (without +/#) or its UCI: that line is the reason.
+    A listed move with no reason of its own is not flagged: the old guess (the nearest
+    line above the list) refused good moves and named the wrong move (2026-10-30:
+    83 refusals for Sonnet, 5 of them really bad moves). Without a board only the
+    first form and UCI-led lines count. The engine only reads; it never invents a flag.
     """
     flagged: dict[str, str] = {}
     for result in results:
-        if not result.ok or not result.output:
+        text = result.raw or result.output
+        if not result.ok or not text:
             continue
-        lines = result.output.splitlines()
-        reasons = [line.strip() for line in lines if not line.strip().startswith("AVOID:")]
-        for index, line in enumerate(lines):
+        lines = text.splitlines()
+        plain = [_clean(line) for line in lines if not AVOID_LINE.match(line)]
+        for line in lines:
             match = AVOID_LINE.match(line)
             if not match:
                 continue
-            reason = next((r for r in reversed(reasons[:index]) if r), "")
-            reason = re.sub(r"^[-*\s]+", "", reason)[:200]
-            for uci in UCI_MOVE.findall(match.group(1)):
-                flagged.setdefault(uci, reason or f"{result.name} says this move loses material")
+            body = AVOID_BODY.match(match.group(1).strip())
+            if not body:
+                continue
+            ucis = UCI_MOVE.findall(body.group(1))
+            rest = body.group(2).strip()
+            if rest[:1] in ("-", ":") and rest[1:].strip():
+                reason = rest[1:].strip()[:200]
+                for uci in ucis:
+                    flagged.setdefault(uci, reason)
+                continue
+            keys = _move_keys(ucis, board)
+            for text in plain:
+                for uci in _leading_moves(text, keys):
+                    flagged.setdefault(uci, text[:200])
     return flagged
 
 
@@ -297,6 +387,9 @@ def render_block(block: ToolsBlock, board: chess.Board, history: list[str]) -> s
             lines.append(f"[{result.name}] {result.output}")
         else:
             lines.append(f"[{result.name}] could not run: {result.error}")
+    if block.skipped:
+        lines.append(f"Not run: {', '.join(block.skipped)} - only {MAX_TOOL_FILES} of your own tools run "
+                     "(shared tools do not count); delete or merge tools to bring the others back.")
     lines.append("These are your own checks, not orders: you still choose the move.")
     return "\n".join(line for line in lines if line)
 
@@ -305,6 +398,7 @@ def describe_for_prompt(tools_dir: Path | None) -> str:
     """One line telling an agent how to get tools (used in the reflection prompt)."""
     names = [p.stem for p in existing_tools(tools_dir)]
     have = f"You already have: {', '.join(names)}. " if names else ""
-    return (f"You may write verification tools in your own tools/ folder (at most {MAX_TOOL_FILES} files, "
+    return (f"You may write verification tools in your own tools/ folder (at most {MAX_TOOL_FILES} files of your "
+            "own; shared tools do not count, "
             f"{TOOL_MAX_BYTES} bytes each). {have}{TOOL_CONTRACT} They are yours: write one when you keep "
             "missing the same kind of check, and sharpen it instead of adding a new one.")

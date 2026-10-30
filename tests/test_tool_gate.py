@@ -85,10 +85,88 @@ class ToolGateTests(unittest.TestCase):
 
     def test_shared_tool_emits_the_machine_readable_line(self):
         block = pt.run_tools(None, self.board, [])
-        flagged = pt.flagged_moves(block.results)
+        flagged = pt.flagged_moves(block.results, self.board)
         self.assertIn("f5g7", flagged)
         self.assertIn("queen on d7", flagged["f5g7"])
         self.assertNotIn("g8h8", flagged)
+
+    def test_refusal_is_recorded_as_gated_not_invalid(self):
+        client = self.make(["f5g7", "g8h8"])
+        client.choose_move(self.board, {"wtime": 600000, "btime": 600000}, [])
+        self.assertEqual(client.last_report["illegal"], ["gated"])
+
+    def test_broken_reply_is_still_invalid(self):
+        client = self.make(["nonsense", "g8h8"])
+        client.choose_move(self.board, {"wtime": 600000, "btime": 600000}, [])
+        self.assertNotIn("gated", client.last_report["illegal"])
+        self.assertEqual(len(client.last_report["illegal"]), 1)
+
+
+def tool(output, name="t"):
+    return pt.ToolResult(name, True, output=output)
+
+
+class ExactGateTests(unittest.TestCase):
+    """flagged_moves flags a move only for a reason that is about THAT move (2026-10-30)."""
+
+    def setUp(self):
+        self.board = chess.Board()      # 1.Nf3 is g1f3, 1.e4 is e2e4, 1.d4 is d2d4
+
+    def test_list_form_with_a_reason_about_another_move_flags_only_that_move(self):
+        # The real failure: one long AVOID list under one example sentence. The old code gave
+        # that sentence to every listed move ("refused Re3 because of Qb3").
+        out = tool("Nf3: reply e5 wins a tempo on f3 (pin/fork, no fix)\nAVOID: g1f3 e2e4 d2d4")
+        flagged = pt.flagged_moves([out], self.board)
+        self.assertEqual(list(flagged), ["g1f3"])
+        self.assertIn("Nf3: reply e5", flagged["g1f3"])
+
+    def test_list_form_under_a_count_line_flags_nothing(self):
+        out = tool("Legal move count: 20\nAVOID: g1f3 e2e4")
+        self.assertEqual(pt.flagged_moves([out], self.board), {})
+
+    def test_per_move_form_flags_with_its_own_reason(self):
+        out = tool("Two checks below.\nAVOID: e2e4 - opens the long diagonal to the king\n"
+                   "AVOID: d2d4: leaves c4 weak")
+        flagged = pt.flagged_moves([out], self.board)
+        self.assertEqual(flagged, {"e2e4": "opens the long diagonal to the king", "d2d4": "leaves c4 weak"})
+
+    def test_per_move_form_may_share_one_reason(self):
+        out = tool("AVOID: e2e4 d2d4 - about 1 pawn down, your pawn would be captured")
+        flagged = pt.flagged_moves([out], self.board)
+        self.assertEqual(set(flagged), {"e2e4", "d2d4"})
+        self.assertEqual(flagged["e2e4"], "about 1 pawn down, your pawn would be captured")
+
+    def test_san_led_reason_line_flags_with_that_line(self):
+        out = tool("Checked 20 moves.\n  - e4: the pawn on e4 hangs after the knight jump\n"
+                   "* Nc3+ blocks the c pawn\nAVOID: e2e4 b1c3 d2d4")
+        flagged = pt.flagged_moves([out], self.board)
+        self.assertEqual(set(flagged), {"e2e4", "b1c3"})
+        self.assertEqual(flagged["e2e4"], "e4: the pawn on e4 hangs after the knight jump")
+        self.assertEqual(flagged["b1c3"], "Nc3+ blocks the c pawn")
+
+    def test_line_naming_several_moves_flags_each(self):
+        out = tool("Nf3, Nc3 and e4: each walks into the same fork\nAVOID: g1f3 b1c3 e2e4 d2d4")
+        flagged = pt.flagged_moves([out], self.board)
+        self.assertEqual(set(flagged), {"g1f3", "b1c3", "e2e4"})
+
+    def test_reason_must_start_with_the_move_not_mention_it(self):
+        out = tool("After e4 the knight is fine\nAVOID: g1f3")
+        self.assertEqual(pt.flagged_moves([out], self.board), {})
+
+    def test_without_a_board_only_uci_led_lines_and_per_move_form_count(self):
+        out = tool("Nf3: loses a tempo\ne2e4 drops the pawn\nAVOID: g1f3 e2e4\nAVOID: d2d4 - weak c4")
+        flagged = pt.flagged_moves([out])
+        self.assertEqual(set(flagged), {"e2e4", "d2d4"})
+        self.assertEqual(flagged["e2e4"], "e2e4 drops the pawn")
+
+    def test_reason_lines_come_from_the_same_tool_only(self):
+        first = tool("Nf3: reason from another tool", name="a")
+        second = tool("AVOID: g1f3", name="b")
+        self.assertEqual(pt.flagged_moves([first, second], self.board), {})
+
+    def test_failed_tool_flags_nothing(self):
+        broken = pt.ToolResult("t", False, output="AVOID: e2e4 - x", error="exit 1")
+        self.assertEqual(pt.flagged_moves([broken], self.board), {})
 
 
 if __name__ == "__main__":

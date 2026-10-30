@@ -18,6 +18,8 @@ import subscription_providers as sp  # noqa: E402
 BLUNDER_GAME = ["e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "g8f6", "e1g1", "f6e4",
                 "d2d4", "e4d6", "b5c6", "d7c6", "d4e5", "d6f5", "d1d8", "e8d8",
                 "b1c3", "f8e7", "f1d1", "d8e8", "c1g5", "e7g5", "f3g5", "h7h6"]
+# Sonnet 5.5 v Stockfish depth 4 (2026-10-30): the rook on g5 is attacked by the h4 pawn.
+ROOK_G5 = "6r1/ppp1k3/2p2p2/3b2r1/7P/3P1B2/PPP1K1P1/4R2R b - - 0 26"
 
 
 def play(ucis):
@@ -112,6 +114,46 @@ class TacticsFactsTests(unittest.TestCase):
         self.assertNotIn("score", facts.lower())
         self.assertNotIn("??", facts)
         self.assertNotIn("!!", facts)
+
+    def test_piece_attacked_by_a_cheaper_piece_has_its_own_section(self):
+        # 2026-10-30, Sonnet v SF4: the rook on g5 was listed as "attacked but defended"
+        # while a pawn could take it, and the model lost the rook.
+        facts = sp.tactics_facts(chess.Board(ROOK_G5))
+        lines = facts.splitlines()
+        header = "Attacked by a cheaper piece (a trade there loses material even though it is defended):"
+        self.assertIn(header, lines)
+        section = lines[lines.index(header) + 1]
+        self.assertIn("your rook on g5", section)
+        self.assertIn("their pawn on h4", section)
+        defended = facts.split("Attacked but defended", 1)[1].split("Safety of every", 1)[0] \
+            if "Attacked but defended" in facts else ""
+        self.assertNotIn("your rook on g5:", defended)
+
+    def test_defended_landing_square_hit_by_a_cheaper_piece_loses_material(self):
+        facts = sp.tactics_facts(chess.Board(ROOK_G5))
+        rg4 = [line for line in facts.splitlines() if line.strip().startswith("Rg4 ")][0]
+        self.assertIn("their bishop on f3", rg4)
+        self.assertIn("your rook on g8", rg4)
+        self.assertIn("so you would lose material", rg4)
+
+    def test_even_trade_does_not_say_lose_material(self):
+        facts = sp.tactics_facts(chess.Board(ROOK_G5))
+        bxf3 = [line for line in facts.splitlines() if line.strip().startswith("Bxf3+ ")][0]
+        self.assertIn("takes their bishop", bxf3)
+        self.assertNotIn("so you would lose material", bxf3)
+        self.assertNotIn("so you would lose it", bxf3)
+        self.assertIn("even or better trade", bxf3)
+
+    def test_undefended_piece_taking_a_pawn_still_loses_it(self):
+        # A knight that takes a pawn on c3, where the d4 pawn takes it back and nothing defends it.
+        facts = sp.tactics_facts(chess.Board("4k3/8/8/8/3p4/2p5/8/1N2K3 w - - 0 1"))
+        line = [l for l in facts.splitlines() if l.strip().startswith("Nxc3 ")][0]
+        self.assertIn("so you would lose it", line)
+
+    def test_equal_attacker_stays_attacked_but_defended(self):
+        facts = sp.tactics_facts(chess.Board(ROOK_G5))
+        defended = facts.split("Attacked but defended", 1)[1].split("Safety of every", 1)[0]
+        self.assertIn("your bishop on d5", defended)      # attacked by a bishop: not cheaper
 
     def test_kill_switch_removes_facts(self):
         board = play(BLUNDER_GAME)

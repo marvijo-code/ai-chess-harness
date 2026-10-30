@@ -834,41 +834,14 @@ def tactics_facts_enabled() -> bool:
     return os.environ.get("LLM_TACTICS_FACTS", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 
-def tactics_facts_enabled() -> bool:
-    """Harness-computed tactics facts for the move prompt. Kill switch: LLM_TACTICS_FACTS=0."""
-    return os.environ.get("LLM_TACTICS_FACTS", "true").strip().lower() not in {"0", "false", "no", "off"}
-
-
-def _piece_tag(piece: chess.Piece | None) -> str:
-    if piece is None:
-        return "-"
-    return ("w" if piece.color == chess.WHITE else "b") + PIECE_LETTERS[piece.piece_type]
-
-
-def _square_pressure(board: chess.Board, square: chess.Square, victim_color: chess.Color) -> tuple[int, int, str, str]:
-    """(attackers, defenders, lowest-attacker tag, lowest-defender tag) for a square."""
-    attackers = [board.piece_at(s) for s in board.attackers(not victim_color, square)]
-    defenders = [board.piece_at(s) for s in board.attackers(victim_color, square)]
-    attackers = [p for p in attackers if p is not None]
-    defenders = [p for p in defenders if p is not None]
-    low_att = min(attackers, key=lambda p: PIECE_VALUES[p.piece_type]) if attackers else None
-    low_def = min(defenders, key=lambda p: PIECE_VALUES[p.piece_type]) if defenders else None
-    return len(attackers), len(defenders), _piece_tag(low_att), _piece_tag(low_def)
-
-
 def _order(piece: chess.Piece) -> int:
     return KING_ORDER if piece.piece_type == chess.KING else PIECE_VALUES[piece.piece_type]
 
 
-def _pieces_on(board: chess.Board, squares, own: bool) -> list[str]:
-    """Plain words for a set of squares: 'your knight on d6, their king on g8'."""
-    owner = "your" if own else "their"
-    out = []
-    for square in sorted(squares):
-        piece = board.piece_at(square)
-        if piece is not None:
-            out.append(f"{owner} {PIECE_WORDS[piece.piece_type]} on {chess.square_name(square)}")
-    return out
+def _cheapest_attacker(board: chess.Board, square: chess.Square, victim_color: chess.Color) -> int | None:
+    """Value of the cheapest enemy piece that attacks a square (a king never counts as cheap), or None."""
+    values = [_order(p) for p in (board.piece_at(s) for s in board.attackers(not victim_color, square)) if p]
+    return min(values) if values else None
 
 
 def _square_pressure(board: chess.Board, square: chess.Square, victim_color: chess.Color) -> tuple[str, str]:
@@ -892,7 +865,7 @@ def tactics_facts(board: chess.Board) -> str:
     named, because a count alone let a model reason about the wrong piece.
     """
     own = board.turn
-    hanging, contested, quiet_pawns = [], [], 0
+    hanging, cheaper, contested, quiet_pawns = [], [], [], 0
     for square in chess.SQUARES:
         piece = board.piece_at(square)
         if piece is None or piece.color != own or piece.piece_type == chess.KING:
@@ -907,10 +880,14 @@ def tactics_facts(board: chess.Board) -> str:
                 att, _ = _square_pressure(board, square, own)
                 hanging.append(f"your {PIECE_WORDS[piece.piece_type]} on {chess.square_name(square)} "
                                f"can be taken by {att} and nothing of yours defends it")
-        elif PIECE_VALUES[piece.piece_type] >= 300:
-            att, dfn = _square_pressure(board, square, own)
-            contested.append(f"your {PIECE_WORDS[piece.piece_type]} on {chess.square_name(square)}: "
-                             f"{att} can take it, {dfn} defends it")
+        else:
+            # A defender does not help when the taker is worth less: the trade still loses material.
+            low = _cheapest_attacker(board, square, own)
+            target = cheaper if low is not None and low < PIECE_VALUES[piece.piece_type] else contested
+            if target is cheaper or PIECE_VALUES[piece.piece_type] >= 300:
+                att, dfn = _square_pressure(board, square, own)
+                target.append(f"your {PIECE_WORDS[piece.piece_type]} on {chess.square_name(square)}: "
+                              f"{att} can take it, {dfn} defends it")
     move_lines = []
     for move in board.legal_moves:
         san = board.san(move)
@@ -921,6 +898,8 @@ def tactics_facts(board: chess.Board) -> str:
         mover = board.piece_at(move.from_square)
         board.push(move)
         att, dfn = _square_pressure(board, move.to_square, own)
+        low = _cheapest_attacker(board, move.to_square, own)
+        landed = board.piece_at(move.to_square)      # the promoted piece after a promotion
         board.pop()
         bits = []
         if captured is not None:
@@ -929,13 +908,26 @@ def tactics_facts(board: chess.Board) -> str:
             bits.append("gives check")
         bits.append(f"after it they can take on {chess.square_name(move.to_square)} with {att}, "
                     f"and you defend with {dfn}")
+        taken_value = PIECE_VALUES[captured.piece_type] if captured is not None else 0
         if mover is not None and mover.piece_type != chess.KING and "nobody" in dfn and "nobody" not in att:
-            bits.append("so you would lose it")
+            # Taking a piece worth as much or more is a trade, not a loss (the prompt forbids "lose" moves).
+            if landed is not None and taken_value >= PIECE_VALUES[landed.piece_type]:
+                bits.append("they can take it back, an even or better trade for you")
+            else:
+                bits.append("so you would lose it")
+        elif mover is not None and mover.piece_type != chess.KING and low is not None and landed is not None:
+            # Defended, but the cheapest taker is worth less than what you put there minus what you took.
+            taken = PIECE_VALUES[captured.piece_type] if captured is not None else 0
+            if low < PIECE_VALUES[landed.piece_type] - taken:
+                bits.append("so you would lose material")
         move_lines.append(f"{san} ({move.uci()}): " + ", ".join(bits))
     lines = []
     if hanging:
         lines.append("Hanging right now (nothing of yours defends them):")
         lines.extend(f"  {h}" for h in hanging)
+    if cheaper:
+        lines.append("Attacked by a cheaper piece (a trade there loses material even though it is defended):")
+        lines.extend(f"  {c}" for c in cheaper)
     if contested:
         lines.append("Attacked but defended (count who can take before trading):")
         lines.extend(f"  {c}" for c in contested[:12])
@@ -947,6 +939,10 @@ def tactics_facts(board: chess.Board) -> str:
     lines.extend(f"  {m}" for m in move_lines)
     return "\n".join(lines)
 
+
+
+class ToolGateRefusal(ValueError):
+    """A legal reply refused once because the player's own tool flagged that move."""
 
 
 class SubscriptionChessClient:
@@ -1323,7 +1319,7 @@ class SubscriptionChessClient:
                     self.last_report["gated"] = self.last_report.get("gated", 0) + 1
                     self._think(f"\n[tool gate refused {board.san(move)}: {self._flagged[move.uci()][:160]}]\n")
                     self.log(f"{self.provider} {self.model} tool gate refused {move.uci()} on this move")
-                    raise ValueError(f"your own tool says that move loses material: {self._flagged[move.uci()]}")
+                    raise ToolGateRefusal(f"your own tool says that move loses material: {self._flagged[move.uci()]}")
                 note = parse_note(text)
                 if note:
                     self.last_report["note"] = note
@@ -1347,7 +1343,11 @@ class SubscriptionChessClient:
                 last_error = str(exc)
                 rejections.append(last_error)
                 bad = re.search(r"'([^']{1,24})' is not a legal move", last_error)
-                self.last_report["illegal"].append(marker_text(bad.group(1)) if bad else "invalid")
+                if isinstance(exc, ToolGateRefusal):
+                    # A legal reply the player's own tool refused, not a broken reply.
+                    self.last_report["illegal"].append("gated")
+                else:
+                    self.last_report["illegal"].append(marker_text(bad.group(1)) if bad else "invalid")
             except Exception as exc:  # timeouts and CLI failures spend an attempt too
                 if self._conv is not None:
                     # The session may hold a half-written turn: the next attempt starts a fresh session with
@@ -1981,7 +1981,7 @@ class SubscriptionChessClient:
             text = player_tools_mod.render_block(block, board, history)
             self.last_report["tools"] = [{"name": r.name, "ok": r.ok, "ms": r.elapsed_ms,
                                           "error": r.error[:120]} for r in block.results]
-            self._flagged = player_tools_mod.flagged_moves(block.results) if self.tool_gate else {}
+            self._flagged = player_tools_mod.flagged_moves(block.results, board) if self.tool_gate else {}
             if block.any_ran:
                 summary = ", ".join(f"{r.name}={'ok' if r.ok else 'failed'}({r.elapsed_ms}ms)"
                                     for r in block.results)

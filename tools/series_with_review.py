@@ -95,7 +95,7 @@ WHAT YOU MAY WRITE
 - notes/<topic>.md: optional topic notes (not shown during play). Cap {mem.NOTE_MAX_BYTES} bytes each.
 - tools/<name>.py: your own verification tools, run by the harness before every move of your NEXT games.
   {ptools.TOOL_CONTRACT}
-  At most {ptools.MAX_TOOL_FILES} tools, {ptools.TOOL_MAX_BYTES} bytes each.
+  At most {ptools.MAX_TOOL_FILES} tools of your own (shared tools do not count), {ptools.TOOL_MAX_BYTES} bytes each.
 
 YOUR CURRENT MEMORY.md
 {read(MEMORY).strip() or "(empty)"}

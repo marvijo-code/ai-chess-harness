@@ -161,14 +161,20 @@ def validate_edits(edits: object, existing_notes: list[str],
             if edit.get("delete") is True:
                 accepted.append({"path": path, "delete": True})
                 continue
+            # Count only the player's own tools: the ones on disk now (`current` must list them),
+            # plus the ones written in this reflection, minus the ones it deletes. Shared tools never count.
+            tools = {p for p in (current or {}) if TOOL_PATH.match(p)}
+            for done in accepted:
+                if TOOL_PATH.match(done["path"]):
+                    (tools.discard if done.get("delete") else tools.add)(done["path"])
+            if path not in tools and len(tools) >= _player_tools.MAX_TOOL_FILES:
+                rejected.append(f"edit {index}: {path} would be your own tool file {len(tools) + 1}, over the limit of "
+                                f"{_player_tools.MAX_TOOL_FILES} (shared tools do not count); delete or merge one "
+                                f"of {', '.join(sorted(tools))} first, or sharpen an existing tool instead")
+                continue
             ok, why = _player_tools.validate_tool_edit(path, edit.get("content"))
             if not ok:
                 rejected.append(f"edit {index}: {why}")
-                continue
-            tools = {p for p in (current or {}) if TOOL_PATH.match(p)} | {a["path"] for a in accepted if TOOL_PATH.match(a["path"])}
-            if path not in tools and len(tools) >= _player_tools.MAX_TOOL_FILES:
-                rejected.append(f"edit {index}: {path} would be tool file {len(tools) + 1}, over the limit of "
-                                f"{_player_tools.MAX_TOOL_FILES}")
                 continue
             accepted.append({"path": path, "content": edit["content"]})
             continue
@@ -371,9 +377,20 @@ class MemoryRepo:
         return out
 
     def current_texts(self, name: str) -> dict[str, str]:
-        """{path: text} of the player's MEMORY.md and notes as they are now (for the line ratchet)."""
+        """{path: text} of the player's MEMORY.md, notes and own tools as they are now.
+
+        The notes feed the line ratchet; the tools feed the tool-file limit. Leaving the
+        tools out let a player grow to 7 own tools while only 6 could run (2026-10-30).
+        """
         out = {MEMORY_FILE: self.memory_text(name)}
         out.update(self.notes_text(name, limit=MAX_NOTE_FILES * 2))
+        folder = self.agent_dir(name) / "tools"
+        for path in sorted(folder.glob("*.py")) if folder.is_dir() else []:
+            if TOOL_PATH.match(f"tools/{path.name}"):
+                try:
+                    out[f"tools/{path.name}"] = path.read_text(encoding="utf-8")
+                except OSError:
+                    continue
         return out
 
     def other_memories(self, name: str) -> list[tuple[str, str]]:

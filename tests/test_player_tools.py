@@ -10,6 +10,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import chess
 
@@ -179,6 +180,101 @@ class MemoryAllowlistTests(unittest.TestCase):
                                                 current=existing)
         self.assertEqual(accepted, [])
         self.assertTrue(any("over the limit" in r for r in rejected), rejected)
+
+    def test_reflection_counts_the_tools_already_on_disk(self):
+        # 2026-10-30: current_texts listed only MEMORY.md and notes, so the limit never saw the
+        # tools on disk and Sonnet grew to 7 own tools while only 6 could run.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = mem.MemoryRepo(Path(tmp), log=lambda *_: None)
+            tools = repo.agent_dir("Sonnet") / "tools"
+            tools.mkdir(parents=True)
+            for i in range(pt.MAX_TOOL_FILES):
+                (tools / f"own{i}.py").write_text("print(1)\n", encoding="utf-8")
+            current = repo.current_texts("Sonnet")
+            self.assertEqual(sum(1 for p in current if p.startswith("tools/")), pt.MAX_TOOL_FILES)
+            accepted, rejected = mem.validate_edits(
+                [{"path": "tools/ninth.py", "content": "print(1)\n"}], [], current=current)
+            self.assertEqual(accepted, [])
+            self.assertTrue(any("ninth.py" in r and "over the limit" in r and "shared tools do not count" in r
+                                for r in rejected), rejected)
+            # Rewriting an existing tool is fine, and a delete in the same reflection frees a place.
+            accepted, rejected = mem.validate_edits(
+                [{"path": "tools/own0.py", "content": "print(2)\n"},
+                 {"path": "tools/own1.py", "delete": True},
+                 {"path": "tools/ninth.py", "content": "print(3)\n"}], [], current=current)
+            self.assertEqual(rejected, [])
+            self.assertEqual([a["path"] for a in accepted], ["tools/own0.py", "tools/own1.py", "tools/ninth.py"])
+
+
+def _write_tools(folder: Path, count: int, prefix: str = "own") -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    for i in range(count):
+        (folder / f"{prefix}{i}.py").write_text(f"print('{prefix}{i} ran')\n", encoding="utf-8")
+
+
+class ToolCapTests(unittest.TestCase):
+    def test_limit_is_eight_own_tools(self):
+        self.assertEqual(pt.MAX_TOOL_FILES, 8)
+
+    def test_shared_tool_does_not_take_an_own_place(self):
+        shared = pt.discover(None)
+        self.assertIn("loose-piece-check", shared)
+        with tempfile.TemporaryDirectory() as tmp:
+            own = Path(tmp) / "tools"
+            _write_tools(own, 7)
+            block = pt.run_tools(own, chess.Board(), [])
+        names = [r.name for r in block.results]
+        self.assertEqual(len(names), 8, names)          # 1 shared + all 7 own
+        self.assertIn("loose-piece-check", names)
+        self.assertEqual(block.skipped, [])
+        self.assertTrue(all(r.ok for r in block.results), [r.error for r in block.results])
+
+    def test_extra_own_tools_are_named_not_dropped_silently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            own = Path(tmp) / "tools"
+            _write_tools(own, 9)
+            board = chess.Board()
+            block = pt.run_tools(own, board, [], include_shared=False)
+            self.assertEqual(len(block.results), 8)
+            self.assertEqual(block.skipped, ["own8"])
+            text = pt.render_block(block, board, [])
+            with_shared = pt.run_tools(own, board, [])
+        self.assertIn("Not run: own8", text)
+        self.assertIn("shared tools do not count", text)
+        self.assertEqual(len(with_shared.results), 9)   # the shared tool still runs on top of 8 own
+        self.assertEqual(with_shared.skipped, ["own8"])
+
+
+class OutputCutTests(unittest.TestCase):
+    def test_short_output_is_untouched(self):
+        self.assertEqual(pt.cut_output("short"), "short")
+
+    def test_cut_output_ends_with_a_marker(self):
+        text = pt.cut_output("x" * (pt.MAX_OUTPUT_CHARS + 50))
+        self.assertTrue(text.endswith(f"[output cut at {pt.MAX_OUTPUT_CHARS} characters - put your answer first]"))
+        self.assertTrue(text.startswith("x" * pt.MAX_OUTPUT_CHARS))
+
+    def test_long_tool_output_is_cut_but_the_gate_still_reads_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tools = Path(tmp) / "tools"
+            tools.mkdir()
+            (tools / "chatty.py").write_text(
+                "print('filler line ' * 200)\nprint('AVOID: e2e4 - leaves the bishop loose')\n", encoding="utf-8")
+            board = chess.Board()
+            result = pt.run_tools(tools, board, [], include_shared=False).results[0]
+        self.assertTrue(result.ok, result.error)
+        self.assertIn("[output cut at", result.output)
+        self.assertNotIn("AVOID", result.output)
+        self.assertEqual(pt.flagged_moves([result], board), {"e2e4": "leaves the bishop loose"})
+
+
+class RestrictedEnvTests(unittest.TestCase):
+    def test_keeps_systemdrive_and_drops_secrets(self):
+        with mock.patch.dict(os.environ, {"SYSTEMDRIVE": "C:", "OPENAI_API_KEY": "secret"}):
+            env = pt._restricted_env()
+        self.assertEqual(env.get("SYSTEMDRIVE"), "C:")
+        self.assertNotIn("OPENAI_API_KEY", env)
+        self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
 
 
 if __name__ == "__main__":
