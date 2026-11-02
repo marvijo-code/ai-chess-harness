@@ -2,6 +2,62 @@
 
 UCI chess engines and harness scripts for testing LLM-backed chess play.
 
+## Quick start: run a local game and open the board
+
+Start here on **Windows with PowerShell**. Install Git and Python 3.13 first, and check that `git --version` and `python --version` work in a new terminal. Python 3.13 is the version used for the fresh-checkout test below. The `.cmd` launchers and PowerShell commands in this guide are Windows-specific.
+
+This first run uses two local Zero engines. It needs no Codex login, API key, Stockfish installation, en-croissant setup, Node.js, or downloaded training data. It checks the runner and viewer before you configure a model provider.
+
+### 1. Clone and install
+
+Run from the parent folder where you want the new checkout:
+
+```powershell
+git clone https://github.com/marvijo-code/ai-chess-harness.git
+cd ai-chess-harness
+python -m venv .venv
+. .\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m pip check
+```
+
+If PowerShell blocks `Activate.ps1`, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, then activate again. This affects only the current terminal. Activate the same environment in each new terminal so the engine launchers use its Python dependencies too.
+
+### 2. Generate a real eight-half-move test game
+
+Keep the activated terminal in the repo root:
+
+```powershell
+python .\tools\play_engine_match.py `
+  --white-name Zero-White `
+  --white-path .\engines\codex-chess-zero\codex-chess-zero.cmd `
+  --black-name Zero-Black `
+  --black-path .\engines\codex-chess-zero\codex-chess-zero.cmd `
+  --white-movetime-ms 250 --black-movetime-ms 250 `
+  --max-plies 8 --live-pgn .\out\live\quickstart.pgn
+```
+
+Expect eight legal half-moves, with four moves per side, followed by JSON containing `"plies": 8`, `"termination": "max_plies"`, and `"forfeit_by": null`. The `"result": "*"` and `"completed": false` values are expected: this is a bounded setup check, stopped before a full game's result. Generated PGN game records, JSON, and logs stay under the ignored `out/` folder. Both sides use Zero's local move path; no model service is called.
+
+### 3. Open the board
+
+```powershell
+$pgn = (Resolve-Path .\out\live\quickstart.pgn).Path
+python .\tools\live_pgn_viewer.py --pgn $pgn --no-analysis --port 8879
+```
+
+Open **http://127.0.0.1:8879/** in your browser. Expect a chessboard, Zero-White and Zero-Black, and the generated moves. Use an absolute PGN path as above: a relative viewer path can resolve under `out/` a second time and show an empty board. Stockfish analysis is off because this first run does not install Stockfish.
+
+The viewer stays in the foreground of this terminal. Stop it with **Ctrl+C**, then run `deactivate` to leave the Python environment. If port 8879 is busy, choose another port and open the matching URL; do not stop an unrelated viewer.
+
+### 4. Choose the next workflow
+
+- **Use Codex or an API-backed model:** complete [optional model and Stockfish setup](#optional-model-and-stockfish-setup), then use the [match harness](#match-harness).
+- **Run multiple games:** use the [FastChess runner](#fastchess-codex-vs-codex-run) after configuring the engines you select.
+- **Explore Zero:** see [first-principles Zero research](#first-principles-zero-research). Training and climb loops are separate from this short setup check.
+
+Fresh-checkout verification, 19 October 2026: cloned the public repo into a separate folder, installed requirements in a new virtual environment, and ran the eight-half-move local game with an empty user profile. No existing engine registry, Codex credentials, or generated game data was copied in. Verified the resulting game through the viewer API and a headless browser. This verifies the Windows local quick start; it does not verify every optional provider or long training workflow.
+
 ## Engines
 
 - `engines/codex-chess`: a UCI engine that asks the local Codex app-server for legal moves.
@@ -13,18 +69,94 @@ Codex-chess does not choose fallback legal moves for the model. Empty responses,
 
 Codex UCI output is normalized to ASCII before it is written to the GUI/FastChess pipe. Optional model comments are non-fatal: a smart quote or other Unicode text in an `info string` must not block the actual `bestmove` line. Move selection also uses the clock-aware timeout settings in `chess-harness.config.json`; the default FastChess run remains 5+0, normal mid-clock moves can wait long enough for the local app-server to answer, and timeout/invalid retries switch to low-effort urgent context-free prompts with empty comments instead of repeating full learner context. Learner prompts use lean embedded memory/knowledgebase context for 5-minute games so routine moves do not spend tens of seconds on oversized context.
 
-## Setup
+## Optional model and Stockfish setup
+
+Complete the quick start above first. Keep its virtual environment active for the commands below.
+
+### Codex-backed engines
+
+Install the Codex command-line tool using the [official Codex CLI setup guide](https://developers.openai.com/codex/cli/). Sign in with your own ChatGPT account using `codex login`, then check `codex login status` and `codex app-server --help`. The Codex engine uses that local sign-in and your account's usage limits. It does not need an OpenRouter key. Use a model that your account supports; the checked-in model setting is not an availability guarantee.
+
+### Use your own ChatGPT and Claude subscriptions
+
+Each developer signs in on their own computer. Nothing in a Git clone shares the repository owner's login or subscription. Install Codex and, for the Claude player, [Claude Code](https://code.claude.com/docs/en/setup). Choose your subscription account when signing in, rather than a Console API-billing account. See the [Claude authentication guide](https://code.claude.com/docs/en/authentication).
 
 ```powershell
-python -m pip install -r requirements.txt
+codex login
+codex login status
+claude auth login
+claude auth status
 ```
 
-For `llm-chess-engine`, set the API key in the environment. Do not commit keys.
+The series launcher selects each player's route using `provider:model:effort`. Enter model IDs your own plans support:
 
 ```powershell
-$env:OPENROUTER_API_KEY = "..."
+$codexModel = Read-Host 'Model ID available in your Codex account'
+$claudeModel = Read-Host 'Model ID available in your Claude account'
+$player1 = "codex:${codexModel}:high"
+$player2 = "claude:${claudeModel}:high"
+.\run-llm-match.ps1 -Player1 $player1 -Player2 $player2 -Games 1
+```
+
+This asks each player for one legal opening move before starting the game, then prints the local viewer URL. Preflight failure stops the launcher. No Stockfish opponent is required for a model-vs-model series; optional viewer analysis still needs the Stockfish registry described below. The `codex` route calls `codex exec`; the `claude` route calls `claude -p`. Both consume the selected account's usage allowance. These routes strip common metered API-key and gateway environment variables from their child process and do not switch to OpenRouter when a login or quota fails.
+
+To check credentials and model access without starting a series, use this **instead of** launching a game:
+
+```powershell
+python .\tools\play_llm_series.py --preflight-only --player1 $player1 --player2 $player2
+```
+
+If a command-line tool is not found, install it and open a new terminal. For a nonstandard installation, set `LLM_CODEX_BIN` or `LLM_CLAUDE_BIN` to its executable's full path. To keep preferred players locally, edit only the provider, model, effort, and display-name fields under `llmMatch.player1` and `llmMatch.player2` in `chess-harness.config.json`; never put credentials in that file.
+
+### Stockfish-backed matches and viewer analysis
+
+The later commands that select Stockfish by name expect an installed Stockfish executable registered as an enabled `Stockfish` entry in `$HOME\AppData\Roaming\org.encroissant.app\engines\engines.json`. Installing Python packages does not create this registry or install Stockfish. Configure it in en-croissant before using those commands. `play_codex_vs_stockfish.py` and the viewer use this home-folder path; `play_engine_match.py` uses `%APPDATA%\org.encroissant.app\engines\engines.json`.
+
+For `play_engine_match.py`, you can skip that registry by supplying `--black-path` with the absolute path to your Stockfish executable. The quick-start Zero-vs-Zero command supplies both engine paths and therefore needs no registry. Keep `--no-analysis` on the viewer until Stockfish is configured; this flag disables viewer analysis only and does not remove a match runner's Stockfish requirement.
+
+### OpenRouter-backed engines
+
+For `llm-chess-engine`, set your own API key in the current terminal. OpenRouter requests can consume paid credits. Do not commit keys. The scripts read environment variables; they do not automatically load a `.env` file.
+
+```powershell
+$env:OPENROUTER_API_KEY = Read-Host 'OpenRouter API key' -MaskInput
 $env:OPENROUTER_MODEL = "moonshotai/kimi-k2.6"
 ```
+
+`-MaskInput` requires PowerShell 7. The key goes into the terminal's environment, without being displayed or written as a literal in shell history. Run the match from that same terminal so child processes inherit it.
+
+To use that key in the series launcher, choose the provider explicitly. This example runs two models through OpenRouter, so both sides use API credits:
+
+```powershell
+$whiteModel = Read-Host 'OpenRouter model ID for White'
+$blackModel = Read-Host 'OpenRouter model ID for Black'
+.\run-llm-match.ps1 `
+  -Player1 "openrouter:${whiteModel}:low" `
+  -Player2 "openrouter:${blackModel}:low" -Games 1
+```
+
+You can mix a subscription player with an API player by changing just one `-Player1` or `-Player2` value. Setting `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` does not configure the series launcher's subscription providers; use their login commands above, or select a supported API route explicitly.
+
+### Other supported subscription keys
+
+The series runner also has these explicit routes, implemented in `engines/llm-chess-engine/subscription_providers.py`:
+
+- `opencode-go`: reads `OPENCODE_GO_API_KEY` and calls the OpenCode Go subscription endpoint.
+- `zai`: reads `ZAI_API_KEY` and calls the Z.ai Coding Plan endpoint.
+- `alibaba`: reads `ALIBABA_TOKEN_PLAN_API_KEY` and calls the configured Alibaba Token Plan endpoint.
+- `openrouter-chat`: reads `OPENROUTER_API_KEY` and uses the alternate OpenRouter chat adapter, with metered API credit.
+
+Use a key for the named plan and a model that plan actually serves. Set only the key for your chosen route, using the same masked-input pattern:
+
+```powershell
+$env:OPENCODE_GO_API_KEY = Read-Host 'OpenCode Go subscription key' -MaskInput
+$goModel = Read-Host 'Model ID available in your OpenCode Go plan'
+$player1 = "opencode-go:${goModel}:low"
+```
+
+Pass that player value to the launcher or standalone preflight command above. Use the exact provider spelling listed here. The adapters use their configured plan endpoints; a key for a different provider or billing product is not interchangeable. These additional key-backed routes were checked against the code, not live-tested with new developer accounts.
+
+Keep keys and login files out of Git, screenshots, logs you share, and `chess-harness.config.json`. `.env` files are ignored by Git but are not loaded automatically. When finished, close the terminal or remove the specific key with, for example, `Remove-Item Env:OPENROUTER_API_KEY -ErrorAction SilentlyContinue`. Detached games keep their inherited environment until they exit.
 
 Search available OpenRouter models without editing engine code:
 
@@ -167,7 +299,8 @@ python .\tools\live_pgn_viewer.py
 Then open `http://127.0.0.1:8765/`. The viewer polls `out\live\codex-vs-stockfish-live.pgn`, renders the current board and move list, and stays entirely on localhost. To watch a different PGN:
 
 ```powershell
-python .\tools\live_pgn_viewer.py --pgn .\out\live\some-other-live.pgn --port 8766
+$pgn = (Resolve-Path .\out\live\some-other-live.pgn).Path
+python .\tools\live_pgn_viewer.py --pgn $pgn --port 8766
 ```
 
 The local viewer opens in dark theme by default. The board uses black/white pieces on grey/white squares, and the top toolbar can toggle light/dark theme, Stockfish analysis, and Follow Live mode. The left and right arrow keys, or the arrow buttons in the toolbar, move backward and forward through the PGN and automatically switch Follow Live off so the board stays on the selected move.
@@ -266,7 +399,8 @@ python .\tools\mirror_fastchess_live_pgn.py `
   --engine-log-dir .\out\codex-chess-logs `
   --output .\out\live\<run>-live.pgn
 
-python .\tools\live_pgn_viewer.py --pgn .\out\live\<run>-live.pgn --port 8766
+$pgn = (Resolve-Path .\out\live\<run>-live.pgn).Path
+python .\tools\live_pgn_viewer.py --pgn $pgn --port 8766
 ```
 
 The mirror also writes standard PGN clock comments such as `{ [%clk 0:04:58.125] }` on completed moves. It keeps `WhiteClockMs`, `BlackClockMs`, `ClockUpdatedAtEpochMs`, and `ClockRunningSide` headers from the latest UCI `go wtime ... btime ...` line as live-viewer metadata, so the viewer can show running clocks above and below the board while still preserving per-move clock times in PGN notation. If a live clock reaches zero before FastChess has printed its final result line, the mirror writes the timeout winner and `lost on time` reason into the live PGN, and the viewer shows `Game over` with the winning side and stopped clock. For concurrent FastChess runs, the mirror writes `out\live\<run>-live.status.json` so the viewer can show other active games as `In progress` while the board PGN remains fixed on one selected live game. The viewer writes `out\live\<run>-live.selection.json` when an operator clicks another in-progress row, and the mirror follows that requested game on the next poll while still refusing unrelated latest-log flicker.
