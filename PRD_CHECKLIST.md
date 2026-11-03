@@ -1,5 +1,9 @@
 # PRD Checklist
 
+- [x] Tournament trophies: "Wins / Runner-up" strip in the header, counted once per completed tournament id (tests/test_tournament_trophies.py).
+- [x] Trophies come from `state["tournament_wins"]`, so the local viewer and the hosted marvijo.com/ai-chess page show the same counts.
+- [x] Header strip verified locally against real tournament files: trophy and runner-up counts render, and no page overflow at 1600x900.
+
 - [x] Harness version v1: every game records runner and engine versions (state and PGN); a fingerprint test forces a bump when the harness changes.
 - [x] Loop guard: stop a reasoning stream that repeats one 8-word phrase 20+ times, ask for the move from the thinking before the repeats, then the latest BEST SO FAR move (tests/test_loop_guard.py).
 - [x] Rule 11: every player writes BEST SO FAR lines; the referee plays the latest legal one instead of a forfeit when no valid reply comes.

@@ -486,6 +486,18 @@ class PageTest(unittest.TestCase):
         ):
             self.assertIn(needle, viewer.PAGE, needle)
 
+    def test_tournament_trophies_read_across_the_top(self):
+        # Tournament wins (crowns) and runner-up totals per model: the data is built by
+        # tournament_wins() and drawn by renderTrophies() into the header strip.
+        for needle in ('id="trophies"', 'class="trophies"', "Wins / Runner-up", "function renderTrophies()",
+                       "renderTrophies();", "data.tournament_wins", "trophy-count", "runner-count"):
+            self.assertIn(needle, viewer.PAGE, needle)
+        self.assertIn('state["tournament_wins"] = tournament_wins(',
+                      Path(viewer.__file__).read_text(encoding="utf-8"))
+        self.assertEqual(viewer.tournament_wins(
+            [{"id": "a", "finished": True, "champion": "Alpha", "runner_up": "Beta", "players": ["Alpha", "Beta"]}],
+            [{"name": "Alpha"}, {"name": "Beta"}])["players"][0]["wins"], 1)
+
     def test_auto_focus_present(self):
         for needle in ("data-toggle-autofocus", "Auto-focus: <b>", 'store("swissAutoFocus"', "following the commentary",
                        "function chooseFocus(s)", "history.replaceState", "focusPinned", 'params.get("dwell")', 'params.get("minDwell")',

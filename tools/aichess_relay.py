@@ -90,6 +90,33 @@ def strip_key(obj, key: str):
     return obj
 
 
+PRIVATE_KEYS = ("pgn_path", "route", "toolsDir")   # route names the paid account behind a player
+PRIVATE_PLAYER_KEYS = ("path",)                      # server file paths in a player's engine config
+EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def scrub_public(obj):
+    """Drop everything private from a state before it is served: account routes, server paths, email addresses."""
+    for key in PRIVATE_KEYS:
+        strip_key(obj, key)
+    if not isinstance(obj, dict):
+        return obj
+    for player in obj.get("players") or []:
+        if isinstance(player, dict):
+            for key in PRIVATE_PLAYER_KEYS:
+                player.pop(key, None)
+    forever = (obj.get("config") or {}).get("forever")
+    if isinstance(forever, dict):
+        forever.pop("memoryRepo", None)       # server folder and ssh alias of the memory repo
+        forever.pop("memoryRemote", None)
+    return obj
+
+
+def scrub_body(body: bytes) -> bytes:
+    """Last line of defence: no email address survives in the served JSON, wherever it was typed."""
+    return EMAIL.sub("[removed]", body.decode("utf-8")).encode("utf-8")
+
+
 def bounded_gunzip(data: bytes, limit: int) -> bytes:
     inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
     out = inflater.decompress(data, limit + 1)
@@ -289,8 +316,8 @@ class Store:
         age = float(age) if isinstance(age, (int, float)) and age >= 0 else 0.0
         for key in VOLATILE:
             obj.pop(key, None)
-        strip_key(obj, "pgn_path")
-        body = json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        scrub_public(obj)
+        body = scrub_body(json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
         self._set_state(body, self.clock(), age)
         return {"ok": True, "id": obj.get("id"), "updated_epoch_ms": obj.get("updated_epoch_ms"), "bytes": len(body)}
 
@@ -350,10 +377,10 @@ class Store:
         tid = state["id"]
         for key in VOLATILE:
             state.pop(key, None)
-        strip_key(state, "pgn_path")
+        scrub_public(state)
         state["hosted"] = True
         state["archived"] = True
-        body = json.dumps(state, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        body = scrub_body(json.dumps(state, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
         summary = self._summary(obj.get("summary") if isinstance(obj.get("summary"), dict) else state, tid)
         atomic_write(self.dir / "archive" / f"{tid}.json.gz", gzip.compress(body, 6))
         with self.lock:
@@ -401,9 +428,10 @@ class Store:
             packed = (self.dir / "archive" / f"{tid}.json.gz").read_bytes()
         except OSError:
             return 404, b'{"error":"no such tournament in the archive"}', False
-        if want_gzip:
-            return 200, packed, True
-        return 200, gzip.decompress(packed), False
+        # Archives stored before the scrub existed still carry routes and emails: clean them on the way out.
+        body = scrub_body(json.dumps(scrub_public(json.loads(gzip.decompress(packed))),
+                                     separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        return (200, gzip.compress(body, 1), True) if want_gzip else (200, body, False)
 
     # ----- what each AI has learnt
 

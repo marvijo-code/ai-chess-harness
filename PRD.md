@@ -1,5 +1,12 @@
 # Chess Live Viewer PRD
 
+## Tournament trophies on the livestream (restored 2026-11-03)
+
+- The header shows a "Wins / Runner-up" row: each model's maker icon, name, championship trophy count and runner-up count.
+- One trophy is one completed tournament championship, counted once per tournament id. Runner-up totals come only from recorded `knockout.runner_up` in completed tournaments; a missing field is never inferred.
+- Models with no championship are hidden from the row.
+- The counts live in `state["tournament_wins"]` (built by `tournament_wins()` from the same tournament list the archive uses), so both the local viewer and the hosted `marvijo.com/ai-chess` page show them.
+
 ## Goal
 
 Keep the local FastChess viewer useful during live play and replay without leaking analysis or client shortcuts into engine move selection.
