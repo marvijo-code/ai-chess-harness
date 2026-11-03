@@ -62,6 +62,16 @@ body { min-height: 100vh; overflow-x: hidden; }
 header { display: flex; align-items: center; gap: 16px; padding: 14px 22px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 h1 { font-size: 22px; margin: 0; letter-spacing: .2px; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.trophies { display: flex; align-items: center; gap: 12px 24px; flex: 0 0 100%; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+.trophies:empty { display: none; }
+.trophies .trophy-label { color: var(--muted); font-size: 13px; }
+.trophies .trophy-model { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 15px; }
+.trophies .plogo { margin: 0; }
+.trophies .trophy-icon { width: 20px; height: 20px; color: #ffd479; flex: none; }
+.trophies .trophy-count { color: #ffd479; font-size: 18px; font-variant-numeric: tabular-nums; }
+.trophies .runner-icon { color: #c5cdd8; margin-left: 3px; }
+.trophies .runner-count { color: #c5cdd8; }
+@media (max-width: 700px) { .trophies { gap: 16px; } .trophies .trophy-model { font-size: 13px; } }
 .chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; font-size: 13px; color: var(--muted); white-space: nowrap; }
 .chip b { color: var(--text); font-weight: 600; }
 .chip.live { color: var(--ok); border-color: rgba(52, 199, 123, .45); }
@@ -709,6 +719,7 @@ body.stream .hdr-links, body.stream .extras, body.stream .archive-bar { display:
 <!--LOGO-SPRITE-->
 <header>
   <h1 id="title">AI Chess Swiss</h1>
+  <div class="trophies" id="trophies" aria-label="Tournament wins and runner-up counts"></div>
   <div class="chips" id="chips"></div>
   <div class="hdr-links" id="hdrLinks">
     <a class="chip yt" id="liveLink" href="#" target="_blank" rel="noopener" hidden title="Open the YouTube livestream of this tournament" aria-label="Watch the livestream"><svg viewBox="0 0 24 17" aria-hidden="true"><path fill="#f00" d="M23.5 2.65A3.02 3.02 0 0 0 21.38.5C19.5 0 12 0 12 0S4.5 0 2.62.5A3.02 3.02 0 0 0 .5 2.65C0 4.53 0 8.46 0 8.46s0 3.93.5 5.81a3.02 3.02 0 0 0 2.12 2.14c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 0 0 2.12-2.14c.5-1.88.5-5.81.5-5.81s0-3.93-.5-5.81z"/><path fill="#fff" d="M9.55 12.03V4.89l6.27 3.57z"/></svg><span><span class="wide">Watch the </span>livestream</span></a>
@@ -1429,6 +1440,7 @@ function render() {
   renderLinks();
   renderArchiveBar();
   if (!data || !data.id) return;
+  renderTrophies();
   document.body.classList.toggle("archive", isArchive());
   document.body.classList.toggle("no-think", HOSTED && isArchive());
   document.getElementById("title").textContent = data.title || "AI Chess Swiss";
@@ -1663,6 +1675,19 @@ function miniBracketHtml(curId) {
 }
 
 // Standings strip in the sticky header, for layouts where the full table is not on screen.
+function renderTrophies() {
+  const totals = data && data.tournament_wins;
+  const el = document.getElementById("trophies");
+  if (!totals || !Array.isArray(totals.players)) { setHTML(el, ""); return; }
+  const winners = totals.players.filter(p => p.wins > 0);
+  if (!winners.length) { setHTML(el, ""); return; }
+  const trophy = '<svg class="trophy-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2h10v2h4v3a5 5 0 0 1-5 5h-.1A5 5 0 0 1 13 14.9V19h4v3H7v-3h4v-4.1A5 5 0 0 1 8.1 12H8a5 5 0 0 1-5-5V4h4V2zm10 4v4a3 3 0 0 0 2-3V6h-2zM5 6v1a3 3 0 0 0 2 3V6H5z"/></svg>';
+  const medal = '<svg class="trophy-icon runner-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 2h5l2 6-4 2-3-8zm9 0h5l-3 8-4-2 2-6z"/><circle cx="12" cy="15" r="7" fill="currentColor"/><text x="12" y="19" text-anchor="middle" font-size="11" font-weight="700" fill="#171a1f">2</text></svg>';
+  setHTML(el, '<span class="trophy-label">Wins / Runner-up</span>' + winners.map(p =>
+    `<span class="trophy-model" title="${esc(p.name)}: ${p.wins} tournament ${p.wins === 1 ? "win" : "wins"}, ${p.runners_up} runner-up ${p.runners_up === 1 ? "finish" : "finishes"}">${logo(p.name)}<span>${esc(p.name)}</span>${trophy}<b class="trophy-count">${p.wins}</b>${medal}<b class="trophy-count runner-count">${p.runners_up}</b></span>`
+  ).join(""));
+}
+
 function renderTicker() {
   const rows = (data.standings || []).slice().sort((a, b) => (a.rank || 99) - (b.rank || 99));
   const f = fmtInfo(), size = f ? (f.ko_size || (data.config || {}).knockoutSize || 4) : 0;
@@ -3615,6 +3640,7 @@ def tournament_summary(state: dict) -> dict:
         "title": str(state.get("title") or ""),
         "finished": bool(state.get("finished")),
         "champion": champion if isinstance(champion, str) else "",
+        "runner_up": ko.get("runner_up") if isinstance(ko.get("runner_up"), str) else "",
         "players": [p["name"] for p in state.get("players") or [] if isinstance(p, dict) and p.get("name")],
         "games": sum(1 for g in games.values() if isinstance(g, dict) and g.get("status") != "live" and g.get("moves")),
         "rounds": len(state.get("rounds") or []),
@@ -3622,6 +3648,27 @@ def tournament_summary(state: dict) -> dict:
         "updated_at": str(state.get("updated_at") or ""),
         "updated_epoch_ms": state.get("updated_epoch_ms"),
     }
+
+
+def tournament_wins(rows: list[dict], players: list[dict]) -> dict:
+    """Count recorded titles and runner-up finishes once per completed id."""
+    counts = {p["name"]: 0 for p in players if isinstance(p, dict) and p.get("name")}
+    runners = {}
+    seen = set()
+    for row in rows:
+        tid, champion = row.get("id"), row.get("champion")
+        for name in row.get("players") or []:
+            counts.setdefault(name, 0)
+        if not tid or tid in seen or not row.get("finished") or not champion:
+            continue
+        seen.add(tid)
+        counts[champion] = counts.get(champion, 0) + 1
+        runner = row.get("runner_up")
+        if runner and runner != champion:
+            counts.setdefault(runner, 0)
+            runners[runner] = runners.get(runner, 0) + 1
+    return {"completed": len(seen), "players": [{"name": name, "wins": wins, "runners_up": runners.get(name, 0)}
+            for name, wins in sorted(counts.items(), key=lambda item: (-item[1], -runners.get(item[0], 0), item[0].casefold()))]}
 
 
 def list_tournaments(live_dir: Path, now: float | None = None) -> list[dict]:
@@ -3995,6 +4042,7 @@ class Handler(BaseHTTPRequestHandler):
                 state["annotations"] = {}
             state["commentary"] = self.commentator is not None
             state["wait_stats"] = wait_stats(self.live_dir, now)
+            state["tournament_wins"] = tournament_wins(list_tournaments(self.live_dir, now), state.get("players") or [])
             state["disk"] = live_disk(path, state)
             if self.follow is not None:
                 state["viewer_follow"] = True
