@@ -304,3 +304,6 @@
 - [x] Focused tool, gate, facts and series tests green: 82 passed, 1 skipped (Validation 94).
 - [x] Tool gate refuses only on reasons that say material is lost or mate; contract text updated (PRD 199).
 - [x] Focused gate and tool tests green: 54 passed; v8 game replay keeps the 4 real refusals and drops the 2 false ones (Validation 95).
+- [x] Lichess hardest-100 fixture builder, puzzle gauntlet, fail-fast live suite and the from-nothing tool climb (PRD 200).
+- [x] Offline gauntlet, suite and climb tests green (Validation 96).
+- [ ] Live GLM 5.3 Flash baseline and tool climb on OpenRouter, spend reported (Validation 96).
