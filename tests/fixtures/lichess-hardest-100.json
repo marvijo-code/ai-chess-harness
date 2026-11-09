@@ -1,0 +1,2669 @@
+{
+ "source": "https://database.lichess.org/lichess_db_puzzle.csv.zst",
+ "license": "CC0 (Lichess puzzle database)",
+ "selection": {
+  "min_rating": 2700,
+  "max_rating_deviation": 90,
+  "min_plays": 300,
+  "min_popularity": 60,
+  "rows_scanned": 3000000,
+  "unique_check": "Stockfish depth 16 multipv 2: best = puzzle move, second not winning (<= 150 cp) or 300+ cp worse; one mating move at most"
+ },
+ "puzzles": [
+  {
+   "id": "B0bOa",
+   "fen": "1k6/1bpB2Q1/1p5p/p5p1/4q1P1/P3B3/1P3P2/1K6 w - - 1 34",
+   "moves": [
+    "b1a1",
+    "e4h1",
+    "a1a2",
+    "b7e4",
+    "g7g8",
+    "b8a7"
+   ],
+   "rating": 2856,
+   "rating_deviation": 90,
+   "plays": 2037,
+   "popularity": 92,
+   "themes": [
+    "clearance",
+    "crushing",
+    "endgame",
+    "long",
+    "master",
+    "quietMove"
+   ],
+   "url": "https://lichess.org/training/B0bOa",
+   "number": 1
+  },
+  {
+   "id": "Dw7vm",
+   "fen": "2r3k1/Q4pp1/5q1p/8/PPB1P3/2PP3P/6r1/1K2R3 w - - 1 32",
+   "moves": [
+    "e4e5",
+    "f6f4",
+    "e1g1",
+    "g2f2"
+   ],
+   "rating": 2856,
+   "rating_deviation": 88,
+   "plays": 426,
+   "popularity": 98,
+   "themes": [
+    "advantage",
+    "defensiveMove",
+    "endgame",
+    "short"
+   ],
+   "url": "https://lichess.org/training/Dw7vm",
+   "number": 2
+  },
+  {
+   "id": "Kf1QA",
+   "fen": "k2r3r/p4p2/6p1/3p4/1Q2b2N/4R1Pq/PPP4P/3R2K1 w - - 7 27",
+   "moves": [
+    "b4c5",
+    "d8c8",
+    "c5d4",
+    "h8h4",
+    "d1d2",
+    "c8c4"
+   ],
+   "rating": 2857,
+   "rating_deviation": 89,
+   "plays": 673,
+   "popularity": 93,
+   "themes": [
+    "advantage",
+    "long",
+    "middlegame"
+   ],
+   "url": "https://lichess.org/training/Kf1QA",
+   "number": 3
+  },
+  {
+   "id": "B3OCX",
+   "fen": "8/8/p4k1p/3pp2P/2p2P2/2P5/PP4K1/8 w - - 0 52",
+   "moves": [
+    "g2f3",
+    "e5e4",
+    "f3g4",
+    "f6e6",
+    "f4f5",
+    "e6e5",
+    "a2a3",
+    "e4e3"
+   ],
+   "rating": 2858,
+   "rating_deviation": 90,
+   "plays": 3595,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "endgame",
+    "pawnEndgame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/B3OCX",
+   "number": 4
+  },
+  {
+   "id": "Kb2Ti",
+   "fen": "r2r2k1/pp3p2/4p1p1/4P1QR/2q2P2/2Pp4/1P4PP/3R2K1 b - - 0 26",
+   "moves": [
+    "c4e4",
+    "h5h6",
+    "e4e3",
+    "g1h1",
+    "d3d2",
+    "g5h4"
+   ],
+   "rating": 2858,
+   "rating_deviation": 88,
+   "plays": 410,
+   "popularity": 93,
+   "themes": [
+    "crushing",
+    "endgame",
+    "long"
+   ],
+   "url": "https://lichess.org/training/Kb2Ti",
+   "number": 5
+  },
+  {
+   "id": "MDMUh",
+   "fen": "R7/1p5k/1PpNb1pp/2P2p2/4p3/2q1B1PP/4nP1K/5B2 b - - 2 31",
+   "moves": [
+    "c3e1",
+    "f1e2",
+    "e1e2",
+    "a8e8"
+   ],
+   "rating": 2859,
+   "rating_deviation": 88,
+   "plays": 750,
+   "popularity": 93,
+   "themes": [
+    "crushing",
+    "master",
+    "masterVsMaster",
+    "middlegame",
+    "short"
+   ],
+   "url": "https://lichess.org/training/MDMUh",
+   "number": 6
+  },
+  {
+   "id": "RXrIT",
+   "fen": "2r4k/p3Qpp1/1p2p3/8/4B3/2K1P3/r3bP1P/6R1 w - - 8 32",
+   "moves": [
+    "c3d4",
+    "c8c4",
+    "d4e5",
+    "f7f6",
+    "e5d6",
+    "a2d2",
+    "e4d3",
+    "d2d3"
+   ],
+   "rating": 2859,
+   "rating_deviation": 87,
+   "plays": 597,
+   "popularity": 93,
+   "themes": [
+    "advantage",
+    "endgame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/RXrIT",
+   "number": 7
+  },
+  {
+   "id": "KlrEt",
+   "fen": "3r2k1/pbq1rp2/7R/1pp4B/3pP1P1/3P3Q/PPP4P/7K b - - 0 27",
+   "moves": [
+    "d8d6",
+    "h5f7",
+    "e7f7",
+    "h6h8",
+    "g8g7",
+    "g4g5",
+    "f7f1",
+    "h1g2",
+    "b7e4",
+    "d3e4"
+   ],
+   "rating": 2861,
+   "rating_deviation": 90,
+   "plays": 1065,
+   "popularity": 91,
+   "themes": [
+    "crushing",
+    "kingsideAttack",
+    "middlegame",
+    "quietMove",
+    "sacrifice",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/KlrEt",
+   "number": 8
+  },
+  {
+   "id": "Q1luE",
+   "fen": "6rk/pp6/2p5/3pPQ2/1P3P1p/4KRr1/P6q/5R2 b - - 0 38",
+   "moves": [
+    "h2a2",
+    "f5h5",
+    "h8g7",
+    "f3g3",
+    "h4g3",
+    "h5g5",
+    "g7f7",
+    "e5e6",
+    "f7e6",
+    "g5g8"
+   ],
+   "rating": 2861,
+   "rating_deviation": 90,
+   "plays": 446,
+   "popularity": 93,
+   "themes": [
+    "advantage",
+    "attraction",
+    "deflection",
+    "endgame",
+    "exposedKing",
+    "master",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/Q1luE",
+   "number": 9
+  },
+  {
+   "id": "0mReY",
+   "fen": "6k1/5p2/3q4/6pp/P4P2/6KP/3pB1P1/Q7 w - - 0 41",
+   "moves": [
+    "g3f2",
+    "d6c5",
+    "f2f3",
+    "g5f4",
+    "f3f4",
+    "c5c1",
+    "a1c1",
+    "d2c1q"
+   ],
+   "rating": 2862,
+   "rating_deviation": 86,
+   "plays": 618,
+   "popularity": 94,
+   "themes": [
+    "advancedPawn",
+    "crushing",
+    "endgame",
+    "promotion",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/0mReY",
+   "number": 10
+  },
+  {
+   "id": "4tiMB",
+   "fen": "7k/p2q3p/3PR2P/Ppr1b1p1/5p2/1Q3P2/KP3P2/8 w - - 3 31",
+   "moves": [
+    "e6e5",
+    "c5e5",
+    "b3c3",
+    "d7e6",
+    "a2b1",
+    "b5b4"
+   ],
+   "rating": 2862,
+   "rating_deviation": 89,
+   "plays": 329,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "endgame",
+    "hangingPiece",
+    "long"
+   ],
+   "url": "https://lichess.org/training/4tiMB",
+   "number": 11
+  },
+  {
+   "id": "BirM5",
+   "fen": "2r3k1/4b3/p3Pp1p/1p3qp1/3B2R1/6QP/PPr2PP1/4R1K1 w - - 0 30",
+   "moves": [
+    "h3h4",
+    "c2c1",
+    "e1c1",
+    "c8c1",
+    "g1h2",
+    "f5e6"
+   ],
+   "rating": 2862,
+   "rating_deviation": 90,
+   "plays": 2303,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "long",
+    "middlegame"
+   ],
+   "url": "https://lichess.org/training/BirM5",
+   "number": 12
+  },
+  {
+   "id": "FbTgr",
+   "fen": "8/4B3/4n3/2Pk1p1p/4pP1P/2K3P1/8/8 w - - 14 60",
+   "moves": [
+    "c3b4",
+    "e4e3",
+    "b4c3",
+    "d5e4",
+    "c5c6",
+    "e6d4"
+   ],
+   "rating": 2862,
+   "rating_deviation": 89,
+   "plays": 560,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "endgame",
+    "long"
+   ],
+   "url": "https://lichess.org/training/FbTgr",
+   "number": 13
+  },
+  {
+   "id": "MAzYp",
+   "fen": "1r5r/2q2pkp/p1p1bN2/3p2pQ/3P1b2/2N5/PPR2PPP/4R1K1 b - - 1 22",
+   "moves": [
+    "g7f6",
+    "h5h6",
+    "f6e7",
+    "c3d5",
+    "c6d5",
+    "e1e6",
+    "f7e6",
+    "h6g7"
+   ],
+   "rating": 2862,
+   "rating_deviation": 86,
+   "plays": 2132,
+   "popularity": 93,
+   "themes": [
+    "crushing",
+    "middlegame",
+    "pin",
+    "sacrifice",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/MAzYp",
+   "number": 14
+  },
+  {
+   "id": "KTC03",
+   "fen": "4rr2/p6k/1p3P2/3P3p/1PP2P2/RQ2p1P1/4Pn2/2R2KNq w - - 3 29",
+   "moves": [
+    "b3c2",
+    "h7h6",
+    "c2f5",
+    "f2e4",
+    "a3e3",
+    "e4d2",
+    "f1e1",
+    "h1g1",
+    "e1d2",
+    "g1e3"
+   ],
+   "rating": 2863,
+   "rating_deviation": 90,
+   "plays": 561,
+   "popularity": 95,
+   "themes": [
+    "advantage",
+    "defensiveMove",
+    "deflection",
+    "fork",
+    "middlegame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/KTC03",
+   "number": 15
+  },
+  {
+   "id": "Qtxy5",
+   "fen": "4q1k1/5pp1/1Q5p/7b/8/B4P2/PPr3PP/3R2K1 w - - 0 27",
+   "moves": [
+    "g2g4",
+    "e8e5",
+    "b6d8",
+    "g8h7",
+    "d8d3",
+    "h5g6"
+   ],
+   "rating": 2863,
+   "rating_deviation": 89,
+   "plays": 349,
+   "popularity": 94,
+   "themes": [
+    "advantage",
+    "endgame",
+    "long"
+   ],
+   "url": "https://lichess.org/training/Qtxy5",
+   "number": 16
+  },
+  {
+   "id": "8k4w8",
+   "fen": "8/5k1p/5p2/7K/6P1/7P/8/8 w - - 2 42",
+   "moves": [
+    "g4g5",
+    "f6f5",
+    "g5g6",
+    "h7g6",
+    "h5g5",
+    "f7e7",
+    "h3h4",
+    "e7e6",
+    "g5f4",
+    "e6f6"
+   ],
+   "rating": 2864,
+   "rating_deviation": 88,
+   "plays": 550,
+   "popularity": 96,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "master",
+    "pawnEndgame",
+    "quietMove",
+    "veryLong",
+    "zugzwang"
+   ],
+   "url": "https://lichess.org/training/8k4w8",
+   "number": 17
+  },
+  {
+   "id": "9CdaR",
+   "fen": "5r1k/6q1/p6p/2R3b1/1P6/P4B1Q/3r4/6RK b - - 1 37",
+   "moves": [
+    "d2d3",
+    "c5g5",
+    "d3f3",
+    "h3h2",
+    "g7g5",
+    "g1g5"
+   ],
+   "rating": 2865,
+   "rating_deviation": 87,
+   "plays": 606,
+   "popularity": 96,
+   "themes": [
+    "crushing",
+    "long",
+    "middlegame",
+    "pin"
+   ],
+   "url": "https://lichess.org/training/9CdaR",
+   "number": 18
+  },
+  {
+   "id": "E6Rwr",
+   "fen": "7k/pp6/8/3P1KP1/7P/1P2r1P1/P2np3/4R3 w - - 1 35",
+   "moves": [
+    "f5f4",
+    "e3f3",
+    "f4e5",
+    "f3f8",
+    "e1e2",
+    "f8e8"
+   ],
+   "rating": 2865,
+   "rating_deviation": 88,
+   "plays": 1352,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "endgame",
+    "long",
+    "quietMove"
+   ],
+   "url": "https://lichess.org/training/E6Rwr",
+   "number": 19
+  },
+  {
+   "id": "5WATW",
+   "fen": "8/8/1p1k4/pP2p1pp/P1K1Pp2/5P1P/2Nb2P1/8 b - - 3 54",
+   "moves": [
+    "d2e3",
+    "h3h4",
+    "e3c5",
+    "h4g5"
+   ],
+   "rating": 2866,
+   "rating_deviation": 86,
+   "plays": 722,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "endgame",
+    "short"
+   ],
+   "url": "https://lichess.org/training/5WATW",
+   "number": 20
+  },
+  {
+   "id": "9PfF1",
+   "fen": "r3q3/1b2bkpQ/pn2p3/1p1pPrp1/3P4/2P1BN1R/PP5P/5RK1 b - - 7 22",
+   "moves": [
+    "e8g8",
+    "f3g5",
+    "e7g5",
+    "f1f5",
+    "e6f5",
+    "h7f5",
+    "g5f6",
+    "h3h7",
+    "g8h7",
+    "f5h7"
+   ],
+   "rating": 2866,
+   "rating_deviation": 90,
+   "plays": 485,
+   "popularity": 96,
+   "themes": [
+    "advantage",
+    "discoveredAttack",
+    "fork",
+    "middlegame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/9PfF1",
+   "number": 21
+  },
+  {
+   "id": "OimiZ",
+   "fen": "5rk1/pb3ppp/1p2p2q/8/2PB2n1/P2B1Nb1/4QPK1/2R2R2 w - - 0 21",
+   "moves": [
+    "g2g3",
+    "b7f3",
+    "d4g7",
+    "g8g7",
+    "e2b2",
+    "f7f6",
+    "g3f3",
+    "g4e5",
+    "f3e2",
+    "h6h5",
+    "e2d2",
+    "f8d8"
+   ],
+   "rating": 2867,
+   "rating_deviation": 90,
+   "plays": 342,
+   "popularity": 98,
+   "themes": [
+    "advantage",
+    "exposedKing",
+    "fork",
+    "middlegame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/OimiZ",
+   "number": 22
+  },
+  {
+   "id": "PHDgC",
+   "fen": "8/8/8/2R5/pr6/4K3/Pk6/8 w - - 6 49",
+   "moves": [
+    "c5a5",
+    "b2a2",
+    "a5c5",
+    "a2b2",
+    "e3d2",
+    "b4d4"
+   ],
+   "rating": 2867,
+   "rating_deviation": 88,
+   "plays": 374,
+   "popularity": 100,
+   "themes": [
+    "crushing",
+    "endgame",
+    "long",
+    "rookEndgame"
+   ],
+   "url": "https://lichess.org/training/PHDgC",
+   "number": 23
+  },
+  {
+   "id": "PQiA9",
+   "fen": "6k1/pp3q1p/2r5/5PP1/4N3/2Pnp3/P6Q/1K5R b - - 0 31",
+   "moves": [
+    "c6b6",
+    "b1a1",
+    "e3e2",
+    "g5g6",
+    "b6g6",
+    "h2e2"
+   ],
+   "rating": 2867,
+   "rating_deviation": 90,
+   "plays": 637,
+   "popularity": 93,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "long",
+    "master"
+   ],
+   "url": "https://lichess.org/training/PQiA9",
+   "number": 24
+  },
+  {
+   "id": "LXdPF",
+   "fen": "1r4k1/pr1Pbppp/3p4/q3p2P/8/P2QBP2/1PP3P1/2KR1BNR w - - 1 18",
+   "moves": [
+    "e3d2",
+    "b7b2",
+    "d2b4",
+    "b8b4",
+    "a3b4",
+    "a5b4",
+    "d3b3",
+    "b2b3"
+   ],
+   "rating": 2868,
+   "rating_deviation": 88,
+   "plays": 433,
+   "popularity": 93,
+   "themes": [
+    "advantage",
+    "middlegame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/LXdPF",
+   "number": 25
+  },
+  {
+   "id": "NGjJe",
+   "fen": "4RQ2/1p1r2p1/p4p2/8/1P1qpkP1/P6P/5PK1/8 b - - 2 41",
+   "moves": [
+    "d4d3",
+    "f8c5",
+    "d3f3",
+    "g2h2",
+    "d7d5",
+    "c5c7",
+    "d5e5",
+    "c7e5",
+    "f6e5",
+    "e8f8",
+    "f4g5",
+    "f8f3",
+    "e4f3",
+    "h2g3"
+   ],
+   "rating": 2868,
+   "rating_deviation": 89,
+   "plays": 823,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "quietMove",
+    "sacrifice",
+    "skewer",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/NGjJe",
+   "number": 26
+  },
+  {
+   "id": "3hcAU",
+   "fen": "2r5/1p2pk1p/1q4p1/5p2/pPr5/P7/Q4RPP/2R3K1 b - - 1 30",
+   "moves": [
+    "b6b5",
+    "f2f4",
+    "b5b6",
+    "g1f1",
+    "b6e6",
+    "c1c4",
+    "b7b5",
+    "c4c2",
+    "e6a2",
+    "c2a2"
+   ],
+   "rating": 2869,
+   "rating_deviation": 88,
+   "plays": 567,
+   "popularity": 91,
+   "themes": [
+    "advantage",
+    "collinearMove",
+    "defensiveMove",
+    "endgame",
+    "pin",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/3hcAU",
+   "number": 27
+  },
+  {
+   "id": "CDgXR",
+   "fen": "r4rk1/1R3p1p/p2p2p1/8/2BP4/PQ2P3/5Pqn/2B1KR2 w - - 0 20",
+   "moves": [
+    "c4f7",
+    "g8h8",
+    "f7c4",
+    "d6d5",
+    "b7h7",
+    "h8h7"
+   ],
+   "rating": 2869,
+   "rating_deviation": 87,
+   "plays": 721,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "defensiveMove",
+    "long",
+    "middlegame"
+   ],
+   "url": "https://lichess.org/training/CDgXR",
+   "number": 28
+  },
+  {
+   "id": "NLcyN",
+   "fen": "r3r1k1/pppb1pPp/6n1/6B1/2p1N3/5Q2/P3R1K1/1q6 b - - 0 29",
+   "moves": [
+    "g8g7",
+    "f3f6",
+    "g7g8",
+    "g5h6",
+    "g6h4",
+    "g2h2",
+    "h4f3",
+    "h2g3",
+    "b1g1",
+    "e2g2",
+    "g1g2",
+    "g3g2",
+    "f3h4",
+    "f6h4"
+   ],
+   "rating": 2869,
+   "rating_deviation": 90,
+   "plays": 532,
+   "popularity": 99,
+   "themes": [
+    "crushing",
+    "middlegame",
+    "quietMove",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/NLcyN",
+   "number": 29
+  },
+  {
+   "id": "9Ccfb",
+   "fen": "5k2/p5p1/1p4Pp/5P2/2Pp4/P2K4/1P6/8 b - - 1 32",
+   "moves": [
+    "h6h5",
+    "b2b4",
+    "f8e7",
+    "c4c5",
+    "h5h4",
+    "c5c6",
+    "h4h3",
+    "c6c7",
+    "h3h2",
+    "c7c8q",
+    "h2h1q",
+    "c8e6"
+   ],
+   "rating": 2870,
+   "rating_deviation": 90,
+   "plays": 1241,
+   "popularity": 92,
+   "themes": [
+    "advancedPawn",
+    "crushing",
+    "endgame",
+    "pawnEndgame",
+    "promotion",
+    "quietMove",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/9Ccfb",
+   "number": 30
+  },
+  {
+   "id": "2zwD3",
+   "fen": "R7/1q1nrk1p/1p1p2p1/1PpPP3/6PP/2B2K2/Q7/8 b - - 0 50",
+   "moves": [
+    "d7e5",
+    "c3e5",
+    "d6e5",
+    "f3e4",
+    "f7g7",
+    "a2a6"
+   ],
+   "rating": 2871,
+   "rating_deviation": 90,
+   "plays": 857,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "endgame",
+    "long"
+   ],
+   "url": "https://lichess.org/training/2zwD3",
+   "number": 31
+  },
+  {
+   "id": "QH4lw",
+   "fen": "8/8/pp1pk1pp/2p5/1PP2K2/P1P4P/6P1/8 w - - 2 33",
+   "moves": [
+    "g2g4",
+    "c5b4",
+    "c3b4",
+    "b6b5"
+   ],
+   "rating": 2871,
+   "rating_deviation": 90,
+   "plays": 2122,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "endgame",
+    "pawnEndgame",
+    "short"
+   ],
+   "url": "https://lichess.org/training/QH4lw",
+   "number": 32
+  },
+  {
+   "id": "6jcSO",
+   "fen": "8/5p2/2Nnkp2/3p3p/7P/3KPPP1/8/8 b - - 4 50",
+   "moves": [
+    "d6f5",
+    "c6d4",
+    "f5d4",
+    "e3d4",
+    "f6f5",
+    "d3c3",
+    "e6d6",
+    "c3b4",
+    "d6c6",
+    "b4a5"
+   ],
+   "rating": 2873,
+   "rating_deviation": 90,
+   "plays": 399,
+   "popularity": 98,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "knightEndgame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/6jcSO",
+   "number": 33
+  },
+  {
+   "id": "6AKs4",
+   "fen": "4r3/ppq3kp/2p3b1/6p1/3PB2n/P3P1pP/1PQN1P2/R2R2K1 w - - 0 30",
+   "moves": [
+    "e4g6",
+    "g3f2",
+    "g1f1",
+    "c7h2",
+    "c2e4",
+    "h7g6"
+   ],
+   "rating": 2874,
+   "rating_deviation": 89,
+   "plays": 595,
+   "popularity": 95,
+   "themes": [
+    "advancedPawn",
+    "clearance",
+    "crushing",
+    "long",
+    "middlegame"
+   ],
+   "url": "https://lichess.org/training/6AKs4",
+   "number": 34
+  },
+  {
+   "id": "IRRDX",
+   "fen": "8/8/2k1p3/ppp1Pp2/2P2P2/1P2K3/P7/8 b - - 1 40",
+   "moves": [
+    "a5a4",
+    "c4b5",
+    "c6b5",
+    "b3a4",
+    "b5a4",
+    "e3d2",
+    "a4b4",
+    "d2d3"
+   ],
+   "rating": 2875,
+   "rating_deviation": 90,
+   "plays": 786,
+   "popularity": 93,
+   "themes": [
+    "attraction",
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "pawnEndgame",
+    "veryLong",
+    "zugzwang"
+   ],
+   "url": "https://lichess.org/training/IRRDX",
+   "number": 35
+  },
+  {
+   "id": "991bd",
+   "fen": "1k3r1r/8/p1qb4/1pp3Q1/5PP1/2PPB2p/PP5P/3R1RK1 w - - 0 25",
+   "moves": [
+    "d1d2",
+    "f8e8",
+    "f1e1",
+    "h8g8",
+    "g5f5",
+    "c6f3",
+    "g4g5",
+    "e8e3"
+   ],
+   "rating": 2876,
+   "rating_deviation": 88,
+   "plays": 2377,
+   "popularity": 91,
+   "themes": [
+    "advantage",
+    "middlegame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/991bd",
+   "number": 36
+  },
+  {
+   "id": "FJ7Em",
+   "fen": "4r3/5kp1/2q2n1p/2p2P2/2Ppp3/6Q1/6PP/2B2RK1 b - - 0 38",
+   "moves": [
+    "c6a4",
+    "c1h6",
+    "g7h6",
+    "g3g6",
+    "f7e7",
+    "g6g7"
+   ],
+   "rating": 2876,
+   "rating_deviation": 87,
+   "plays": 371,
+   "popularity": 91,
+   "themes": [
+    "crushing",
+    "endgame",
+    "long",
+    "sacrifice"
+   ],
+   "url": "https://lichess.org/training/FJ7Em",
+   "number": 37
+  },
+  {
+   "id": "RzFw6",
+   "fen": "8/p7/8/1pp5/3k4/1P6/P1P5/2K5 w - - 0 50",
+   "moves": [
+    "c1b2",
+    "c5c4",
+    "c2c3",
+    "d4d3"
+   ],
+   "rating": 2876,
+   "rating_deviation": 88,
+   "plays": 518,
+   "popularity": 95,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "pawnEndgame",
+    "short"
+   ],
+   "url": "https://lichess.org/training/RzFw6",
+   "number": 38
+  },
+  {
+   "id": "GLLd8",
+   "fen": "8/5p2/6kp/1p4p1/1Qp4P/PqP2PK1/6P1/8 w - - 1 44",
+   "moves": [
+    "h4g5",
+    "b3b4",
+    "a3b4",
+    "g6g5",
+    "g3f2",
+    "h6h5",
+    "g2g3",
+    "f7f5",
+    "f3f4",
+    "g5g4",
+    "f2g2",
+    "h5h4",
+    "g3h4",
+    "g4h4",
+    "g2f3",
+    "h4h3"
+   ],
+   "rating": 2878,
+   "rating_deviation": 89,
+   "plays": 653,
+   "popularity": 93,
+   "themes": [
+    "crushing",
+    "endgame",
+    "intermezzo",
+    "queenEndgame",
+    "quietMove",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/GLLd8",
+   "number": 39
+  },
+  {
+   "id": "HY2Gc",
+   "fen": "r1b2kr1/pp3p2/2n2Q1R/1B2p1P1/4q3/2P5/P4PP1/4RK2 b - - 4 23",
+   "moves": [
+    "e4f5",
+    "f6d6",
+    "f8g7",
+    "b5d3",
+    "g8d8",
+    "d3f5",
+    "d8d6",
+    "f5c8",
+    "a8c8",
+    "h6d6"
+   ],
+   "rating": 2878,
+   "rating_deviation": 84,
+   "plays": 1491,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "middlegame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/HY2Gc",
+   "number": 40
+  },
+  {
+   "id": "CKBVx",
+   "fen": "1k1r4/p2n2pp/1p6/1P1Q4/3P4/1KPq2P1/P2N1r2/3R3R w - - 1 30",
+   "moves": [
+    "d2c4",
+    "d7c5",
+    "d4c5",
+    "d3c2",
+    "b3b4",
+    "d8d5",
+    "d1d5",
+    "f2f3",
+    "c5b6",
+    "a7b6"
+   ],
+   "rating": 2880,
+   "rating_deviation": 90,
+   "plays": 326,
+   "popularity": 86,
+   "themes": [
+    "advantage",
+    "middlegame",
+    "sacrifice",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/CKBVx",
+   "number": 41
+  },
+  {
+   "id": "1SkIM",
+   "fen": "r5k1/7p/p1n2p2/5QpP/2RP2P1/P3P3/3K1Pq1/8 b - - 0 31",
+   "moves": [
+    "a8b8",
+    "f5e6",
+    "g8g7",
+    "h5h6",
+    "g7g6",
+    "e6f5",
+    "g6f7",
+    "d4d5",
+    "g2f2",
+    "f5f2"
+   ],
+   "rating": 2883,
+   "rating_deviation": 88,
+   "plays": 1660,
+   "popularity": 91,
+   "themes": [
+    "crushing",
+    "endgame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/1SkIM",
+   "number": 42
+  },
+  {
+   "id": "6g5Ft",
+   "fen": "r3rNk1/1b2bn1p/3p2p1/6P1/1p2PB1Q/1p5R/Pq4BP/5RK1 b - - 0 25",
+   "moves": [
+    "g8f8",
+    "f4e5",
+    "b2e5",
+    "h4h7",
+    "e7f6",
+    "g5f6"
+   ],
+   "rating": 2883,
+   "rating_deviation": 90,
+   "plays": 629,
+   "popularity": 93,
+   "themes": [
+    "advantage",
+    "long",
+    "middlegame",
+    "pin",
+    "sacrifice"
+   ],
+   "url": "https://lichess.org/training/6g5Ft",
+   "number": 43
+  },
+  {
+   "id": "TQePs",
+   "fen": "r5k1/ppp3pp/3p4/2bN4/3nP1nq/2PP4/PP1Q1PKP/R1B2R2 w - - 1 16",
+   "moves": [
+    "f1h1",
+    "a8f8",
+    "f2f4",
+    "d4f3",
+    "g2f3",
+    "g4e5"
+   ],
+   "rating": 2883,
+   "rating_deviation": 88,
+   "plays": 519,
+   "popularity": 100,
+   "themes": [
+    "attraction",
+    "crushing",
+    "long",
+    "middlegame",
+    "pin",
+    "sacrifice"
+   ],
+   "url": "https://lichess.org/training/TQePs",
+   "number": 44
+  },
+  {
+   "id": "MU2pg",
+   "fen": "r1b5/3k2p1/p1q1pr2/1pB4Q/3R4/P1n4P/2P3P1/R5K1 b - - 3 24",
+   "moves": [
+    "d7c7",
+    "h5e5",
+    "c7b7",
+    "d4d6",
+    "c3e2",
+    "g1h1"
+   ],
+   "rating": 2884,
+   "rating_deviation": 90,
+   "plays": 581,
+   "popularity": 95,
+   "themes": [
+    "advantage",
+    "defensiveMove",
+    "long",
+    "middlegame"
+   ],
+   "url": "https://lichess.org/training/MU2pg",
+   "number": 45
+  },
+  {
+   "id": "58wZ8",
+   "fen": "1r6/8/P7/4k3/1P6/4PRp1/4Kb2/8 b - - 2 69",
+   "moves": [
+    "g3g2",
+    "e2f2",
+    "b8b4",
+    "f3f8",
+    "g2g1b",
+    "f2g1"
+   ],
+   "rating": 2885,
+   "rating_deviation": 89,
+   "plays": 318,
+   "popularity": 94,
+   "themes": [
+    "crushing",
+    "endgame",
+    "long",
+    "quietMove"
+   ],
+   "url": "https://lichess.org/training/58wZ8",
+   "number": 46
+  },
+  {
+   "id": "Kwy9J",
+   "fen": "8/p4pk1/4pn2/7p/3Q2pP/1N6/PPbR1PPK/4q3 b - - 6 35",
+   "moves": [
+    "c2b3",
+    "a2b3",
+    "g4g3",
+    "f2g3",
+    "e6e5",
+    "d2d1",
+    "e1e2",
+    "d4d2",
+    "f6g4",
+    "h2g1"
+   ],
+   "rating": 2885,
+   "rating_deviation": 88,
+   "plays": 1201,
+   "popularity": 91,
+   "themes": [
+    "clearance",
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/Kwy9J",
+   "number": 47
+  },
+  {
+   "id": "L8t46",
+   "fen": "7k/6p1/Q2p3p/2q4r/8/1P2K1P1/P4P2/4R3 w - - 3 38",
+   "moves": [
+    "e3e2",
+    "c5e5",
+    "e2f3",
+    "e5e1",
+    "a6c8",
+    "h8h7"
+   ],
+   "rating": 2885,
+   "rating_deviation": 90,
+   "plays": 334,
+   "popularity": 100,
+   "themes": [
+    "crushing",
+    "deflection",
+    "endgame",
+    "long",
+    "skewer"
+   ],
+   "url": "https://lichess.org/training/L8t46",
+   "number": 48
+  },
+  {
+   "id": "K08po",
+   "fen": "2rr2k1/2q2pb1/p2p3p/1p3Pp1/2n1n1PP/2NQ2B1/PPP1B3/2KR3R w - - 3 23",
+   "moves": [
+    "d3e4",
+    "d8e8",
+    "e4f3",
+    "c4b2"
+   ],
+   "rating": 2886,
+   "rating_deviation": 89,
+   "plays": 525,
+   "popularity": 93,
+   "themes": [
+    "advantage",
+    "middlegame",
+    "short"
+   ],
+   "url": "https://lichess.org/training/K08po",
+   "number": 49
+  },
+  {
+   "id": "L4GhP",
+   "fen": "8/4B3/2b5/5p1p/3Pp1pP/1pk1P1P1/5P2/2K5 w - - 2 62",
+   "moves": [
+    "e7a3",
+    "c6d5",
+    "a3b2",
+    "c3d3",
+    "c1d1",
+    "f5f4"
+   ],
+   "rating": 2886,
+   "rating_deviation": 89,
+   "plays": 551,
+   "popularity": 93,
+   "themes": [
+    "bishopEndgame",
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "long",
+    "quietMove",
+    "zugzwang"
+   ],
+   "url": "https://lichess.org/training/L4GhP",
+   "number": 50
+  },
+  {
+   "id": "Dppkf",
+   "fen": "2k4r/Bp1b1pp1/4p1p1/3pP1qr/8/2P4P/PP3PP1/R2QR1K1 w - - 1 19",
+   "moves": [
+    "g1h2",
+    "h5h3",
+    "g2h3",
+    "g5f5",
+    "d1d3",
+    "f5d3"
+   ],
+   "rating": 2888,
+   "rating_deviation": 89,
+   "plays": 513,
+   "popularity": 96,
+   "themes": [
+    "crushing",
+    "long",
+    "middlegame",
+    "sacrifice"
+   ],
+   "url": "https://lichess.org/training/Dppkf",
+   "number": 51
+  },
+  {
+   "id": "5eNvE",
+   "fen": "8/8/5Qp1/7p/P2p1k2/7P/2q5/6K1 b - - 3 54",
+   "moves": [
+    "c2f5",
+    "f6d4",
+    "f5e4",
+    "d4e4",
+    "f4e4",
+    "h3h4"
+   ],
+   "rating": 2889,
+   "rating_deviation": 90,
+   "plays": 336,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "long",
+    "queenEndgame"
+   ],
+   "url": "https://lichess.org/training/5eNvE",
+   "number": 52
+  },
+  {
+   "id": "ArDHb",
+   "fen": "4R3/2q2kp1/1pPr1p1p/2p5/P5Q1/5P2/4K1PP/8 w - - 11 40",
+   "moves": [
+    "e8c8",
+    "c7e7",
+    "e2f2",
+    "d6d2",
+    "f2g3",
+    "d2d4",
+    "g4h5",
+    "g7g6",
+    "h5h6",
+    "e7e1",
+    "g3h3",
+    "e1e6",
+    "g2g4",
+    "e6c8",
+    "h6h7",
+    "f7e6"
+   ],
+   "rating": 2889,
+   "rating_deviation": 89,
+   "plays": 342,
+   "popularity": 86,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "fork",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/ArDHb",
+   "number": 53
+  },
+  {
+   "id": "KR4dL",
+   "fen": "8/2k1rp2/2p2n2/1pP5/1P2PK2/3P1N2/4B3/8 b - - 2 39",
+   "moves": [
+    "f6d5",
+    "e4d5",
+    "e7e2",
+    "f3d4",
+    "e2f2",
+    "f4e3",
+    "f2h2",
+    "d4c6"
+   ],
+   "rating": 2889,
+   "rating_deviation": 84,
+   "plays": 1573,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "endgame",
+    "master",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/KR4dL",
+   "number": 54
+  },
+  {
+   "id": "7TwED",
+   "fen": "r5k1/1q3pp1/7p/2Rp4/r2Q4/1P3P2/1KPR2PP/8 w - - 0 50",
+   "moves": [
+    "d4d5",
+    "b7b4",
+    "c2c3",
+    "b4a3",
+    "b2c2",
+    "a3a2",
+    "c2d3",
+    "a2b1"
+   ],
+   "rating": 2890,
+   "rating_deviation": 89,
+   "plays": 415,
+   "popularity": 85,
+   "themes": [
+    "advantage",
+    "endgame",
+    "master",
+    "pin",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/7TwED",
+   "number": 55
+  },
+  {
+   "id": "M1SCN",
+   "fen": "r3r1k1/ppp2ppp/5b1B/2n1qN2/6Q1/2P5/PP4PP/R4RK1 b - - 0 17",
+   "moves": [
+    "c5e4",
+    "f5g7",
+    "f6g7",
+    "f1f5",
+    "g8h8",
+    "f5e5"
+   ],
+   "rating": 2890,
+   "rating_deviation": 90,
+   "plays": 2696,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "long",
+    "middlegame",
+    "pin",
+    "sacrifice"
+   ],
+   "url": "https://lichess.org/training/M1SCN",
+   "number": 56
+  },
+  {
+   "id": "0VS55",
+   "fen": "8/p1Q3pk/1p3R1p/4r3/3p4/3P3P/qPP3PK/8 b - - 0 34",
+   "moves": [
+    "a2b2",
+    "c7f7",
+    "e5g5",
+    "h3h4",
+    "g5g2",
+    "h2g2"
+   ],
+   "rating": 2892,
+   "rating_deviation": 88,
+   "plays": 650,
+   "popularity": 95,
+   "themes": [
+    "crushing",
+    "endgame",
+    "long",
+    "pin"
+   ],
+   "url": "https://lichess.org/training/0VS55",
+   "number": 57
+  },
+  {
+   "id": "PW4pd",
+   "fen": "6r1/1p1k1pbp/p3p3/3pPp2/5P2/BP4QP/P2q2P1/2R3K1 b - - 4 26",
+   "moves": [
+    "d2a2",
+    "a3d6",
+    "g7e5",
+    "g3g8",
+    "e5d6",
+    "g8f7"
+   ],
+   "rating": 2892,
+   "rating_deviation": 86,
+   "plays": 768,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "endgame",
+    "long",
+    "quietMove"
+   ],
+   "url": "https://lichess.org/training/PW4pd",
+   "number": 58
+  },
+  {
+   "id": "TrZlZ",
+   "fen": "8/8/3r3P/1pk5/8/4K3/P1p5/7R w - - 0 51",
+   "moves": [
+    "e3e2",
+    "c5b4",
+    "h6h7",
+    "d6d8",
+    "h1c1",
+    "b4c3"
+   ],
+   "rating": 2892,
+   "rating_deviation": 90,
+   "plays": 393,
+   "popularity": 93,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "long",
+    "quietMove",
+    "rookEndgame"
+   ],
+   "url": "https://lichess.org/training/TrZlZ",
+   "number": 59
+  },
+  {
+   "id": "OgrZE",
+   "fen": "8/5N1p/2k1p1pP/p2pP1P1/n2K1P2/8/8/8 b - - 0 59",
+   "moves": [
+    "c6b5",
+    "f4f5",
+    "e6f5",
+    "e5e6",
+    "b5c6",
+    "f7e5",
+    "c6d6",
+    "e5g6"
+   ],
+   "rating": 2893,
+   "rating_deviation": 90,
+   "plays": 726,
+   "popularity": 93,
+   "themes": [
+    "crushing",
+    "endgame",
+    "knightEndgame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/OgrZE",
+   "number": 60
+  },
+  {
+   "id": "JxCbs",
+   "fen": "2k5/1pp4R/6nP/1p3K2/8/3r2P1/1P1P4/8 b - - 4 34",
+   "moves": [
+    "d3g3",
+    "h7g7",
+    "g6h4",
+    "f5e6",
+    "g3g6",
+    "g7g6",
+    "h4g6",
+    "e6f7"
+   ],
+   "rating": 2894,
+   "rating_deviation": 90,
+   "plays": 663,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/JxCbs",
+   "number": 61
+  },
+  {
+   "id": "6JS4s",
+   "fen": "6k1/pp4p1/4p3/1P1pP3/P1np1r1q/2PQ1PRp/5K1P/6R1 w - - 0 32",
+   "moves": [
+    "d3g6",
+    "f4f3",
+    "f2e2",
+    "d4d3",
+    "e2d1",
+    "c4e3",
+    "d1c1",
+    "f3g3"
+   ],
+   "rating": 2896,
+   "rating_deviation": 89,
+   "plays": 438,
+   "popularity": 94,
+   "themes": [
+    "advantage",
+    "endgame",
+    "pin",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/6JS4s",
+   "number": 62
+  },
+  {
+   "id": "Fzr8V",
+   "fen": "4k1r1/nN3p2/4p3/pP1p1p1p/P2P3q/2R1P1r1/3Q2B1/1R4K1 w - - 0 30",
+   "moves": [
+    "b5b6",
+    "g3h3",
+    "g1f1",
+    "h3h1",
+    "g2h1",
+    "h4h1",
+    "f1e2",
+    "g8g2",
+    "e2d3",
+    "h1b1"
+   ],
+   "rating": 2896,
+   "rating_deviation": 90,
+   "plays": 494,
+   "popularity": 94,
+   "themes": [
+    "crushing",
+    "exposedKing",
+    "kingsideAttack",
+    "master",
+    "middlegame",
+    "pin",
+    "sacrifice",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/Fzr8V",
+   "number": 63
+  },
+  {
+   "id": "9y7D5",
+   "fen": "8/5k2/p6p/1p2p3/1P1p4/P5PP/2P3K1/8 b - - 0 32",
+   "moves": [
+    "f7f6",
+    "g2f3",
+    "f6f5",
+    "g3g4",
+    "f5g5",
+    "f3e4",
+    "g5h4",
+    "e4e5",
+    "h4h3",
+    "e5d4",
+    "h3g4",
+    "c2c4",
+    "g4f5",
+    "c4c5"
+   ],
+   "rating": 2899,
+   "rating_deviation": 90,
+   "plays": 1383,
+   "popularity": 91,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "pawnEndgame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/9y7D5",
+   "number": 64
+  },
+  {
+   "id": "R6AvB",
+   "fen": "5r1k/6pp/2R5/p2Q1p2/PpBP4/4p1P1/1P3K1P/2q5 w - - 0 35",
+   "moves": [
+    "f2f3",
+    "c1g1",
+    "f3f4",
+    "g1f2",
+    "f4e5",
+    "e3e2"
+   ],
+   "rating": 2899,
+   "rating_deviation": 90,
+   "plays": 351,
+   "popularity": 93,
+   "themes": [
+    "advancedPawn",
+    "crushing",
+    "endgame",
+    "long"
+   ],
+   "url": "https://lichess.org/training/R6AvB",
+   "number": 65
+  },
+  {
+   "id": "EtdUK",
+   "fen": "8/4k3/6P1/6K1/P5n1/8/8/8 b - - 4 62",
+   "moves": [
+    "g4f2",
+    "g6g7",
+    "e7f7",
+    "a4a5"
+   ],
+   "rating": 2900,
+   "rating_deviation": 89,
+   "plays": 446,
+   "popularity": 94,
+   "themes": [
+    "advancedPawn",
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "knightEndgame",
+    "short"
+   ],
+   "url": "https://lichess.org/training/EtdUK",
+   "number": 66
+  },
+  {
+   "id": "NvlbZ",
+   "fen": "rnb3k1/pp4b1/2pP3p/4P1B1/6PK/2q2N2/P5P1/5Q1R b - - 0 22",
+   "moves": [
+    "h6g5",
+    "f3g5",
+    "c8e6",
+    "f1b1",
+    "c3e5",
+    "b1h7",
+    "g8f8",
+    "h1f1",
+    "f8e8",
+    "h7g6",
+    "e8d7",
+    "g5e6"
+   ],
+   "rating": 2901,
+   "rating_deviation": 90,
+   "plays": 1950,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "exposedKing",
+    "middlegame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/NvlbZ",
+   "number": 67
+  },
+  {
+   "id": "2CrMT",
+   "fen": "2r1k2r/3bbp1P/p2pp1p1/4q3/1p1NPB2/1P3R2/1QP2P2/3K3R b k - 4 26",
+   "moves": [
+    "e5c5",
+    "d4e6",
+    "e7f6",
+    "e6c5",
+    "f6b2",
+    "c5d7"
+   ],
+   "rating": 2903,
+   "rating_deviation": 89,
+   "plays": 514,
+   "popularity": 95,
+   "themes": [
+    "advantage",
+    "long",
+    "middlegame"
+   ],
+   "url": "https://lichess.org/training/2CrMT",
+   "number": 68
+  },
+  {
+   "id": "8INxk",
+   "fen": "6k1/2p2p2/3b2pp/8/3Q2R1/2P1PB1P/rrq2PP1/5RK1 w - - 0 26",
+   "moves": [
+    "f3d5",
+    "a2a1",
+    "d5f7",
+    "g8f8",
+    "d4d6",
+    "c7d6"
+   ],
+   "rating": 2904,
+   "rating_deviation": 89,
+   "plays": 612,
+   "popularity": 93,
+   "themes": [
+    "advantage",
+    "defensiveMove",
+    "long",
+    "middlegame"
+   ],
+   "url": "https://lichess.org/training/8INxk",
+   "number": 69
+  },
+  {
+   "id": "4PdPD",
+   "fen": "8/8/8/2b2p2/1pk4P/5K2/3B2P1/8 w - - 0 42",
+   "moves": [
+    "d2c1",
+    "c4c3",
+    "h4h5",
+    "c3c2",
+    "c1f4",
+    "c5d4"
+   ],
+   "rating": 2905,
+   "rating_deviation": 88,
+   "plays": 929,
+   "popularity": 93,
+   "themes": [
+    "bishopEndgame",
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "long"
+   ],
+   "url": "https://lichess.org/training/4PdPD",
+   "number": 70
+  },
+  {
+   "id": "MsaH7",
+   "fen": "7R/7P/3r4/8/8/8/3K1p2/5k2 w - - 4 63",
+   "moves": [
+    "d2e3",
+    "d6d7",
+    "e3f3",
+    "d7f7"
+   ],
+   "rating": 2905,
+   "rating_deviation": 89,
+   "plays": 674,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "endgame",
+    "master",
+    "rookEndgame",
+    "short"
+   ],
+   "url": "https://lichess.org/training/MsaH7",
+   "number": 71
+  },
+  {
+   "id": "HOdI8",
+   "fen": "1k2rb2/1P4p1/pQ5p/P1p5/3Pq1n1/2P3P1/5PP1/5RK1 b - - 6 31",
+   "moves": [
+    "e4e1",
+    "b6a6",
+    "e1e6",
+    "a6a8",
+    "b8c7",
+    "a5a6",
+    "e8b8",
+    "a6a7",
+    "b8b7",
+    "a8f8"
+   ],
+   "rating": 2906,
+   "rating_deviation": 87,
+   "plays": 728,
+   "popularity": 92,
+   "themes": [
+    "advancedPawn",
+    "advantage",
+    "endgame",
+    "exposedKing",
+    "skewer",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/HOdI8",
+   "number": 72
+  },
+  {
+   "id": "PaEtK",
+   "fen": "5B1Q/pp3p1p/q3p1pk/3pP3/8/3r4/P3nPPP/5K1R b - - 5 29",
+   "moves": [
+    "h6g5",
+    "h8f6",
+    "g5h5",
+    "f2f3",
+    "d3d1",
+    "f1f2",
+    "a6b6",
+    "f2e2",
+    "d1d2",
+    "e2d2"
+   ],
+   "rating": 2906,
+   "rating_deviation": 90,
+   "plays": 746,
+   "popularity": 94,
+   "themes": [
+    "crushing",
+    "endgame",
+    "quietMove",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/PaEtK",
+   "number": 73
+  },
+  {
+   "id": "47ckv",
+   "fen": "7R/3kq3/pp1p1B1Q/2pP1r2/2P1p1p1/P7/1P4K1/8 b - - 0 43",
+   "moves": [
+    "f5f6",
+    "h6h5",
+    "e7f7",
+    "h5g4",
+    "f6f5",
+    "h8a8"
+   ],
+   "rating": 2907,
+   "rating_deviation": 90,
+   "plays": 540,
+   "popularity": 95,
+   "themes": [
+    "crushing",
+    "endgame",
+    "long"
+   ],
+   "url": "https://lichess.org/training/47ckv",
+   "number": 74
+  },
+  {
+   "id": "MPu9q",
+   "fen": "8/2n3Kp/8/1k6/6PP/8/8/8 b - - 2 49",
+   "moves": [
+    "c7d5",
+    "h4h5",
+    "b5c4",
+    "h5h6",
+    "c4d4",
+    "g7h7"
+   ],
+   "rating": 2907,
+   "rating_deviation": 89,
+   "plays": 446,
+   "popularity": 94,
+   "themes": [
+    "crushing",
+    "endgame",
+    "knightEndgame",
+    "long",
+    "quietMove"
+   ],
+   "url": "https://lichess.org/training/MPu9q",
+   "number": 75
+  },
+  {
+   "id": "0I0gA",
+   "fen": "8/8/p1k1ppp1/1p5p/1P1PKP1P/P4P2/8/8 w - - 0 31",
+   "moves": [
+    "e4d3",
+    "c6d5",
+    "d3c3",
+    "e6e5",
+    "d4e5",
+    "f6e5",
+    "c3d2",
+    "d5d4",
+    "f4e5",
+    "d4e5",
+    "d2e3",
+    "e5f5",
+    "f3f4",
+    "f5g4"
+   ],
+   "rating": 2908,
+   "rating_deviation": 90,
+   "plays": 524,
+   "popularity": 95,
+   "themes": [
+    "crushing",
+    "endgame",
+    "pawnEndgame",
+    "veryLong",
+    "zugzwang"
+   ],
+   "url": "https://lichess.org/training/0I0gA",
+   "number": 76
+  },
+  {
+   "id": "KI3G8",
+   "fen": "3Q4/6pk/5n2/1Rp1q1p1/PpP5/1P2p1PP/5P1K/8 w - - 0 41",
+   "moves": [
+    "f2e3",
+    "f6e4",
+    "d8d3",
+    "h7h6",
+    "d3e4",
+    "e5e4"
+   ],
+   "rating": 2908,
+   "rating_deviation": 89,
+   "plays": 338,
+   "popularity": 96,
+   "themes": [
+    "crushing",
+    "endgame",
+    "long"
+   ],
+   "url": "https://lichess.org/training/KI3G8",
+   "number": 77
+  },
+  {
+   "id": "SOqSh",
+   "fen": "2k4r/1b1p2p1/ppq1p3/2b2p2/2P1PPQ1/1PN3K1/PB4P1/3R1R2 w - - 0 19",
+   "moves": [
+    "g4f3",
+    "e6e5",
+    "e4f5",
+    "e5f4",
+    "g3g4",
+    "c6f6"
+   ],
+   "rating": 2910,
+   "rating_deviation": 89,
+   "plays": 599,
+   "popularity": 94,
+   "themes": [
+    "advantage",
+    "long",
+    "middlegame"
+   ],
+   "url": "https://lichess.org/training/SOqSh",
+   "number": 78
+  },
+  {
+   "id": "K3qQl",
+   "fen": "8/5B1b/3k3P/pp1p4/2pP1P2/P1K5/8/8 w - - 0 48",
+   "moves": [
+    "c3d2",
+    "b5b4",
+    "a3b4",
+    "a5b4",
+    "f4f5",
+    "c4c3",
+    "d2c2",
+    "h7f5",
+    "c2b3",
+    "f5h7"
+   ],
+   "rating": 2915,
+   "rating_deviation": 89,
+   "plays": 339,
+   "popularity": 88,
+   "themes": [
+    "bishopEndgame",
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "exposedKing",
+    "veryLong",
+    "zugzwang"
+   ],
+   "url": "https://lichess.org/training/K3qQl",
+   "number": 79
+  },
+  {
+   "id": "1Hkik",
+   "fen": "q4rk1/4bpp1/7p/1p2PN2/3p1P2/1n1P4/1PNB2bP/3Q1RK1 b - - 0 21",
+   "moves": [
+    "b3d2",
+    "f5e7",
+    "g8h7",
+    "f1f2",
+    "f8e8",
+    "f2g2",
+    "d2f3",
+    "g1f2"
+   ],
+   "rating": 2916,
+   "rating_deviation": 90,
+   "plays": 1650,
+   "popularity": 94,
+   "themes": [
+    "advantage",
+    "hangingPiece",
+    "middlegame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/1Hkik",
+   "number": 80
+  },
+  {
+   "id": "D3uEz",
+   "fen": "8/p7/2p5/1p3pK1/1P2kP2/8/P7/8 b - - 0 40",
+   "moves": [
+    "e4d5",
+    "g5f5",
+    "c6c5",
+    "b4c5",
+    "b5b4",
+    "f5g5",
+    "a7a5",
+    "f4f5",
+    "a5a4",
+    "f5f6",
+    "b4b3",
+    "a2b3",
+    "a4b3",
+    "f6f7",
+    "b3b2",
+    "f7f8q",
+    "b2b1q",
+    "f8d6",
+    "d5c4",
+    "c5c6"
+   ],
+   "rating": 2916,
+   "rating_deviation": 89,
+   "plays": 763,
+   "popularity": 91,
+   "themes": [
+    "advancedPawn",
+    "crushing",
+    "endgame",
+    "pawnEndgame",
+    "promotion",
+    "quietMove",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/D3uEz",
+   "number": 81
+  },
+  {
+   "id": "MW85f",
+   "fen": "8/6p1/7p/8/8/p1k3P1/P3K2P/8 w - - 2 38",
+   "moves": [
+    "e2d1",
+    "c3d3",
+    "g3g4",
+    "g7g6"
+   ],
+   "rating": 2916,
+   "rating_deviation": 83,
+   "plays": 586,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "pawnEndgame",
+    "short"
+   ],
+   "url": "https://lichess.org/training/MW85f",
+   "number": 82
+  },
+  {
+   "id": "ApIaU",
+   "fen": "1r5r/2k1q1pp/4p3/Q1pp4/2pPpP1P/nB4P1/P7/K2R3R b - - 1 34",
+   "moves": [
+    "c7d6",
+    "a5c5",
+    "d6d7",
+    "c5a7",
+    "d7e8",
+    "a7b8",
+    "e8f7",
+    "b8h8"
+   ],
+   "rating": 2917,
+   "rating_deviation": 88,
+   "plays": 910,
+   "popularity": 91,
+   "themes": [
+    "advantage",
+    "fork",
+    "interference",
+    "middlegame",
+    "skewer",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/ApIaU",
+   "number": 83
+  },
+  {
+   "id": "Nuqn7",
+   "fen": "7k/4P1p1/7p/1p1Q4/3K4/1p5P/2q3P1/8 b - - 4 39",
+   "moves": [
+    "c2d2",
+    "d4e5",
+    "d2e3",
+    "d5e4",
+    "e3c5",
+    "e5e6",
+    "c5c8",
+    "e6d6",
+    "c8b8",
+    "d6d7"
+   ],
+   "rating": 2918,
+   "rating_deviation": 90,
+   "plays": 793,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "queenEndgame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/Nuqn7",
+   "number": 84
+  },
+  {
+   "id": "OrI95",
+   "fen": "8/8/1p2p1p1/p1kpPp1p/5P1P/4P3/PP3KP1/8 w - - 2 42",
+   "moves": [
+    "f2e2",
+    "c5c4",
+    "e2d2",
+    "a5a4",
+    "d2c2",
+    "d5d4",
+    "c2d2",
+    "d4d3"
+   ],
+   "rating": 2919,
+   "rating_deviation": 90,
+   "plays": 508,
+   "popularity": 92,
+   "themes": [
+    "crushing",
+    "endgame",
+    "pawnEndgame",
+    "quietMove",
+    "veryLong",
+    "zugzwang"
+   ],
+   "url": "https://lichess.org/training/OrI95",
+   "number": 85
+  },
+  {
+   "id": "BdtcN",
+   "fen": "8/6pp/5p2/4p3/1k2P2P/1p1K4/1P3PP1/8 w - - 0 37",
+   "moves": [
+    "f2f4",
+    "e5f4",
+    "d3d4",
+    "g7g6",
+    "d4d5",
+    "h7h6",
+    "d5e6",
+    "g6g5"
+   ],
+   "rating": 2922,
+   "rating_deviation": 87,
+   "plays": 648,
+   "popularity": 93,
+   "themes": [
+    "crushing",
+    "endgame",
+    "pawnEndgame",
+    "quietMove",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/BdtcN",
+   "number": 86
+  },
+  {
+   "id": "9Atgm",
+   "fen": "1r1qr3/8/pn1p2pk/3bp3/1p6/1P1B2P1/P3NN1P/2Q1R1K1 b - - 1 24",
+   "moves": [
+    "d8g5",
+    "f2g4",
+    "h6h5",
+    "g4e3",
+    "b8c8",
+    "c1d2"
+   ],
+   "rating": 2924,
+   "rating_deviation": 90,
+   "plays": 967,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "long",
+    "master",
+    "middlegame",
+    "pin"
+   ],
+   "url": "https://lichess.org/training/9Atgm",
+   "number": 87
+  },
+  {
+   "id": "KAwmX",
+   "fen": "N4b1r/q3pQp1/4PpBk/3P2p1/2p4P/8/1P1n1PP1/6K1 b - - 0 32",
+   "moves": [
+    "a7a8",
+    "g6c2",
+    "a8a1",
+    "g1h2",
+    "d2f1",
+    "h2h3",
+    "g5g4",
+    "h3g4",
+    "f6f5",
+    "f7f5",
+    "a1d1",
+    "c2d1"
+   ],
+   "rating": 2924,
+   "rating_deviation": 89,
+   "plays": 309,
+   "popularity": 97,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "quietMove",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/KAwmX",
+   "number": 88
+  },
+  {
+   "id": "FL7z6",
+   "fen": "8/5rpk/5q1p/p5n1/2P1p3/P2QB1Pn/1P3P1K/3R1R2 w - - 0 30",
+   "moves": [
+    "d3d6",
+    "f6f3",
+    "d1d5",
+    "h3f4",
+    "d6f4",
+    "f7f4",
+    "d5g5",
+    "h6g5"
+   ],
+   "rating": 2931,
+   "rating_deviation": 85,
+   "plays": 677,
+   "popularity": 91,
+   "themes": [
+    "middlegame"
+   ],
+   "url": "https://lichess.org/training/FL7z6",
+   "number": 89
+  },
+  {
+   "id": "LUb72",
+   "fen": "1b1r2k1/pQ3pp1/4q1p1/4N3/5n2/1P5P/PB4P1/2R4K w - - 0 29",
+   "moves": [
+    "e5c6",
+    "f4g2",
+    "c6d8",
+    "e6h3",
+    "h1g1",
+    "h3h2"
+   ],
+   "rating": 2936,
+   "rating_deviation": 89,
+   "plays": 510,
+   "popularity": 95,
+   "themes": [
+    "capturingDefender",
+    "crushing",
+    "long",
+    "middlegame",
+    "sacrifice"
+   ],
+   "url": "https://lichess.org/training/LUb72",
+   "number": 90
+  },
+  {
+   "id": "6JDYm",
+   "fen": "8/8/pn1kpp1p/1p4pP/1P1PP1P1/P3K3/4B3/8 b - - 4 31",
+   "moves": [
+    "b6c4",
+    "e2c4",
+    "b5c4",
+    "e4e5",
+    "f6e5",
+    "e3e4",
+    "c4c3",
+    "d4e5"
+   ],
+   "rating": 2941,
+   "rating_deviation": 90,
+   "plays": 349,
+   "popularity": 100,
+   "themes": [
+    "crushing",
+    "endgame",
+    "intermezzo",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/6JDYm",
+   "number": 91
+  },
+  {
+   "id": "Qx0mY",
+   "fen": "8/5p2/6p1/1p1k2Pp/1P5P/2P1K3/8/8 b - - 1 43",
+   "moves": [
+    "d5c4",
+    "e3d2",
+    "c4d5",
+    "d2d3",
+    "d5e6",
+    "d3d4"
+   ],
+   "rating": 2944,
+   "rating_deviation": 86,
+   "plays": 1168,
+   "popularity": 93,
+   "themes": [
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "long",
+    "pawnEndgame",
+    "zugzwang"
+   ],
+   "url": "https://lichess.org/training/Qx0mY",
+   "number": 92
+  },
+  {
+   "id": "S53f1",
+   "fen": "5rk1/ppp3bp/3p2p1/1N1P2q1/1P2Pp2/3Q3P/P1P3P1/5RK1 w - - 1 20",
+   "moves": [
+    "b5c7",
+    "f4f3",
+    "f1f2",
+    "g7e5",
+    "c7e6",
+    "g5g3",
+    "f2f3",
+    "f8f3",
+    "d3f3",
+    "g3e1",
+    "f3f1",
+    "e5h2",
+    "g1h2",
+    "e1f1"
+   ],
+   "rating": 2949,
+   "rating_deviation": 89,
+   "plays": 1992,
+   "popularity": 92,
+   "themes": [
+    "clearance",
+    "crushing",
+    "deflection",
+    "endgame",
+    "kingsideAttack",
+    "pin",
+    "quietMove",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/S53f1",
+   "number": 93
+  },
+  {
+   "id": "RZQJC",
+   "fen": "2kr3r/ppp5/4qp2/3p4/3P1Bp1/P3P3/1QP2Pb1/R4RK1 w - - 0 22",
+   "moves": [
+    "g1g2",
+    "e6e4",
+    "f2f3",
+    "g4f3",
+    "g2f2",
+    "h8h4"
+   ],
+   "rating": 2952,
+   "rating_deviation": 90,
+   "plays": 478,
+   "popularity": 93,
+   "themes": [
+    "advantage",
+    "long",
+    "middlegame"
+   ],
+   "url": "https://lichess.org/training/RZQJC",
+   "number": 94
+  },
+  {
+   "id": "8vbCT",
+   "fen": "R7/P5k1/1K6/6p1/8/8/8/r7 b - - 3 64",
+   "moves": [
+    "g5g4",
+    "a8c8",
+    "g7f6",
+    "c8c6",
+    "f6g5",
+    "c6c5",
+    "g5h4",
+    "c5a5"
+   ],
+   "rating": 2954,
+   "rating_deviation": 89,
+   "plays": 625,
+   "popularity": 91,
+   "themes": [
+    "endgame"
+   ],
+   "url": "https://lichess.org/training/8vbCT",
+   "number": 95
+  },
+  {
+   "id": "BUoYi",
+   "fen": "8/3qk1p1/3p1b1p/2pQpP2/4P3/2PP4/1R2K3/r7 b - - 4 55",
+   "moves": [
+    "a1a7",
+    "b2b8",
+    "f6h4",
+    "e2f3"
+   ],
+   "rating": 2956,
+   "rating_deviation": 89,
+   "plays": 981,
+   "popularity": 92,
+   "themes": [
+    "advantage",
+    "defensiveMove",
+    "endgame",
+    "quietMove",
+    "short"
+   ],
+   "url": "https://lichess.org/training/BUoYi",
+   "number": 96
+  },
+  {
+   "id": "L4aQT",
+   "fen": "6k1/4npp1/7p/4p3/Q2pP1P1/3P1B1P/R4P1K/1q4r1 b - - 2 35",
+   "moves": [
+    "e7g6",
+    "a4e8",
+    "g8h7",
+    "e8f7",
+    "b1f1",
+    "f7f5"
+   ],
+   "rating": 2958,
+   "rating_deviation": 89,
+   "plays": 350,
+   "popularity": 98,
+   "themes": [
+    "crushing",
+    "deflection",
+    "endgame",
+    "long"
+   ],
+   "url": "https://lichess.org/training/L4aQT",
+   "number": 97
+  },
+  {
+   "id": "J0yKW",
+   "fen": "5rk1/pp5p/2p1Rqp1/3p4/1P1p2QN/P2PbPK1/2P3P1/8 b - - 5 28",
+   "moves": [
+    "f6f7",
+    "h4g6",
+    "h7h5",
+    "g4h5",
+    "f7e6",
+    "h5h7",
+    "g8h7",
+    "g6f8",
+    "h7g8",
+    "f8e6"
+   ],
+   "rating": 2959,
+   "rating_deviation": 89,
+   "plays": 899,
+   "popularity": 95,
+   "themes": [
+    "advantage",
+    "attraction",
+    "endgame",
+    "fork",
+    "sacrifice",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/J0yKW",
+   "number": 98
+  },
+  {
+   "id": "24OH4",
+   "fen": "8/8/8/p7/P3K3/1P4k1/5pp1/6Q1 w - - 0 67",
+   "moves": [
+    "g1d1",
+    "g2g1q",
+    "d1f3",
+    "g3h4",
+    "f3f6",
+    "h4h3",
+    "f6h6",
+    "h3g2"
+   ],
+   "rating": 2988,
+   "rating_deviation": 89,
+   "plays": 2248,
+   "popularity": 91,
+   "themes": [
+    "advancedPawn",
+    "crushing",
+    "defensiveMove",
+    "endgame",
+    "promotion",
+    "queenEndgame",
+    "veryLong"
+   ],
+   "url": "https://lichess.org/training/24OH4",
+   "number": 99
+  },
+  {
+   "id": "9TjdG",
+   "fen": "8/8/1p5p/p3kpp1/2P4P/1P2K1P1/P7/8 w - - 0 38",
+   "moves": [
+    "h4g5",
+    "h6g5",
+    "e3d3",
+    "f5f4",
+    "g3g4",
+    "a5a4",
+    "b3b4",
+    "a4a3"
+   ],
+   "rating": 2998,
+   "rating_deviation": 89,
+   "plays": 759,
+   "popularity": 96,
+   "themes": [
+    "crushing",
+    "endgame",
+    "pawnEndgame",
+    "veryLong",
+    "zugzwang"
+   ],
+   "url": "https://lichess.org/training/9TjdG",
+   "number": 100
+  }
+ ]
+}
