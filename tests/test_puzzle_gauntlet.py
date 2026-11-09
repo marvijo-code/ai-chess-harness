@@ -350,7 +350,8 @@ class ClimbTests(unittest.TestCase):
 
     def test_rejected_tool_is_sent_back_once_more(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tools = Path(tmp)
+            out, tools = Path(tmp), Path(tmp) / "tools"
+            tools.mkdir()
             replies = iter([json.dumps({"edits": [{"path": "tools/a.py", "content": "import chess.engine"}]}),
                             json.dumps({"edits": [{"path": "tools/a.py", "content": GENERAL_TOOL}]})])
 
@@ -361,11 +362,77 @@ class ClimbTests(unittest.TestCase):
                     Author.prompts.append(prompt)
                     return next(replies)
 
-            record = climb.author_round(Author(), "story", [], tools, [TWO_STEP], 0, 0, log=lambda m: None)
+            failed = {"expected": "d5c7", "played": "d5f6", "failed_ply": 2}
+            record = climb.retro(Author(), out, tools, "story", [], [TWO_STEP], TWO_STEP, failed, 0, 0,
+                                 log=lambda m: None, iterations=2)
             self.assertEqual(len(Author.prompts), 2)
             self.assertIn("NOT FULLY ACCEPTED", Author.prompts[1])
             self.assertTrue((tools / "a.py").is_file())
             self.assertEqual(len(record["rejected"]), 1)
+
+
+class ToolVerdictTests(unittest.TestCase):
+    """2026-11-09: a tool that only mentioned the winning move (on a WEAK line) was logged as FOUND."""
+
+    def verdict(self, sources: dict[str, str], expected: str = "e2e4"):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, line in sources.items():
+                (Path(tmp) / f"{name}.py").write_text(f"import chess\nprint({line!r})\n", encoding="utf-8")
+            return climb.tool_verdict(Path(tmp), chess.Board(), [], expected)
+
+    def test_a_mention_is_not_a_find(self):
+        hit, text = self.verdict({"a": "WEAK: e2e4 quiet, prefer search\npv: d2d4 e2e4"})
+        self.assertFalse(hit)
+        self.assertIn("only MENTIONS e2e4", text)
+
+    def test_only_the_first_move_of_a_play_line_counts(self):
+        self.assertFalse(self.verdict({"a": "PLAY: d2d4 then e2e4"})[0])
+        self.assertTrue(self.verdict({"a": "PLAY: e2e4 eval 30"})[0])
+
+    def test_tools_that_disagree_do_not_count(self):
+        hit, text = self.verdict({"a": "PLAY: e2e4", "b": "PLAY: d2d4"})
+        self.assertFalse(hit)
+        self.assertIn("disagree", text)
+        self.assertTrue(self.verdict({"a": "PLAY: e2e4", "b": "no forced mate"})[0])
+
+
+CAPTURE_TOOL = textwrap.dedent('''
+    import json, sys, chess
+    board = chess.Board(json.load(sys.stdin)["fen"])
+    captures = [m.uci() for m in board.legal_moves if board.is_capture(m)]
+    print("PLAY: " + captures[0] if captures else "no capture")
+''').strip()
+
+
+class RetroSelfTestTests(unittest.TestCase):
+    """2026-11-09: after a rejected edit the next prompt hid that the rest of the puzzle line still failed."""
+
+    def test_every_prompt_shows_the_whole_line_and_broken_earlier_puzzles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, tools = Path(tmp), Path(tmp) / "tools"
+            tools.mkdir()
+            # Try 1: a tool that finds the first move of TWO_STEP only, and no move of BACK_RANK.
+            # Try 2: a banned tool (rejected). Try 3 must still be told about both gaps.
+            replies = iter([json.dumps({"edits": [{"path": "tools/a.py", "content": CAPTURE_TOOL}]}),
+                            json.dumps({"edits": [{"path": "tools/b.py", "content": "import chess.engine"}]}),
+                            json.dumps({"edits": []})])
+
+            class Author:
+                prompts = []
+
+                def ask_text(self, system, prompt, timeout):
+                    Author.prompts.append(prompt)
+                    return next(replies)
+
+            failed = {"expected": "d5c7", "played": "d5f6", "failed_ply": 2}
+            record = climb.retro(Author(), out, tools, "story", [], [BACK_RANK, TWO_STEP], TWO_STEP, failed, 1, 1,
+                                 log=lambda m: None, iterations=3)
+            self.assertEqual(len(Author.prompts), 3)
+            for prompt in Author.prompts[1:]:
+                self.assertIn("recommend 1 of the 2 winning moves", prompt)
+                self.assertIn("BROKE a puzzle you had already solved", prompt)
+            self.assertEqual(record["selftest_found"], 1)
+            self.assertEqual(record["selftest_regressions"], 1)
 
 
 class ImportedToolsTests(unittest.TestCase):
