@@ -4,7 +4,9 @@
                                       [--out out/puzzles/climb-<time>]
 
 Round 0 is the baseline: the puzzle gauntlet with NO tools at all (not even the harness's shared
-ones). After every failed round the SAME model is shown the puzzle it missed (the position, its move,
+ones). With --import-tools <memory repo>/agents the model instead starts from every tournament
+player's tools (each copied as <player>-<tool>.py into a read-only imported folder that, like the
+harness's shared tools, does not count against its own 8) plus the shared harness tools. After every failed round the SAME model is shown the puzzle it missed (the position, its move,
 what its tools printed, and - as Lichess shows after a miss - the solution line and the puzzle's
 themes) and writes, rewrites or deletes its own tools. Then the gauntlet starts again from puzzle 1,
 fail-fast, so a round passes only when all puzzles pass with the current tools.
@@ -57,11 +59,43 @@ def answer_key_problem(content: str, puzzles: list[dict]) -> str | None:
     return None
 
 
+def import_tools(agents_dir: Path, dest: Path, puzzles: list[dict], log=print) -> list[dict]:
+    """Copy every player's tools (agents/<player>/tools/*.py) into `dest` as <player>-<tool>.py.
+
+    Each one passes the same checks as a new tool (contract, compile, start-position run, answer-key ban);
+    one that fails is left out and reported."""
+    dest.mkdir(parents=True, exist_ok=True)
+    report = []
+    for path in sorted(Path(agents_dir).glob("*/tools/*.py")):
+        player = path.parent.parent.name
+        name = f"{player}-{path.stem}"[:48].rstrip("-")
+        content = path.read_text(encoding="utf-8", errors="replace")
+        ok, why = player_tools.validate_tool_edit(f"tools/{name}.py", content)
+        if ok:
+            why = answer_key_problem(content, puzzles) or ""
+            ok = not why
+        if ok:
+            (dest / f"{name}.py").write_text(content, encoding="utf-8")
+        report.append({"from": f"{player}/{path.name}", "as": f"{name}.py", "ok": ok, "why": why})
+        log(f"import {player}/{path.name} -> {name}.py: {'ok' if ok else 'left out: ' + why}")
+    return report
+
+
+def tool_summary(path: Path) -> str:
+    """The tool's first docstring or comment line, for the author prompt (full sources would be too long)."""
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        text = line.strip().strip('"').strip("'").lstrip("#").strip()
+        if text and not text.startswith(("import ", "from ")):
+            return text[:140]
+    return ""
+
+
 def tool_sources(tools_dir: Path) -> dict[str, str]:
     return {f"tools/{p.name}": p.read_text(encoding="utf-8") for p in sorted(tools_dir.glob("*.py"))}
 
 
-def failure_story(puzzle: dict, failed: dict, tools_dir: Path) -> str:
+def failure_story(puzzle: dict, failed: dict, tools_dir: Path, shared_tools: bool = False,
+                  extra_dirs: list[Path] | None = None) -> str:
     """The missed puzzle as the model should see it: position, its move, its tools, the solution."""
     board = chess.Board(puzzle["fen"])
     board.push_uci(puzzle["moves"][0])
@@ -74,7 +108,7 @@ def failure_story(puzzle: dict, failed: dict, tools_dir: Path) -> str:
         board.push(move)
     if miss is None:
         raise ValueError(f"puzzle {puzzle['id']} has no ply {failed['failed_ply']}")
-    block = player_tools.run_tools(tools_dir, miss, [], include_shared=False)
+    block = player_tools.run_tools(tools_dir, miss, [], include_shared=shared_tools, extra_dirs=extra_dirs or ())
     tools_text = player_tools.render_block(block, miss, []) or "(you had no tools)"
     side = "White" if miss.turn == chess.WHITE else "Black"
     played = failed.get("played") or "no move"
@@ -96,14 +130,17 @@ def failure_story(puzzle: dict, failed: dict, tools_dir: Path) -> str:
 
 
 def author_prompt(story: str, history: list[str], sources: dict[str, str], round_no: int, passed: int,
-                  total: int, rejected: list[str] | None = None) -> str:
+                  total: int, rejected: list[str] | None = None, borrowed: list[str] | None = None) -> str:
     parts = [
         f"You are solving {total} of the hardest Lichess puzzles (rated about 2950-3100), each with exactly one "
         "winning move at every step. They run in order and the run stops at the first miss. "
         f"Round {round_no}: you solved {passed} in a row, then missed the next one.",
         "",
         "Before every move, the harness runs YOUR verification tools on the position and shows you what they "
-        "print. You start from nothing: there are no tools except the ones you write. Write, rewrite or delete "
+        "print. " + ("You start with the borrowed tools listed below (written by other players; read-only, they do "
+                     "not count against your own limit; write a tool with the same name to replace one) and your "
+                     "own tools. " if borrowed else
+                     "You start from nothing: there are no tools except the ones you write. ") + "Write, rewrite or delete "
         "tools so that next time you find the winning move yourself. Think about WHY you missed it: which "
         "check, which candidate move, which opponent reply you did not see, and write a tool that would have "
         "shown it to you in ANY position with the same idea. Calculation helpers are allowed: a tool may search "
@@ -126,6 +163,10 @@ def author_prompt(story: str, history: list[str], sources: dict[str, str], round
         "EARLIER MISSES (most recent first)",
         "\n".join(history[-6:]) or "(none)",
         "",
+    ]
+    if borrowed:
+        parts += ["BORROWED TOOLS (already running before every move; name: what it says it does)", *borrowed, ""]
+    parts += [
         "YOUR CURRENT TOOLS",
     ]
     parts += [f"--- {path} ---\n{text}" for path, text in sources.items()] or ["(none yet)"]
@@ -191,13 +232,14 @@ def make_author(model: str, provider: str, effort: str):
 
 
 def author_round(client, story: str, history: list[str], tools_dir: Path, puzzles: list[dict], round_no: int,
-                 passed: int, log=print) -> dict:
+                 passed: int, log=print, borrowed: list[str] | None = None) -> dict:
     from ai_chess_memory import parse_reflection
 
     record = {"applied": [], "rejected": [], "summary": "", "error": ""}
     rejected: list[str] | None = None
     for attempt in range(MAX_AUTHOR_RETRIES + 1):
-        prompt = author_prompt(story, history, tool_sources(tools_dir), round_no, passed, len(puzzles), rejected)
+        prompt = author_prompt(story, history, tool_sources(tools_dir), round_no, passed, len(puzzles), rejected,
+                               borrowed)
         try:
             text = client.ask_text(AUTHOR_SYSTEM, prompt, 900)
         except Exception as exc:
@@ -220,15 +262,22 @@ def author_round(client, story: str, history: list[str], tools_dir: Path, puzzle
 
 
 def climb(puzzles: list[dict], out_dir: Path, *, model: str, provider: str, effort: str, budget_usd: float,
-          max_rounds: int, engine_factory=None, author_factory=None, spend=None, log=print) -> dict:
+          max_rounds: int, engine_factory=None, author_factory=None, spend=None, log=print,
+          imported_dir: Path | None = None, shared_tools: bool = False) -> dict:
     tools_dir = out_dir / "tools"
     tools_dir.mkdir(parents=True, exist_ok=True)
+    extra = [imported_dir] if imported_dir is not None else []
+    borrowed = [f"{p.stem}: {tool_summary(p)}" for d in extra for p in sorted(Path(d).glob("*.py"))]
+    if shared_tools:
+        borrowed += [f"{p.stem} (harness): {tool_summary(p)}" for p in sorted(player_tools.SHARED_DIR.glob("*.py"))]
     spend = spend if spend is not None else (pg.Spend() if provider == "openrouter-chat" else None)
     engine_factory = engine_factory or (lambda: pg.open_engine(
-        pg.player_config(model, provider, effort, tools_dir, shared_tools=False), pg.engine_cfg()))
+        pg.player_config(model, provider, effort, tools_dir, shared_tools=shared_tools, extra_dirs=extra),
+        pg.engine_cfg()))
     author = (author_factory or make_author)(model, provider, effort)
     state = {"model": model, "provider": provider, "effort": effort, "puzzles": len(puzzles),
-             "budget_usd": budget_usd, "rounds": [], "solved_all": False, "stopped": ""}
+             "budget_usd": budget_usd, "rounds": [], "solved_all": False, "stopped": "",
+             "borrowed_tools": len(borrowed), "shared_tools": shared_tools}
     history: list[str] = []
     for round_no in range(max_rounds + 1):
         if spend is not None and spend.used() >= budget_usd:
@@ -238,7 +287,8 @@ def climb(puzzles: list[dict], out_dir: Path, *, model: str, provider: str, effo
         if snapshot.exists():
             shutil.rmtree(snapshot)
         shutil.copytree(tools_dir, snapshot / "tools")
-        log(f"round {round_no}: {len(list(tools_dir.glob('*.py')))} tools; gauntlet from puzzle 1")
+        log(f"round {round_no}: {len(list(tools_dir.glob('*.py')))} own tools, {len(borrowed)} borrowed; "
+            "gauntlet from puzzle 1")
         engine = engine_factory()
         try:
             report = pg.run(puzzles, engine, snapshot, fail_fast=True, budget_usd=budget_usd, spend=spend, log=log)
@@ -262,8 +312,9 @@ def climb(puzzles: list[dict], out_dir: Path, *, model: str, provider: str, effo
             state["stopped"] = f"{max_rounds} tool rounds used"
             break
         puzzle = next(p for p in puzzles if p["id"] == failed["id"])
-        story = failure_story(puzzle, failed, tools_dir)
-        record = author_round(author, story, history, tools_dir, puzzles, round_no, report["passed"], log=log)
+        story = failure_story(puzzle, failed, tools_dir, shared_tools, extra)
+        record = author_round(author, story, history, tools_dir, puzzles, round_no, report["passed"], log=log,
+                              borrowed=borrowed)
         entry["author"] = record
         history.insert(0, f"round {round_no}: puzzle {puzzle['number']} ({', '.join(puzzle['themes'][:4])}): played "
                           f"{failed.get('played') or '-'}, needed {failed['expected']}")
@@ -284,12 +335,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--budget-usd", type=float, required=True)
     parser.add_argument("--max-rounds", type=int, default=30)
     parser.add_argument("--fixture", type=Path, default=lichess_puzzles.FIXTURE)
+    parser.add_argument("--import-tools", type=Path,
+                        help="a memory repo agents/ folder: start from every player's tools plus the shared ones")
+    parser.add_argument("--seed-own", type=Path, help="copy these .py tools into the model's own tools first")
     parser.add_argument("--out", type=Path, default=ROOT / "out" / "puzzles" / time.strftime("climb-%Y%m%d-%H%M%S"))
     args = parser.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=True)
-    state = climb(lichess_puzzles.load(args.fixture), args.out, model=args.model, provider=args.provider,
-                  effort=args.effort, budget_usd=args.budget_usd, max_rounds=args.max_rounds,
-                  log=lambda m: print(time.strftime("%H:%M:%S ") + m, flush=True))
+
+    def log(message: str) -> None:
+        print(time.strftime("%H:%M:%S ") + message, flush=True)
+
+    puzzles = lichess_puzzles.load(args.fixture)
+    imported = None
+    if args.import_tools:
+        imported = args.out / "imported"
+        report = import_tools(args.import_tools, imported, puzzles, log=log)
+        (args.out / "imported.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+    if args.seed_own:
+        (args.out / "tools").mkdir(parents=True, exist_ok=True)
+        for path in sorted(args.seed_own.glob("*.py")):
+            shutil.copy2(path, args.out / "tools" / path.name)
+    state = climb(puzzles, args.out, model=args.model, provider=args.provider,
+                  effort=args.effort, budget_usd=args.budget_usd, max_rounds=args.max_rounds, log=log,
+                  imported_dir=imported, shared_tools=bool(args.import_tools))
     print(json.dumps({"solved_all": state["solved_all"], "stopped": state["stopped"],
                       "rounds": [(r["round"], r["passed"]) for r in state["rounds"]]}), flush=True)
     return 0 if state["solved_all"] else 1

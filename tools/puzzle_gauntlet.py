@@ -62,9 +62,12 @@ class PuzzleResult:
 
 
 def player_config(model: str = DEFAULT_MODEL, provider: str = DEFAULT_PROVIDER, effort: str = "high",
-                  tools_dir: str | Path | None = None, shared_tools: bool = False) -> dict:
+                  tools_dir: str | Path | None = None, shared_tools: bool = False,
+                  extra_dirs: list[str | Path] | None = None) -> dict:
     player = {"name": f"{model} puzzles", "provider": provider, "model": model, "effort": effort, "image": False,
               "maxOutputTokens": 131072, "sharedTools": shared_tools}
+    if extra_dirs:
+        player["extraToolsDirs"] = [str(p) for p in extra_dirs]
     if provider == "openrouter-chat":
         player["maxPrice"] = MAX_PRICE
     if tools_dir:

@@ -128,6 +128,8 @@ def engine_env(player: dict, cfg: dict) -> dict[str, str]:
     if player.get("sharedTools") is False:
         # Only the player's own tools run (a first-principles start, without the harness's shared tools).
         env["LLM_SHARED_TOOLS"] = "false"
+    if player.get("extraToolsDirs"):
+        env["LLM_EXTRA_TOOLS_DIRS"] = os.pathsep.join(str(p) for p in player["extraToolsDirs"])
     # Forever tournament: one provider session per game (cache) and waiting out usage limits.
     # moveCap false = think until the move is made (only the clock limits it); keepReasoning = the reasoning stays
     # in the game's session from move to move (owner 2026-10-16).

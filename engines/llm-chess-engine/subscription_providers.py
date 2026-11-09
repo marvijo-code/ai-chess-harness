@@ -977,6 +977,10 @@ class SubscriptionChessClient:
         self._tools_cache: tuple[str, str] = ("", "")   # (fen, rendered text) for this move
         # LLM_SHARED_TOOLS=0: only the player's own tools run (a first-principles start with no harness tools).
         self.shared_tools = _flag_env("LLM_SHARED_TOOLS", True)
+        # LLM_EXTRA_TOOLS_DIRS: more read-only shared tool folders (os.pathsep-separated), e.g. tools imported
+        # from other players. They run like the shared tools and never count against the own-tool cap.
+        self.extra_tool_dirs = [Path(p) for p in os.environ.get("LLM_EXTRA_TOOLS_DIRS", "").split(os.pathsep)
+                                if p.strip()]
         # A reply that the player's own tool flags is refused once per move, with the
         # tool's sentence as the reason. LLM_TOOL_GATE=0 turns the gate off.
         self.tool_gate = os.environ.get("LLM_TOOL_GATE", "true").strip().lower() not in {"0", "false", "no", "off"}
@@ -1986,14 +1990,16 @@ class SubscriptionChessClient:
         Once per position: a retry of the same move reuses the same output, so a tool
         never runs twice for one decision and never eats the clock twice.
         """
-        if not self.tools_dir and (not self.shared_tools or not player_tools_mod.SHARED_DIR.is_dir()):
+        if not self.tools_dir and not self.extra_tool_dirs and (
+                not self.shared_tools or not player_tools_mod.SHARED_DIR.is_dir()):
             return ""
         fen = board.fen()
         if self._tools_cache[0] == fen:
             return self._tools_cache[1]
         try:
             block = player_tools_mod.run_tools(self.tools_dir, board, history, go_args,
-                                               include_shared=self.shared_tools)
+                                               include_shared=self.shared_tools,
+                                               extra_dirs=self.extra_tool_dirs)
             text = player_tools_mod.render_block(block, board, history)
             self.last_report["tools"] = [{"name": r.name, "ok": r.ok, "ms": r.elapsed_ms,
                                           "error": r.error[:120]} for r in block.results]

@@ -157,14 +157,18 @@ def _tool_files(folder: Path | None) -> dict[str, Path]:
 
 
 def discover_with_skipped(own_dir: Path | None = None,
-                          include_shared: bool = True) -> tuple[dict[str, Path], list[str]]:
+                          include_shared: bool = True,
+                          extra_dirs: "list[Path] | tuple[Path, ...]" = ()) -> tuple[dict[str, Path], list[str]]:
     """(tools to run by name, own tool names over the limit).
 
     Every shared tool runs; the player's own tools are capped at MAX_TOOL_FILES in
     name order, and the shared ones never take one of those places. An own tool with
-    the same name as a shared one replaces it (own wins a clash).
+    the same name as a shared one replaces it (own wins a clash). `extra_dirs` are more
+    read-only shared folders (tools imported from other players), treated like the shared one.
     """
     shared = _tool_files(SHARED_DIR) if include_shared else {}
+    for folder in extra_dirs or ():
+        shared.update(_tool_files(Path(folder)))
     own = _tool_files(own_dir)
     names = list(own)
     kept, skipped = names[:MAX_TOOL_FILES], names[MAX_TOOL_FILES:]
@@ -282,9 +286,10 @@ def cut_output(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 
 def run_tools(tools_dir: Path | None, board: chess.Board, history: list[str],
               go_args: dict | None = None, *, timeout: float = RUN_TIMEOUT_SECONDS,
-              python: str | None = None, include_shared: bool = True) -> ToolsBlock:
-    """Run the shared tools and the agent's own on this position, in name order."""
-    found, skipped = discover_with_skipped(tools_dir, include_shared=include_shared)
+              python: str | None = None, include_shared: bool = True,
+              extra_dirs: "list[Path] | tuple[Path, ...]" = ()) -> ToolsBlock:
+    """Run the shared tools (plus any extra shared folders) and the agent's own on this position, in name order."""
+    found, skipped = discover_with_skipped(tools_dir, include_shared=include_shared, extra_dirs=extra_dirs)
     if not found:
         return ToolsBlock()
     payload = position_payload(board, history, go_args)

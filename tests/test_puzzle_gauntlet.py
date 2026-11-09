@@ -368,5 +368,60 @@ class ClimbTests(unittest.TestCase):
             self.assertEqual(len(record["rejected"]), 1)
 
 
+class ImportedToolsTests(unittest.TestCase):
+    """Owner 2026-11-09: start from every tournament player's tools, not from scratch."""
+
+    def test_import_copies_every_players_tools_with_a_player_prefix_and_checks_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agents = Path(tmp) / "agents"
+            for player, name, content in (("claude", "loose-sweep", GENERAL_TOOL), ("glm", "loose-sweep", GENERAL_TOOL),
+                                          ("muse", "bad", "import chess.engine\nprint(1)")):
+                (agents / player / "tools").mkdir(parents=True, exist_ok=True)
+                (agents / player / "tools" / f"{name}.py").write_text(content, encoding="utf-8")
+            dest = Path(tmp) / "imported"
+            report = climb.import_tools(agents, dest, [TWO_STEP], log=lambda m: None)
+            self.assertEqual(sorted(p.name for p in dest.glob("*.py")), ["claude-loose-sweep.py", "glm-loose-sweep.py"])
+            self.assertEqual([r["ok"] for r in report], [True, True, False])
+
+    def test_imported_tools_run_like_shared_ones_and_do_not_use_own_slots(self):
+        import player_tools as pt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            imported, own = Path(tmp) / "imported", Path(tmp) / "own"
+            imported.mkdir()
+            own.mkdir()
+            for index in range(12):
+                (imported / f"borrowed-{index:02d}.py").write_text(GENERAL_TOOL, encoding="utf-8")
+            for index in range(pt.MAX_TOOL_FILES):
+                (own / f"mine-{index}.py").write_text(GENERAL_TOOL, encoding="utf-8")
+            found, skipped = pt.discover_with_skipped(own, include_shared=False, extra_dirs=[imported])
+            self.assertEqual(len(found), 12 + pt.MAX_TOOL_FILES)
+            self.assertEqual(skipped, [])
+            block = pt.run_tools(None, chess.Board(), [], include_shared=False, extra_dirs=[imported])
+            self.assertEqual(len(block.results), 12)
+            self.assertTrue(all(r.ok and r.output.startswith("checks:") for r in block.results))
+
+    def test_engine_gets_the_imported_folder(self):
+        import subscription_providers as sp
+
+        player = pg.player_config(tools_dir="C:/own", shared_tools=True, extra_dirs=["C:/imp"])
+        env = pls.engine_env(player, pg.engine_cfg())
+        self.assertEqual(env["LLM_EXTRA_TOOLS_DIRS"], "C:/imp")
+        self.assertNotIn("LLM_SHARED_TOOLS", env)
+        with mock.patch.dict(os.environ, {"LLM_EXTRA_TOOLS_DIRS": "C:/imp", "LLM_TOOLS_DIR": ""}):
+            client = sp.SubscriptionChessClient("openrouter-chat", lambda m: None)
+        self.assertEqual(client.extra_tool_dirs, [Path("C:/imp")])
+        with mock.patch.object(sp.player_tools_mod, "run_tools", return_value=sp.player_tools_mod.ToolsBlock()) as run:
+            client._tools_text(chess.Board(), {}, [])
+        self.assertEqual(run.call_args.kwargs["extra_dirs"], [Path("C:/imp")])
+
+    def test_author_prompt_lists_borrowed_tools(self):
+        text = climb.author_prompt("story", [], {}, 0, 0, 100, borrowed=["claude-loose-sweep: flags loose pieces"])
+        self.assertIn("BORROWED TOOLS", text)
+        self.assertIn("claude-loose-sweep: flags loose pieces", text)
+        self.assertNotIn("You start from nothing", text)
+        self.assertIn("You start from nothing", climb.author_prompt("story", [], {}, 0, 0, 100))
+
+
 if __name__ == "__main__":
     unittest.main()
