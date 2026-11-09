@@ -218,6 +218,33 @@ class EngineWiringTests(unittest.TestCase):
             self.assertTrue(sp.SubscriptionChessClient("openrouter-chat", lambda m: None).shared_tools)
 
 
+class FenStartTests(unittest.TestCase):
+    def test_move_record_starts_from_the_puzzle_fen_not_the_start_position(self):
+        """Live run 2026-11-09: move 2 of a puzzle forfeited because the record was replayed from the start."""
+        import subscription_providers as sp
+
+        board = chess.Board(TWO_STEP["fen"])
+        history = ["a8b8", "d5c7", "e8d7"]
+        for uci in history:
+            board.push_uci(uci)
+        self.assertEqual(sp.root_of(board, history).fen(), TWO_STEP["fen"])
+        self.assertEqual(sp.san_history(history, sp.root_of(board, history)), "1... Rb8 2. Nxc7+ Kd7")
+        prompt = sp.build_prompt(board, {"wtime": 60000, "btime": 60000}, history, [])
+        self.assertIn("Moves so far: 1... Rb8 2. Nxc7+ Kd7", prompt)
+        full = sp.build_full_turn({"memory": "", "header": "puzzle"}, board, {"wtime": 60000, "btime": 60000}, history)
+        self.assertIn("1... Rb8 2. Nxc7+ Kd7", full)
+        delta = sp.build_delta_turn(board, {"wtime": 60000, "btime": 60000}, history, 1)
+        self.assertIn("2. Nxc7+ Kd7", delta)
+        # A record that does not fit its start position is shown as UCI instead of crashing the move.
+        self.assertEqual(sp.san_moves_since(["a8b8"], 0), "a8b8")
+        self.assertEqual(sp.san_history(["e2e4", "e7e5"]), "1. e4 e5")
+
+    def test_puzzle_engine_config_has_no_short_move_cap(self):
+        cfg = pg.engine_cfg()
+        self.assertFalse(cfg["moveCap"])
+        self.assertGreaterEqual(cfg["attemptTimeoutSeconds"], pg.MOVE_CLOCK_MS // 1000)
+
+
 class FailFastSuiteTests(unittest.TestCase):
     def test_suite_stops_at_the_first_failed_test(self):
         import test_lichess_puzzles_live as live

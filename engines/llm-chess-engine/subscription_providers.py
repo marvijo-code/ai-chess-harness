@@ -315,15 +315,38 @@ def fmt_clock(ms: object) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
-def san_history(history: list[str]) -> str:
-    board = chess.Board()
+def root_of(board: chess.Board | None, history: list[str]) -> chess.Board:
+    """The position the history starts from: the start position, or the FEN a `position fen` set (a puzzle).
+
+    The UCI loop pushes the history onto the FEN board, so popping it back gives the FEN. A board whose
+    move stack does not end with this history falls back to the normal start position."""
+    if board is None or len(board.move_stack) < len(history):
+        return chess.Board()
+    root = board.copy()
+    popped = [root.pop().uci() for _ in range(len(history))][::-1]
+    return root if popped == list(history) else chess.Board()
+
+
+def _san_line(history: list[str], start: int, root: chess.Board | None) -> list[str]:
+    board = root.copy(stack=False) if root is not None else chess.Board()
     parts = []
-    for uci in history:
+    for index, uci in enumerate(history):
         move = chess.Move.from_uci(uci)
-        if board.turn == chess.WHITE:
-            parts.append(f"{board.fullmove_number}.")
-        parts.append(board.san(move))
+        if move not in board.legal_moves:
+            # Never crash a move over the record: the moves as UCI when they do not fit the start position.
+            return parts + list(history[max(index, start):])
+        if index >= start:
+            if board.turn == chess.WHITE:
+                parts.append(f"{board.fullmove_number}.")
+            elif index == start:
+                parts.append(f"{board.fullmove_number}...")
+            parts.append(board.san(move))
         board.push(move)
+    return parts
+
+
+def san_history(history: list[str], root: chess.Board | None = None) -> str:
+    parts = _san_line(history, 0, root)
     return " ".join(parts) if parts else "(none, this is the first move)"
 
 
@@ -458,7 +481,7 @@ def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejectio
     # longest prefix from the previous move; the parts that change every move come after it.
     lines = [
         f"You are playing {side}.",
-        f"Moves so far: {san_history(history)}",
+        f"Moves so far: {san_history(history, root_of(board, history))}",
         "It is your move.",
         f"FEN: {board.fen()}",
         "Board diagram from the FEN (White pieces uppercase, Black lowercase, White plays up the board):",
@@ -510,20 +533,9 @@ def build_prompt(board: chess.Board, go_args: dict, history: list[str], rejectio
 # from move to move (clocks, budget, legal moves) may appear before the position block.
 
 
-def san_moves_since(history: list[str], start: int) -> str:
+def san_moves_since(history: list[str], start: int, root: chess.Board | None = None) -> str:
     """SAN with move numbers for plies `start`.. of `history` (a black first move gets 'N...')."""
-    board = chess.Board()
-    parts = []
-    for index, uci in enumerate(history):
-        move = chess.Move.from_uci(uci)
-        if index >= start:
-            if board.turn == chess.WHITE:
-                parts.append(f"{board.fullmove_number}.")
-            elif index == start:
-                parts.append(f"{board.fullmove_number}...")
-            parts.append(board.san(move))
-        board.push(move)
-    return " ".join(parts)
+    return " ".join(_san_line(history, start, root))
 
 
 def memory_section(context: dict) -> str:
@@ -570,8 +582,8 @@ def position_block(board: chess.Board, go_args: dict, show_legal: bool, cap_seco
     return "\n".join(lines)
 
 
-def history_section(history: list[str], notes: list[dict] | None = None) -> str:
-    text = "MOVES SO FAR\n" + (san_moves_since(history, 0) or "(none, the game starts now)")
+def history_section(history: list[str], notes: list[dict] | None = None, root: chess.Board | None = None) -> str:
+    text = "MOVES SO FAR\n" + (san_moves_since(history, 0, root) or "(none, the game starts now)")
     own = [n for n in (notes or []) if n.get("note")]
     if own:
         text += "\nYOUR NOTES IN THIS GAME\n" + "\n".join(f"after ply {n.get('ply')}: {n['note']}" for n in own)
@@ -602,7 +614,8 @@ def build_full_turn(context: dict, board: chess.Board, go_args: dict, history: l
                     notes: list[dict] | None = None, summary: dict | None = None, tools_text: str = "") -> str:
     """The whole request text for a fresh session: rules, memory, game header, moves so far, the summary of
     this game's earlier thinking (after a compaction), position."""
-    parts = [RULES_TEXT, memory_section(context), game_header_section(context), history_section(history, notes)]
+    parts = [RULES_TEXT, memory_section(context), game_header_section(context),
+             history_section(history, notes, root_of(board, history))]
     compacted = summary_section(summary)
     if compacted:
         parts.append(compacted)
@@ -614,7 +627,7 @@ def build_delta_turn(board: chess.Board, go_args: dict, history: list[str], seen
                      cap_seconds: float | None = None, nudge: str | None = None, image: bool = False,
                      carried: str = "", tools_text: str = "") -> str:
     """A later turn of the same session: the carried thinking (if any), the moves since the last turn, the position."""
-    since = san_moves_since(history, seen_plies)
+    since = san_moves_since(history, seen_plies, root_of(board, history))
     head = f"MOVES SINCE YOUR LAST TURN\n{since}" if since else "MOVES SINCE YOUR LAST TURN\n(none)"
     carried_text = carried_thoughts_section(carried)
     if carried_text:

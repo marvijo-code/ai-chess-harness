@@ -72,9 +72,11 @@ def player_config(model: str = DEFAULT_MODEL, provider: str = DEFAULT_PROVIDER, 
     return player
 
 
-def engine_cfg(attempt_timeout: int = 300) -> dict:
+def engine_cfg(attempt_timeout: int = 900) -> dict:
+    # moveCap off: the model thinks until it answers, inside the 15-minute move clock (a 60 s cap cut GLM off
+    # mid-calculation on the first live run, 2026-11-09).
     return {"maxAttempts": 3, "attemptTimeoutSeconds": attempt_timeout, "showLegalMoves": True,
-            "conversation": False, "limitWait": False, "moveCap": True, "keepReasoning": False}
+            "conversation": False, "limitWait": False, "moveCap": False, "keepReasoning": False}
 
 
 def open_engine(player: dict, cfg: dict):
